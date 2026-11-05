@@ -10,8 +10,10 @@ Sparsity for Communication-Efficient Distributed RL" (arXiv:2602.03839):
   reconstruct the trainer's weights bit-identically;
 * the payload is compressed with zstd level 1 by default;
 * decode is a plain memory copy, no floating point arithmetic;
-* every patch carries a blake2b of the full post-patch checkpoint, so an
-  inference worker can verify it is bit-identical to the trainer.
+* every patch carries a SHA-256 of the full post-patch checkpoint (sorted
+  tensor names, each followed by its BF16 bits little-endian), so any worker —
+  Python or the Cloudflare Worker via WebCrypto — can verify it is bit-identical
+  to the trainer.
 """
 from __future__ import annotations
 
@@ -66,11 +68,12 @@ def _bf16_bits(t: torch.Tensor) -> np.ndarray:
 
 
 def checkpoint_digest(sd: dict[str, torch.Tensor]) -> str:
-    h = hashlib.blake2b(digest_size=16)
+    h = hashlib.sha256()
     for k in sorted(sd):
         h.update(k.encode())
         v = sd[k]
-        h.update(_bf16_bits(v).tobytes() if v.is_floating_point() else v.detach().contiguous().numpy().tobytes())
+        bits = _bf16_bits(v) if v.is_floating_point() else v.detach().contiguous().numpy()
+        h.update(bits.astype(bits.dtype.newbyteorder("<"), copy=False).tobytes())
     return h.hexdigest()
 
 

@@ -27,17 +27,38 @@ async function load(env: Env, spec: string): Promise<Nerve> {
   const cached = models.get(spec);
   if (cached) return cached;
   const obj = await getWeights(env, `${spec}/edge.json`);
-  if (!obj) throw new Error(`no weights for ${spec}; run: nerve export specs/${spec}.nerve --model runs/${spec}/v2/model.pt --out edge/export/${spec}/edge.json`);
+  if (!obj) throw new Error(`no weights for ${spec}; run: nerve edge specs/${spec}.nerve --model runs/${spec}/v2/model.pt`);
   const n = new Nerve((await obj.json()) as EdgeModel);
   models.set(spec, n);
+  await sync(env, spec, n);
   return n;
+}
+
+/** Apply every patch in patches/index.json that this isolate has not applied yet, in order. */
+async function sync(env: Env, spec: string, n: Nerve): Promise<{ applied: string[]; rejected?: string }> {
+  const idx = await getWeights(env, `${spec}/patches/index.json`);
+  if (!idx) return { applied: [] };
+  const names = (await idx.json()) as string[];
+  const applied: string[] = [];
+  for (const name of names) {
+    if (n.applied.includes(name)) continue;
+    const p = await getWeights(env, `${spec}/patches/${name}`);
+    if (!p) return { applied, rejected: `${name}: not found` };
+    try {
+      await n.patch(name, new Uint8Array(await p.arrayBuffer()));
+      applied.push(name);
+    } catch (e) {
+      return { applied, rejected: `${name}: ${String(e)}` };   // chain stops at the first bad patch; weights unchanged
+    }
+  }
+  return { applied };
 }
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const [, spec, verb, sid] = url.pathname.split("/");
-    if (!spec) return json({ nerve: "edge", usage: "/<spec>/step  /<spec>/session/<id>  /<spec>/weights" });
+    if (!spec) return json({ nerve: "edge", usage: "/<spec>/step  /<spec>/session/<id>  /<spec>/weights  /<spec>/sync  /<spec>/health" });
     try {
       if (verb === "weights") {
         // Serve the current edge export and patch feed so browsers can run the network locally too.
@@ -55,6 +76,8 @@ export default {
         const id = env.SESSIONS.idFromName(`${spec}:${sid}`);
         return env.SESSIONS.get(id).fetch(new Request(`https://do/${spec}`, req));
       }
+      if (verb === "sync") { const n = await load(env, spec); return json({ ...(await sync(env, spec, n)), digest: await n.digest(), patches: n.applied }); }
+      if (verb === "health") { const n = await load(env, spec); return json({ spec, digest: await n.digest(), patches: n.applied, base_digest: n.m.jepa.digest }); }
       if (verb === "reload") { models.delete(spec); return json({ reloaded: spec }); }
       return json({ error: "not found" }, 404);
     } catch (e) {

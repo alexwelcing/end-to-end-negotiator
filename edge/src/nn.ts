@@ -1,5 +1,7 @@
 // The forward pass. This is the entire "program": energy over candidate futures, argmin.
-export interface Linear { w: number[]; b: number[]; out: number; in: number }
+import { applyPatch, digest, type Tensor } from "./pulse";
+
+export interface Linear { w: Float32Array; b: Float32Array; out: number; in: number }
 export interface EdgeModel {
   spec: string;
   fields: Record<string, { kind: string; domain: unknown[] }>;
@@ -7,7 +9,7 @@ export interface EdgeModel {
   actions: { name: string; params: Record<string, unknown> }[];
   states: Record<string, unknown>[];
   state_vectors: number[][];
-  jepa: { d: number; enc: Linear[]; tgt: Linear[]; pred: Linear[]; act: number[] };
+  jepa: { d: number; tensors: Record<string, { shape: number[]; data: number[] }>; digest: string };
   circuit: { ws: number[]; wa: number[]; wo: number[]; bias: number; H: number; weight: number } | null;
   state_dim: number;
   action_dim: number;
@@ -38,7 +40,28 @@ function mlp(layers: Linear[], x: Float32Array): Float32Array {
 export class Nerve {
   private candZ: Float32Array[] | null = null;
   m: EdgeModel;
-  constructor(m: EdgeModel) { this.m = m; }
+  tensors: Record<string, Tensor> = {};        // live weights, patched in place by PULSE
+  enc: Linear[]; tgt: Linear[]; pred: Linear[]; act: Float32Array;
+  applied: string[] = [];
+  constructor(m: EdgeModel) {
+    this.m = m;
+    for (const [k, t] of Object.entries(m.jepa.tensors)) this.tensors[k] = { shape: t.shape, data: Float32Array.from(t.data) };
+    const lin = (p: string): Linear => {
+      const w = this.tensors[`${p}.weight`], b = this.tensors[`${p}.bias`];
+      return { w: w.data, b: b.data, out: w.shape[0], in: w.shape[1] };
+    };
+    const mlp = (p: string) => [0, 2, 4].map((i) => lin(`${p}.${i}`));   // Sequential(Linear, GELU, Linear, GELU, Linear)
+    this.enc = mlp("enc"); this.tgt = mlp("tgt"); this.pred = mlp("pred"); this.act = this.tensors["act.weight"].data;
+  }
+
+  /** Apply a PULSE patch (verified bit-identical by digest) and drop cached target encodings. */
+  async patch(name: string, bytes: Uint8Array): Promise<void> {
+    await applyPatch(this.tensors, bytes);
+    this.applied.push(name);
+    this.candZ = null;
+  }
+
+  digest(): Promise<string> { return digest(this.tensors); }
 
   stateVector(s: Record<string, unknown>): Float32Array {
     const x = new Float32Array(this.m.state_dim);
@@ -59,7 +82,7 @@ export class Nerve {
   }
 
   private targets(): Float32Array[] {
-    if (!this.candZ) this.candZ = this.m.state_vectors.map((v) => mlp(this.m.jepa.tgt, Float32Array.from(v)));
+    if (!this.candZ) this.candZ = this.m.state_vectors.map((v) => mlp(this.tgt, Float32Array.from(v)));
     return this.candZ;
   }
 
@@ -68,11 +91,11 @@ export class Nerve {
     const xs = this.stateVector(s);
     const ai = this.actionIndex(action, params);
     const d = this.m.jepa.d;
-    const z = mlp(this.m.jepa.enc, xs);
+    const z = mlp(this.enc, xs);
     const za = new Float32Array(2 * d);
     za.set(z, 0);
-    za.set(this.m.jepa.act.slice(ai * d, (ai + 1) * d), d);
-    const zh = mlp(this.m.jepa.pred, za);
+    za.set(this.act.subarray(ai * d, (ai + 1) * d), d);
+    const zh = mlp(this.pred, za);
     const tg = this.targets();
     const E = new Float32Array(tg.length);
     for (let c = 0; c < tg.length; c++) {

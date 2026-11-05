@@ -71,6 +71,10 @@ class Workerd:
         for f in EDGE.glob(f".workerd.{self.port}.capnp"):
             f.unlink()
 
+    def get(self, path: str) -> str:
+        with urllib.request.urlopen(self.base + path, timeout=10) as r:
+            return r.read().decode()
+
     def post(self, path: str, body: dict) -> dict:
         req = urllib.request.Request(self.base + path, data=json.dumps(body).encode(), method="POST",
                                      headers={"content-type": "application/json"})

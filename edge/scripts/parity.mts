@@ -1,6 +1,6 @@
 // Check the Worker's forward pass against Python on every (state, action) pair.
 import { readFileSync } from "node:fs";
-import { Nerve } from "../src/nn.ts";
+import { Nerve } from "../src/nn.ts";   // run via esbuild bundle (fzstd import); see package.json "parity"
 const [exportPath, pyPath] = process.argv.slice(2);
 const n = new Nerve(JSON.parse(readFileSync(exportPath, "utf8")));
 const py = JSON.parse(readFileSync(pyPath, "utf8")) as { s: any; a: string; p: any; next: any; E: number }[];

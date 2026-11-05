@@ -7,4 +7,4 @@ if (!spec) { console.error("usage: node scripts/upload.mjs <spec> [export_dir]")
 const put = (key, file) => execSync(`wrangler r2 object put nerve-weights/${key} --file ${file}`, { stdio: "inherit" });
 put(`${spec}/edge.json`, `${root}/${spec}/edge.json`);
 const pd = `${root}/${spec}/patches`;
-if (existsSync(pd)) for (const p of readdirSync(pd).filter((f) => f.endsWith(".nrvp"))) put(`${spec}/patches/${p}`, `${pd}/${p}`);
+if (existsSync(pd)) for (const p of readdirSync(pd).filter((f) => f.endsWith(".nrvp") || f === "index.json")) put(`${spec}/patches/${p}`, `${pd}/${p}`);

@@ -110,7 +110,7 @@ def cmd_export(a):
 def cmd_edge(a):
     """Export to edge/export/<spec>/, bundle, and serve the Worker on workerd locally."""
     from .model import NerveEnergy
-    from .serve.export import export_edge
+    from .serve.export import export_edge, write_patch_index
     from .serve import workerd as wd
     sp = _spec(a.spec); m = NerveEnergy.load(sp, a.model)
     out = wd.export_dir(sp.name); out.mkdir(parents=True, exist_ok=True)
@@ -120,6 +120,7 @@ def cmd_edge(a):
         (out / "patches").mkdir(exist_ok=True)
         for p in Path(a.patches).glob("*.nrvp"):
             _sh.copy(p, out / "patches" / p.name)
+        write_patch_index(out / "patches")
     if not wd.available():
         print(json.dumps({"exported": str(out), "workerd": "not installed (cd edge && npm install)"})); return 0
     if a.no_serve:
