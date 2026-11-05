@@ -33,7 +33,18 @@ class Encoder:
         self.disc_dim = off
         self.cont_fields = spec.continuous_fields()
         self.cont_ranges = [(spec.fields[k].lo, spec.fields[k].hi) for k in self.cont_fields]
-        self.state_dim = self.disc_dim + len(self.cont_fields) * CONT_WIDTH
+        # ordinal fields: ints and gridded floats with more than two values also get a normalised value + Fourier
+        # features beside their one-hot, so "same value" and "+1" are compositional for cells never seen in training
+        self.ord_fields = [k for k, off_, dom in self._state_slots
+                           if spec.fields[k].kind in ("int", "float") and len(dom) > 2]
+        self._ord_proj = np.zeros((self.disc_dim, len(self.ord_fields)), np.float32)   # one-hot -> normalised value
+        for j, k in enumerate(self.ord_fields):
+            off_, dom = next((o, d) for kk, o, d in self._state_slots if kk == k)
+            lo, hi = float(dom[0]), float(dom[-1])
+            for i, v in enumerate(dom):
+                self._ord_proj[off_ + i, j] = (float(v) - lo) / (hi - lo)
+        self.ord_dim = len(self.ord_fields) * CONT_WIDTH
+        self.state_dim = self.disc_dim + len(self.cont_fields) * CONT_WIDTH + self.ord_dim
         self._actions = spec.action_instances()
         self._action_index = {spec.action_key(a): i for i, a in enumerate(self._actions)}
         self.action_dim = len(self._actions)
@@ -84,16 +95,22 @@ class Encoder:
 
     def state(self, s: dict[str, Any]) -> np.ndarray:
         d = self.discrete(s)
-        if not self.cont_fields:
-            return d
-        return np.concatenate([d, self.cont_feats_np(self.cont_norm(s))]).astype(np.float32)
+        parts = [d]
+        if self.cont_fields:
+            parts.append(self.cont_feats_np(self.cont_norm(s)))
+        if self.ord_fields:
+            parts.append(self.cont_feats_np(d @ self._ord_proj))
+        return np.concatenate(parts).astype(np.float32) if len(parts) > 1 else d
 
-    def state_torch(self, disc, cont_norm):
+    def state_torch(self, disc, cont_norm=None):
         """Differentiable featurisation: disc [.., disc_dim] one-hots, cont_norm [.., n_cont] in [0,1]."""
         import torch
-        if not self.cont_fields:
-            return disc
-        return torch.cat([disc, self.cont_feats_torch(cont_norm)], -1)
+        parts = [disc]
+        if self.cont_fields:
+            parts.append(self.cont_feats_torch(cont_norm))
+        if self.ord_fields:
+            parts.append(self.cont_feats_torch(disc @ torch.as_tensor(self._ord_proj, dtype=disc.dtype, device=disc.device)))
+        return torch.cat(parts, -1) if len(parts) > 1 else disc
 
     def states(self, ss: list[dict[str, Any]]) -> np.ndarray:
         return np.stack([self.state(s) for s in ss]) if ss else np.zeros((0, self.state_dim), np.float32)
@@ -115,9 +132,18 @@ class Encoder:
         return self._states
 
     def all_state_vectors(self) -> np.ndarray:
+        """Finite specs: full feature vectors. Continuous specs: one-hot part only (features are built in torch)."""
         if self.cont_fields:
             return np.stack([self.discrete(s) for s in self._states])
         return self.states(self._states)
+
+    def layout(self) -> dict:
+        """What the edge Worker needs to rebuild `state()` bit for bit."""
+        return {"disc_dim": self.disc_dim, "n_fourier": N_FOURIER,
+                "ordinal": [{"field": k, "offset": next(o for kk, o, d in self._state_slots if kk == k),
+                             "values_norm": [float(self._ord_proj[next(o for kk, o, d in self._state_slots if kk == k) + i, j])
+                                             for i in range(len(next(d for kk, o, d in self._state_slots if kk == k)))]}
+                            for j, k in enumerate(self.ord_fields)]}
 
     # ---- actions ------------------------------------------------------
     def action(self, a: tuple[str, dict[str, Any]]) -> np.ndarray:

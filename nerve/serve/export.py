@@ -38,6 +38,7 @@ def export_edge(spec: Spec, model: NerveEnergy, out: str | Path) -> dict[str, An
             "bias": float(model.circuit.bias), "H": int(model.circuit.ws.shape[1]), "weight": model.w,
         },
         "state_dim": enc.state_dim, "action_dim": enc.action_dim,
+        "layout": enc.layout(),
     }
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     Path(out).write_text(json.dumps(doc, separators=(",", ":")))

@@ -68,7 +68,7 @@ def compile_circuit(spec: Spec, max_hidden: int = 200_000, exclude_actions: set[
     nf = len(spec.fields)
     k = 0
     for s in states:
-        xs = enc.state(s)
+        xs = np.zeros(enc.state_dim, np.float32); xs[:enc.disc_dim] = enc.discrete(s)    # gate on one-hots only
         for a in actions:
             xa = enc.action(a)
             # one unit fires iff all nf state one-hots and the action one-hot are on:
@@ -77,6 +77,6 @@ def compile_circuit(spec: Spec, max_hidden: int = 200_000, exclude_actions: set[
             ws[:, k] = xs
             wa[:, k] = xa
             if not exclude_actions or a[0] not in exclude_actions:
-                wo[k, :] = enc.state(oracle.step(s, a))
+                wo[k, :enc.disc_dim] = enc.discrete(oracle.step(s, a))                 # one-hot successor only
             k += 1
     return CompiledCircuit(torch.from_numpy(ws), torch.from_numpy(wa), torch.from_numpy(wo), bias=float(nf))

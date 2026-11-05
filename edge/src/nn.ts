@@ -13,6 +13,7 @@ export interface EdgeModel {
   circuit: { ws: number[]; wa: number[]; wo: number[]; bias: number; H: number; weight: number } | null;
   state_dim: number;
   action_dim: number;
+  layout?: { disc_dim: number; n_fourier: number; ordinal: { field: string; offset: number; values_norm: number[] }[] };
 }
 
 const gelu = (x: number) => 0.5 * x * (1 + Math.tanh(Math.sqrt(2 / Math.PI) * (x + 0.044715 * x * x * x)));
@@ -66,11 +67,19 @@ export class Nerve {
   stateVector(s: Record<string, unknown>): Float32Array {
     const x = new Float32Array(this.m.state_dim);
     let off = 0;
+    const idx: Record<string, number> = {};
     for (const [k, f] of Object.entries(this.m.fields)) {
       const j = f.domain.findIndex((v) => v === s[k]);
       if (j < 0) throw new Error(`state.${k}=${JSON.stringify(s[k])} not in type`);
-      x[off + j] = 1;
+      x[off + j] = 1; idx[k] = j;
       off += f.domain.length;
+    }
+    // ordinal features (same order and layout as Encoder.cont_feats_np): u, sin(2πku), cos(2πku) for k=1..n
+    const L = this.m.layout;
+    if (L) for (const o of L.ordinal) {
+      const u = o.values_norm[idx[o.field]];
+      x[off++] = u;
+      for (let k = 1; k <= L.n_fourier; k++) { x[off++] = Math.sin(2 * Math.PI * k * u); x[off++] = Math.cos(2 * Math.PI * k * u); }
     }
     return x;
   }

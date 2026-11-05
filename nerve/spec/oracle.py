@@ -48,9 +48,24 @@ class Oracle:
         return out
 
     # ---- checking -----------------------------------------------------
-    def violations(self, state: dict[str, Any], action: tuple[str, dict[str, Any]] | None, new: dict[str, Any]) -> list[str]:
-        """Which spec properties does (state -action-> new) break?"""
+    def violations(self, state: dict[str, Any], action: tuple[str, dict[str, Any]] | None, new: dict[str, Any],
+                   tol: float = 0.01) -> list[str]:
+        """Which spec properties does (state -action-> new) break?
+
+        Continuous fields are inferred by gradient descent, so a prediction within ``tol`` of the range of the
+        true value is taken *as* the true value before ``ensures`` are checked; exact ``==`` on a float would
+        otherwise flag 137.19 against 137.2. Discrete fields are always exact.
+        """
         bad: list[str] = []
+        cont = self.spec.continuous_fields()
+        if cont and action is not None:
+            truth = self.step(state, action)
+            snapped = dict(new)
+            for k in cont:
+                f = self.spec.fields[k]
+                if k in new and abs(float(new[k]) - float(truth[k])) <= tol * (f.hi - f.lo):
+                    snapped[k] = truth[k]
+            new = snapped
         for k, f in self.spec.fields.items():
             if k not in new or not f.contains(new[k]):
                 bad.append(f"type:{k}={new.get(k)!r}")
