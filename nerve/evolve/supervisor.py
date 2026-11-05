@@ -82,12 +82,34 @@ Last eval.json:
 
 REPO = Path(__file__).resolve().parents[2]
 OWNABLE = {"spec", "rollout", "adversary", "train", "eval"}
+_KNOB_TYPES = {f.name: f.type for f in __import__("dataclasses").fields(TrainConfig)}
+
+
+def _coerce_knobs(knobs: dict[str, Any]) -> dict[str, Any]:
+    """Agents write knobs as JSON; make them the dataclass's types (an int knob given 40.0 or "40" is still 40)."""
+    out: dict[str, Any] = {}
+    for k, v in knobs.items():
+        t = _KNOB_TYPES.get(k)
+        try:
+            if t == "int":
+                out[k] = int(round(float(v)))
+            elif t == "float":
+                out[k] = float(v)
+            elif t == "bool":
+                out[k] = v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes")
+            else:
+                out[k] = v
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 class Supervisor:
     def __init__(self, spec_path: str, workdir: str, budget_usd: float = 5.0, iterations: int = 4, mode: str = "offline",
-                 model: str = "claude-fable-5-1", role_model: str = "claude-sonnet-5-5"):
+                 model: str = "claude-fable-5-1", role_model: str = "claude-sonnet-5-5", remote: str | None = None,
+                 flavor: str = "a10g-small"):
         self.spec_path = str(Path(spec_path).resolve())
+        self.remote = remote; self.flavor = flavor          # "hf": train every iteration as a Hugging Face GPU Job
         self.role_model = role_model
         self._pending_cost = 0.0
         self.spec = load_spec(spec_path)
@@ -201,7 +223,9 @@ class Supervisor:
             prev_eval=prev_eval if prev_eval.exists() else "none", learnings=self.learnings_path,
             knobs_file=it_dir / f"knobs.{role.name}.json", spec_text=spec_copy.read_text(),
             eval_text=prev_eval.read_text()[:4000] if prev_eval.exists() else "none yet")
-        allowed = ["Read", "Bash(python -m nerve:*)", "Bash(cat:*)", "Bash(ls:*)", "Bash(wc:*)", "Bash(head:*)", "Bash(tail:*)"]
+        allowed = ["Read", "Bash(python -m nerve:*)", "Bash(python3 -m nerve:*)", "Bash(python -c:*)", "Bash(python3 -c:*)",
+                   "Bash(cat:*)", "Bash(ls:*)", "Bash(wc:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)", "Bash(sort:*)",
+                   "Bash(uniq:*)", "Bash(cut:*)", "Bash(jq:*)", "Bash(diff:*)"]
         if "spec" in role.owns or "train" in role.owns or "eval" in role.owns:
             allowed += ["Edit", "Write"]
         t0 = time.time()
@@ -268,9 +292,22 @@ class Supervisor:
                     for pol in ("coverage", "random", "adversary"):
                         rollout_dataset(spec, log, episodes=tc.rollout.get("episodes", 50), policy=pol, seed=tc.iteration)
                 knobs.pop("init", None); knobs["log_every"] = 10 ** 6
-                ev = train(spec, log, it_dir / "run", TrainConfig(**knobs, seed=tc.iteration))
-                (it_dir / "eval.json").write_text(json.dumps(ev, indent=1))
+                knobs = _coerce_knobs(knobs)
                 (it_dir / "knobs.effective.json").write_text(json.dumps(knobs, indent=1))
+                try:
+                    if self.remote == "hf":
+                        from ..train.remote import train_remote
+                        rr = train_remote(str(spec_copy), str(log_path), str(it_dir / "run"), TrainConfig(**knobs, seed=tc.iteration), flavor=self.flavor)
+                        if "error" in rr:
+                            raise RuntimeError(rr["error"])
+                        ev = json.loads((it_dir / "run" / "eval.json").read_text())
+                        cost += rr.get("minutes_wall", 0) / 60 * {"t4-small": 0.4, "a10g-small": 1.0, "a10g-large": 1.5, "a100-large": 2.5}.get(self.flavor, 1.0)
+                    else:
+                        ev = train(spec, log, it_dir / "run", TrainConfig(**knobs, seed=tc.iteration))
+                except Exception as e:  # noqa: BLE001
+                    self._learn(f"iter {tc.iteration}: training failed with knobs {knobs}: {str(e)[:200]}")
+                    return {"error": f"train failed: {str(e)[:300]}", "cost_usd": round(cost, 4), "roles_report": reports}
+                (it_dir / "eval.json").write_text(json.dumps(ev, indent=1))
         if not claude:
             cost += (time.time() - t0) / 3600 * 0.5     # nominal $0.50/h CPU; claude mode uses the CLI's reported cost
         if not (it_dir / "eval.json").exists():

@@ -33,6 +33,7 @@ class TrainConfig:
     hole_weight: int = 20          # oversample hole examples (there are very few)
     log_every: int = 10
     init: str | None = None        # warm-start JEPA weights from a checkpoint (continued training)
+    device: str = "auto"           # auto | cpu | cuda | mps
 
 
 def _tensors(spec: Spec, enc: Encoder, log: EpisodeLog, cfg: TrainConfig):
@@ -77,6 +78,16 @@ def _tensors_continuous(spec: Spec, enc: Encoder, log: EpisodeLog, k_neg: int = 
     return t(S), t(A, torch.long), t(AC), t(NX), t(NEG)
 
 
+def _device(cfg: "TrainConfig") -> torch.device:
+    if cfg.device != "auto":
+        return torch.device(cfg.device)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | None = None) -> dict[str, Any]:
     cfg = cfg or TrainConfig()
     torch.manual_seed(cfg.seed)
@@ -91,7 +102,10 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
         prev = NerveEnergy.load(spec, cfg.init)
         model.jepa.load_state_dict(prev.jepa.state_dict())
     (S, A, P), (NS, NA, N) = _tensors(spec, enc, log, cfg)
-    cand = torch.from_numpy(enc.all_state_vectors())
+    dev = _device(cfg)
+    model.jepa.to(dev)
+    S, A, P, NS, NA, N = (x.to(dev) for x in (S, A, P, NS, NA, N))
+    cand = torch.from_numpy(enc.all_state_vectors()).to(dev)
     opt = torch.optim.AdamW(model.jepa.parameters(), lr=cfg.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(cfg.epochs, 1), eta_min=cfg.lr * 0.05)
     n = len(S)
@@ -99,13 +113,13 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
     t0 = time.time()
     for ep in range(cfg.epochs):
         model.jepa.train()
-        perm = torch.randperm(n)
+        perm = torch.randperm(n, device=dev)
         tot = {"total": 0.0, "nce": 0.0}
         for i in range(0, n, cfg.batch):
             idx = perm[i:i + cfg.batch]
             neg = None
             if len(NS):
-                j = torch.randint(0, len(NS), (len(idx),))
+                j = torch.randint(0, len(NS), (len(idx),), device=dev)
                 neg = (N[j], NS[j], NA[j])
             losses = model.jepa.loss(S[idx], A[idx], P[idx], cand,
                                      neg=None if neg is None else neg[0],
@@ -116,8 +130,9 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
         sched.step()
         rec = {"epoch": ep, "loss": tot["total"] / n, "nce": tot["nce"] / n}
         if ep % cfg.log_every == 0 or ep == cfg.epochs - 1:
-            model.jepa.eval()
+            model.jepa.eval(); model.jepa.cpu()
             ev = evaluate(spec, model.step, cfg.holdout, learned_only_fn=model.step_learned_only)
+            model.jepa.to(dev)
             rec.update({"heldout": ev["heldout"]["exact"], "all": ev["all"]["exact"],
                         "learned_only": ev["learned_only"]["exact"], "score": ev["score"]})
             print(f"  ep {ep:3d} loss {rec['loss']:.4f} nce {rec['nce']:.4f} | exact all {rec['all']:.3f} "
@@ -127,7 +142,7 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
 
 
 def _finish(spec, model, out, cfg, history, t0, n, n_neg):
-    model.jepa.eval()
+    model.jepa.eval(); model.jepa.cpu()
     model.save(str(out / "model.pt"))
     # official numbers come from the checkpoint that ships (BF16), not the FP32 training copy
     shipped = NerveEnergy.load(spec, str(out / "model.pt"))
@@ -144,11 +159,14 @@ def _train_continuous(spec, log, out, cfg, enc, model):
     if cfg.init:
         model.jepa.load_state_dict(NerveEnergy.load(spec, cfg.init).jepa.state_dict())
     S, A, AC, NX, NEG = _tensors_continuous(spec, enc, log, seed=cfg.seed)
+    dev = _device(cfg)
+    model.jepa.to(dev)
+    S, A, AC, NX, NEG = (x.to(dev) for x in (S, A, AC, NX, NEG))
     opt = torch.optim.AdamW(model.jepa.parameters(), lr=cfg.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(cfg.epochs, 1), eta_min=cfg.lr * 0.05)
     n = len(S); history = []; t0 = time.time()
     for ep in range(cfg.epochs):
-        model.jepa.train(); perm = torch.randperm(n); tot = 0.0; nce = 0.0
+        model.jepa.train(); perm = torch.randperm(n, device=dev); tot = 0.0; nce = 0.0
         for i in range(0, n, cfg.batch):
             idx = perm[i:i + cfg.batch]
             if len(idx) < 2:
@@ -159,8 +177,9 @@ def _train_continuous(spec, log, out, cfg, enc, model):
         sched.step()
         rec = {"epoch": ep, "loss": tot / n, "nce": nce / n}
         if ep % cfg.log_every == 0 or ep == cfg.epochs - 1:
-            model.jepa.eval()
+            model.jepa.eval(); model.jepa.cpu()
             ev = evaluate(spec, model.step, cfg.holdout, n_samples=200)
+            model.jepa.to(dev)
             rec.update({"all": ev["all"]["exact"], "score": ev["score"]})
             print(f"  ep {ep:3d} loss {rec['loss']:.4f} nce {rec['nce']:.4f} | within-tol {rec['all']:.3f} "
                   f"violations {ev['all']['violation_rate']:.3f} score {rec['score']:.3f}")

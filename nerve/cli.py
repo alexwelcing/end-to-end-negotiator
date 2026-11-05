@@ -52,7 +52,10 @@ def cmd_train(a):
     from .train import TrainConfig, train
     sp = _spec(a.spec)
     cfg = TrainConfig(epochs=a.epochs, lr=a.lr, d=a.d, hidden=a.hidden, holdout=a.holdout, seed=a.seed,
-                      compile_circuit=not a.no_circuit, init=a.init)
+                      compile_circuit=not a.no_circuit, init=a.init, device=a.device)
+    if a.remote:
+        from .train.remote import train_remote
+        print(json.dumps(train_remote(a.spec, a.log, a.out, cfg, flavor=a.flavor))); return 0
     r = train(sp, EpisodeLog(a.log), a.out, cfg)
     print(json.dumps({"score": r["score"], "all": r["all"]["exact"], "heldout": r["heldout"]["exact"],
                       "learned_only": r["learned_only"]["exact"], "violations": r["all"]["violation_rate"],
@@ -137,7 +140,7 @@ def cmd_edge(a):
 def cmd_evolve(a):
     from .evolve import Supervisor
     sup = Supervisor(a.spec, a.workdir, budget_usd=a.budget, iterations=a.iterations, mode=a.mode,
-                     model=a.supervisor_model, role_model=a.role_model)
+                     model=a.supervisor_model, role_model=a.role_model, remote=a.remote, flavor=a.flavor)
     print(json.dumps(sup.run(), indent=1))
 
 
@@ -161,7 +164,10 @@ def main(argv=None) -> int:
     s.add_argument("spec"); s.add_argument("--log", required=True); s.add_argument("--out", required=True)
     s.add_argument("--epochs", type=int, default=60); s.add_argument("--lr", type=float, default=3e-3); s.add_argument("--d", type=int, default=64)
     s.add_argument("--hidden", type=int, default=128); s.add_argument("--holdout", type=float, default=0.15); s.add_argument("--seed", type=int, default=0)
-    s.add_argument("--no-circuit", action="store_true"); s.add_argument("--init", help="warm-start from checkpoint"); s.set_defaults(f=cmd_train)
+    s.add_argument("--no-circuit", action="store_true"); s.add_argument("--init", help="warm-start from checkpoint")
+    s.add_argument("--device", default="auto", help="auto|cpu|cuda|mps")
+    s.add_argument("--remote", choices=["hf"], help="run the training as a Hugging Face Job on a GPU (needs HF_TOKEN)")
+    s.add_argument("--flavor", default="a10g-small", help="HF Jobs hardware flavor for --remote hf"); s.set_defaults(f=cmd_train)
     s = sub.add_parser("eval", help="official conformance eval"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--holdout", type=float, default=0.15); s.set_defaults(f=cmd_eval)
     s = sub.add_parser("patch", help="PULSE sparse patch between two checkpoints"); s.add_argument("--prev", required=True); s.add_argument("--new", required=True); s.add_argument("--out", required=True); s.add_argument("--level", type=int, default=1); s.set_defaults(f=cmd_patch)
     s = sub.add_parser("serve", help="run an inference worker"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--patches"); s.add_argument("--host", default="127.0.0.1"); s.add_argument("--port", type=int, default=8787); s.set_defaults(f=cmd_serve)
@@ -171,7 +177,8 @@ def main(argv=None) -> int:
     s.add_argument("--patches"); s.add_argument("--port", type=int, default=8788); s.add_argument("--no-serve", action="store_true"); s.set_defaults(f=cmd_edge)
     s = sub.add_parser("evolve", help="EAT-style supervisor loop over team configs"); s.add_argument("spec"); s.add_argument("--workdir", required=True)
     s.add_argument("--budget", type=float, default=5.0); s.add_argument("--iterations", type=int, default=4); s.add_argument("--mode", choices=["offline", "claude"], default="offline")
-    s.add_argument("--supervisor-model", default="claude-fable-5-1"); s.add_argument("--role-model", default="claude-sonnet-5-5"); s.set_defaults(f=cmd_evolve)
+    s.add_argument("--supervisor-model", default="claude-fable-5-1"); s.add_argument("--role-model", default="claude-sonnet-5-5")
+    s.add_argument("--remote", choices=["hf"], help="train each iteration as a Hugging Face GPU Job"); s.add_argument("--flavor", default="a10g-small"); s.set_defaults(f=cmd_evolve)
     s = sub.add_parser("intake", help="code | screenshot | prose -> behavior spec (via a harness agent)"); s.add_argument("source"); s.add_argument("--kind", choices=["auto", "code", "image", "prose"], default="auto")
     s.add_argument("--model", default="claude"); s.add_argument("--out", required=True); s.set_defaults(f=cmd_intake)
 
