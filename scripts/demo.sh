@@ -20,6 +20,13 @@ python -m nerve patch --prev $R/v1/model.pt --new $R/v2/model.pt --out $R/patche
 step "6. run it: an inference worker loads v1, applies the patch, and *is* the interface"
 python -m nerve step specs/$SPEC.nerve --model $R/v1/model.pt --patches $R/patches inc inc 'set:{"to":7}' arm inc nudge
 step "7. export for the Cloudflare Worker (edge/): the forward pass in nn.ts is the entire runtime"
-python -m nerve export specs/$SPEC.nerve --model $R/v2/model.pt --out edge/export/$SPEC.json
+python -m nerve edge specs/$SPEC.nerve --model $R/v2/model.pt --patches $R/patches --no-serve
+if [ -x edge/node_modules/.bin/workerd ]; then
+  step "7b. run that Worker on workerd (Cloudflare's open-source runtime) and drive a session over HTTP"
+  (cd edge && mkdir -p .do-storage && npx workerd serve workerd.capnp >/dev/null 2>&1 & echo $! > "$R/workerd.pid")
+  for i in $(seq 1 50); do curl -s http://127.0.0.1:8788/ >/dev/null 2>&1 && break; sleep 0.2; done
+  node edge/scripts/smoke.mjs http://127.0.0.1:8788 $SPEC || true
+  kill "$(cat "$R/workerd.pid")" 2>/dev/null || true
+fi
 step "8. evolve: EAT-style supervisor emits TEAM_CONFIGs, the harness scores each with the official eval"
 python -m nerve evolve specs/$SPEC.nerve --workdir $R/evo --iterations 2 --budget 1 | grep -v '^  ep'

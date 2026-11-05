@@ -2,6 +2,26 @@
 
 The trained network runs **inside a Cloudflare Worker**. `src/nn.ts` is the whole runtime: a forward pass and an argmin.
 
+## Local, on workerd
+
+[workerd](https://github.com/cloudflare/workerd) is the open-source runtime Cloudflare Workers run on. The same bundle
+runs here with no account:
+
+```
+npm install
+python -m nerve edge ../specs/counter.nerve --model ../runs/counter/v2/model.pt --patches ../runs/counter/patches
+#   -> exports to export/counter/{edge.json,patches/}, bundles with esbuild, serves on http://127.0.0.1:8788
+curl -X POST http://127.0.0.1:8788/counter/session/alice -d '{"action":"inc"}'
+npm run smoke                      # drives a session and prints the trace
+```
+
+`workerd.capnp` binds `WEIGHTS` to a read-only disk service over `export/` (R2 in production) and `SESSIONS` to a
+Durable Object namespace persisted in `.do-storage/`, so sessions survive restarts. `src/index.ts` reads weights
+through one function that accepts either binding. `tests/test_workerd.py` trains tiny models, starts workerd on a
+spare port with its own export root, and asserts every transition matches Python over HTTP.
+
+## Deploy to Cloudflare
+
 ```
 nerve export specs/counter.nerve --model runs/counter/model.pt --out edge/export/counter.json
 cd edge && npm i && npm run upload -- counter export/counter.json ../runs/counter/patches

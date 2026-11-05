@@ -1,0 +1,6 @@
+.do-storage/
+dist/
+node_modules/
+export/
+.test-export/
+.workerd.*.capnp

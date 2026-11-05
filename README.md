@@ -22,7 +22,7 @@ treating software as the deliverable.
 ## One run
 
 ```
-pip install -e . && scripts/demo.sh counter
+pip install -e . && (cd edge && npm install) && scripts/demo.sh counter
 ```
 
 That does, on a laptop CPU in about a minute:
@@ -40,6 +40,9 @@ That does, on a laptop CPU in about a minute:
    BF16. We ship only the bits that changed (PULSE), verified bit-identical by digest.
 6. **step** — an inference worker loads the base weights, applies the patch, and is the interface.
 7. **export** — weights go to a Cloudflare Worker whose entire runtime is a forward pass and an argmin.
+   `nerve edge` runs that same Worker locally on **workerd**, Cloudflare's open-source Workers runtime, with
+   Durable Object sessions on local disk and weights served from `edge/export/`. No account, no Python on the
+   serving path. The test suite checks Python and workerd agree on every transition over real HTTP.
 8. **evolve** — an EAT-style supervisor emits TEAM_CONFIGs; the harness runs the team and scores it on the
    official eval; the best checkpoint is kept.
 
@@ -103,6 +106,7 @@ nerve/serve              inference worker (applies patches, HTTP), edge export
 nerve/evolve             EAT loop: TEAM_CONFIG, offline and Claude supervisors, herdr/subprocess launcher
 nerve/intake             code | screenshot | prose -> spec, via Claude Code or DeepSeek Harness, validated by `nerve check`
 edge/                    Cloudflare Worker + Durable Object sessions + R2 weights; nn.ts is the whole runtime
+edge/workerd.capnp       the same Worker on workerd locally (disk-backed weights + DO storage); `npm run local`
 harness/dsh              DeepSeek Harness profile patch (providers, allowed tools, system prompt)
 harness/eat              EAT skill + role prompts (spec_auditor, coverage_hunter, adversary, trainer, energy_auditor, hole_tutor)
 harness/herdr            how the team lives on herdr
@@ -129,6 +133,7 @@ harness/herdr            how the team lives on herdr
                           │
                           ▼
      Cloudflare Worker + Durable Object  ◄──  users   (or a Container / `nerve serve` for big networks)
+     └─ identical Worker on workerd locally:  nerve edge specs/x.nerve --model runs/x/v2/model.pt
 ```
 
 `--mode claude` makes the supervisor and the roles real `claude -p` processes (the way EAT's are); `--mode offline`

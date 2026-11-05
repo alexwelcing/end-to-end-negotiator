@@ -5,11 +5,17 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "upload": "node scripts/upload.mjs"
+    "upload": "node scripts/upload.mjs",
+    "bundle": "esbuild src/index.ts --bundle --format=esm --outfile=dist/index.js",
+    "local": "scripts/local.sh",
+    "smoke": "node scripts/smoke.mjs http://127.0.0.1:8788 counter",
+    "parity": "node --experimental-strip-types --no-warnings scripts/parity.mts"
   },
   "devDependencies": {
-    "wrangler": "^4.40.0",
-    "@cloudflare/workers-types": "^4.20261001.0",
-    "typescript": "^5.6.0"
+    "@cloudflare/workers-types": "^5.20261104.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.6.0",
+    "workerd": "^1.20261104.1",
+    "wrangler": "^4.157.0"
   }
 }

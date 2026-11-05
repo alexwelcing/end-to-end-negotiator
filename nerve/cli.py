@@ -107,6 +107,32 @@ def cmd_export(a):
     print(json.dumps(export_edge(sp, m, a.out)))
 
 
+def cmd_edge(a):
+    """Export to edge/export/<spec>/, bundle, and serve the Worker on workerd locally."""
+    from .model import NerveEnergy
+    from .serve.export import export_edge
+    from .serve import workerd as wd
+    sp = _spec(a.spec); m = NerveEnergy.load(sp, a.model)
+    out = wd.export_dir(sp.name); out.mkdir(parents=True, exist_ok=True)
+    export_edge(sp, m, out / "edge.json")
+    if a.patches:
+        import shutil as _sh
+        (out / "patches").mkdir(exist_ok=True)
+        for p in Path(a.patches).glob("*.nrvp"):
+            _sh.copy(p, out / "patches" / p.name)
+    if not wd.available():
+        print(json.dumps({"exported": str(out), "workerd": "not installed (cd edge && npm install)"})); return 0
+    if a.no_serve:
+        print(json.dumps({"exported": str(out), "bundle": str(wd.bundle())})); return 0
+    with wd.Workerd(a.port) as w:
+        print(json.dumps({"serving": w.base, "spec": sp.name, "try": f"curl -X POST {w.base}/{sp.name}/session/me -d '{{\"action\":\"{next(iter(sp.actions))}\"}}'"}), flush=True)
+        try:
+            while w.proc and w.proc.poll() is None:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+
 def cmd_evolve(a):
     from .evolve import Supervisor
     sup = Supervisor(a.spec, a.workdir, budget_usd=a.budget, iterations=a.iterations, mode=a.mode)
@@ -139,6 +165,8 @@ def main(argv=None) -> int:
     s = sub.add_parser("serve", help="run an inference worker"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--patches"); s.add_argument("--host", default="127.0.0.1"); s.add_argument("--port", type=int, default=8787); s.set_defaults(f=cmd_serve)
     s = sub.add_parser("step", help="drive the network from the shell"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--patches"); s.add_argument("--state"); s.add_argument("action", nargs="+", help="name or name:{json params}"); s.set_defaults(f=cmd_step)
     s = sub.add_parser("export", help="export weights for the Cloudflare edge worker"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--out", required=True); s.set_defaults(f=cmd_export)
+    s = sub.add_parser("edge", help="export + run the Cloudflare Worker locally on workerd"); s.add_argument("spec"); s.add_argument("--model", required=True)
+    s.add_argument("--patches"); s.add_argument("--port", type=int, default=8788); s.add_argument("--no-serve", action="store_true"); s.set_defaults(f=cmd_edge)
     s = sub.add_parser("evolve", help="EAT-style supervisor loop over team configs"); s.add_argument("spec"); s.add_argument("--workdir", required=True)
     s.add_argument("--budget", type=float, default=5.0); s.add_argument("--iterations", type=int, default=4); s.add_argument("--mode", choices=["offline", "claude"], default="offline"); s.set_defaults(f=cmd_evolve)
     s = sub.add_parser("intake", help="code | screenshot | prose -> behavior spec (via a harness agent)"); s.add_argument("source"); s.add_argument("--kind", choices=["auto", "code", "image", "prose"], default="auto")
