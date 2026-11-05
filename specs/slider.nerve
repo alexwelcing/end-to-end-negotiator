@@ -1,0 +1,26 @@
+# dragology's continuous slider: d.vary(state, param("value"), inOrder([0, value, 240]))
+nerve: 1
+name: slider
+state:
+  value: {type: float, range: [0, 240], step: 10}
+  grabbed: {type: bool}
+actions:
+  grab: {}
+  release: {}
+  move: {params: {to: {type: float, range: [0, 240], step: 10}}}
+  step_right: {}
+  step_left: {}
+transitions:
+  grab:       { grabbed: "True" }
+  release:    { grabbed: "False" }
+  move:       { when: "grabbed", value: "clamp(to, 0, 240)" }
+  step_right: { value: "min(value + 10, 240)" }
+  step_left:  { value: "max(value - 10, 0)" }
+invariants:
+  - "0 <= value <= 240"
+ensures:
+  - { after: move, holds: "value == to or not old.grabbed" }
+  - { after: release, holds: "not grabbed" }
+futures:
+  drag_handle: { kind: vary, over: value }
+initial: {value: 0, grabbed: false}

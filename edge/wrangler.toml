@@ -1,0 +1,20 @@
+name = "nerve-edge"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Weights (edge export JSON + PULSE patches) live in R2; sessions in a Durable Object.
+[[r2_buckets]]
+binding = "WEIGHTS"
+bucket_name = "nerve-weights"
+
+[[durable_objects.bindings]]
+name = "SESSIONS"
+class_name = "NerveSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["NerveSession"]
+
+[vars]
+# Optional: a heavier inference origin (Cloudflare Container or `nerve serve`) for specs too large to run in the Worker.
+ORIGIN = ""

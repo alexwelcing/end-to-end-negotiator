@@ -1,0 +1,14 @@
+# The smallest interface: a switch. Two states, one gesture.
+nerve: 1
+name: toggle
+state:
+  status: {type: enum, values: [off, on]}
+actions:
+  flip: {}
+transitions:
+  flip: { status: "'on' if status == 'off' else 'off'" }
+futures:
+  # dragology: dragging the knob leads to one of exactly these states
+  drag_knob: { kind: between, over: status, values: [off, on] }
+ensures:
+  - { after: flip, holds: "status != old.status" }

@@ -1,0 +1,35 @@
+# Homage to the repo this branch grew out of: Deal or No Deal, scaled to a
+# finite game. Two agents split 2 books and 2 hats. A proposal is "what I keep".
+nerve: 1
+name: negotiate
+state:
+  turn:   {type: enum, values: [a, b]}
+  books:  {type: int, range: [0, 2]}     # books proposer keeps
+  hats:   {type: int, range: [0, 2]}     # hats proposer keeps
+  status: {type: enum, values: [open, deal, no_deal]}
+  rounds: {type: int, range: [0, 3]}
+actions:
+  propose: {params: {b: {type: int, range: [0, 2]}, h: {type: int, range: [0, 2]}}}
+  accept: {}
+  walk: {}
+transitions:
+  propose:
+    when: "status == 'open' and rounds < 3"
+    books: "b"
+    hats: "h"
+    turn: "'b' if turn == 'a' else 'a'"
+    rounds: "rounds + 1"
+  accept:
+    when: "status == 'open' and rounds > 0"
+    status: "'deal'"
+  walk:
+    when: "status == 'open'"
+    status: "'no_deal'"
+invariants:
+  - "0 <= books <= 2 and 0 <= hats <= 2"
+  - "rounds <= 3"
+ensures:
+  - { after: propose, holds: "turn != old.turn or old.status != 'open' or old.rounds >= 3" }
+  - { after: accept,  holds: "status != 'open' or old.rounds == 0" }
+  - { holds: "status == old.status or old.status == 'open'" }   # terminal states are absorbing
+initial: {turn: a, books: 0, hats: 0, status: open, rounds: 0}

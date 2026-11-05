@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+runs/
+*.egg-info/
+edge/node_modules/
+edge/dist/
+.wrangler/
+edge/export/

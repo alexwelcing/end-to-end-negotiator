@@ -1,0 +1,15 @@
+{
+  "name": "nerve-edge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "upload": "node scripts/upload.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.40.0",
+    "@cloudflare/workers-types": "^4.20261001.0",
+    "typescript": "^5.6.0"
+  }
+}

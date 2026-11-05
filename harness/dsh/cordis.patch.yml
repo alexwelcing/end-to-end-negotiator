@@ -1,0 +1,41 @@
+# DeepSeek Harness (dsh) profile patch for Nerve.
+# Install:  mkdir -p $DSH_HOME/profiles/nerve && cp harness/dsh/cordis.patch.yml $DSH_HOME/profiles/nerve/
+# Run:      dsh --profile nerve        (or `dsh nerve`)
+# Layers apply: profile bundles -> this patch -> home patch -> --patch overlays.
+- id: llm-pi-ai
+  config:
+    providers:
+      claude:
+        apiKeyEnv: ANTHROPIC_API_KEY
+        api: anthropic-messages
+        baseURL: https://api.anthropic.com
+        models:
+          - id: claude-fable-5-1          # supervisor / REFLECT-EVOLVE
+          - id: claude-sonnet-5-5         # role agents
+            input: [text, image]          # screenshot intake
+      deepseek-local:
+        apiKeyEnv: DEEPSEEK_API_KEY
+        api: openai-completions
+        baseURL: https://api.deepseek.com/v1
+        models:
+          - id: deepseek-chat
+- id: core-tools
+  config:
+    # Expose the nerve pipeline as tools. Each is a shell verb with a JSON result on stdout.
+    shell:
+      allow:
+        - "python -m nerve check *"
+        - "python -m nerve compile *"
+        - "python -m nerve rollout *"
+        - "python -m nerve train *"
+        - "python -m nerve eval *"
+        - "python -m nerve patch *"
+        - "python -m nerve step *"
+        - "python -m nerve export *"
+- id: core-system-prompt
+  config:
+    append: |
+      You are a role agent on a Nerve team. The spec in specs/*.nerve is the only source of truth about behaviour.
+      You never write application code. You may: patch the spec (and re-run `nerve check`), add trajectories to the
+      episode log, change training knobs, and read eval.json. "Model-visible means logged": anything you want the
+      network to learn must be in the episode log.

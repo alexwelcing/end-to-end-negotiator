@@ -1,0 +1,38 @@
+# A bounded counter with an arm switch and a `learn` hole.
+nerve: 1
+name: counter
+state:
+  count: {type: int, range: [0, 9]}
+  armed: {type: bool}
+actions:
+  inc: {}
+  dec: {}
+  arm: {}
+  set: {params: {to: {type: int, range: [0, 9]}}}
+  nudge: {}          # behaviour given only by examples (see `learn`)
+transitions:
+  inc: { when: "armed", count: "min(count + 1, 9)" }
+  dec: { when: "armed", count: "max(count - 1, 0)" }
+  arm: { armed: "not armed" }
+  set: { count: "to" }
+invariants:
+  - "0 <= count <= 9"
+ensures:
+  - { after: inc, holds: "count >= old.count" }
+  - { after: dec, holds: "count <= old.count" }
+  - { after: set, holds: "count == to" }
+futures:
+  drag_dial: { kind: closest, over: count, values: [0,1,2,3,4,5,6,7,8,9] }
+learn:
+  # ink-style hole: the spec cannot write `nudge` down, only show it and bound it.
+  # The fallback is the spec-visible behaviour the network must never do worse than.
+  - name: nudge_towards_middle
+    action: nudge
+    fallback: { count: "count" }
+    examples:
+      - { state: {count: 0, armed: true},  next: {count: 2, armed: true} }
+      - { state: {count: 9, armed: true},  next: {count: 7, armed: true} }
+      - { state: {count: 4, armed: true},  next: {count: 5, armed: true} }
+      - { state: {count: 5, armed: true},  next: {count: 5, armed: true} }
+      - { state: {count: 1, armed: false}, next: {count: 1, armed: false} }
+initial: {count: 0, armed: true}
