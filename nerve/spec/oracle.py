@@ -36,7 +36,7 @@ class Oracle:
                 v = int(v)
             if f.kind == "enum":
                 v = str(v)
-            new[k] = v
+            new[k] = f.canon(v)
         return new
 
     def rollout(self, actions: list[tuple[str, dict[str, Any]]], state: dict[str, Any] | None = None):
@@ -78,9 +78,18 @@ class Oracle:
         A spec whose own transitions break its own invariants is rejected
         before any training happens — the formal-verification analogue.
         """
-        if not self.spec.finite:
-            return []
         problems: list[str] = []
+        if not self.spec.finite:
+            import random
+            rng = random.Random(0)
+            for _ in range(2000):
+                s = self.spec.sample_state(rng); a = self.spec.sample_action(rng)
+                if self.violations(s, None, s):
+                    continue
+                n = self.step(s, a)
+                for v in self.violations(s, a, n):
+                    problems.append(f"{a[0]}{a[1] or ''} from {s}: {v}")
+            return problems
         for s in self.spec.state_space():
             if self.violations(s, None, s) and self.violations(s, None, s)[0].startswith("invariant"):
                 continue  # unreachable-by-construction states are allowed to violate invariants

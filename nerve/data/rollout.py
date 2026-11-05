@@ -17,13 +17,25 @@ from .trajectories import EpisodeLog, Step
 Policy = Literal["random", "coverage", "adversary"]
 
 
+def _perturb(spec: Spec, truth: dict, rng: random.Random) -> dict:
+    """A near-miss successor for continuous specs: jitter continuous fields, sometimes flip a discrete one."""
+    cand = dict(truth)
+    for k in spec.continuous_fields():
+        f = spec.fields[k]
+        if rng.random() < 0.7:
+            cand[k] = min(f.hi, max(f.lo, truth[k] + rng.gauss(0, 0.15) * (f.hi - f.lo)))
+    if rng.random() < 0.3 and spec.discrete_fields():
+        k = rng.choice(spec.discrete_fields()); cand[k] = spec.fields[k].sample(rng)
+    return cand
+
+
 def _negatives(spec: Spec, oracle: Oracle, s: dict, a: tuple, truth: dict, rng: random.Random, k: int) -> list[Step]:
     out: list[Step] = []
-    space = spec.state_space() if spec.finite else []
+    space = spec.state_space() if spec.finite else None
     tried = 0
-    while len(out) < k and tried < 10 * k and space:
+    while len(out) < k and tried < 10 * k:
         tried += 1
-        cand = rng.choice(space)
+        cand = rng.choice(space) if space else _perturb(spec, truth, rng)
         if cand == truth:
             continue
         v = oracle.violations(s, a, cand)
@@ -42,12 +54,14 @@ def rollout_dataset(spec: Spec, log: EpisodeLog, episodes: int = 50, horizon: in
     seen: set[tuple] = set()
     n = 0
     for ep in range(episodes):
-        if spec.finite and policy != "random" and rng.random() < 0.5:
-            s = rng.choice(spec.state_space())      # start anywhere reachable-or-not: breadth
+        if policy != "random" and rng.random() < 0.5:
+            s = rng.choice(spec.state_space()) if spec.finite else spec.sample_state(rng)   # breadth
         else:
             s = dict(spec.initial)
         for _ in range(horizon):
-            if policy == "coverage":
+            if not spec.finite:
+                a = spec.sample_action(rng)
+            elif policy == "coverage":
                 unseen = [a for a in actions if (spec.state_key(s), spec.action_key(a)) not in seen]
                 a = rng.choice(unseen or actions)
             elif policy == "adversary":

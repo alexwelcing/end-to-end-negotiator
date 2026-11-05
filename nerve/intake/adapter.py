@@ -42,12 +42,16 @@ def _extract_yaml(text: str) -> str:
     return (m.group(1) if m else text).strip()
 
 
-def intake(source: str, kind: str = "auto", model: str = "claude", out: str = "spec.nerve", rounds: int = 3) -> dict[str, Any]:
+def intake(source: str, kind: str = "auto", model: str = "claude", out: str = "spec.nerve", rounds: int = 3,
+           claude_model: str | None = None) -> dict[str, Any]:
     k, prompt = build_prompt(source, kind)
     if model == "claude":
         if shutil.which("claude") is None:
             return {"error": "claude CLI not found; install Claude Code or pass --model dsh", "kind": k, "prompt_chars": len(prompt)}
-        cmd = ["claude", "-p", prompt, "--output-format", "json"]
+        # Read is all the agent needs (to look at the screenshot); we run `nerve check` ourselves and loop.
+        cmd = ["claude", "-p", prompt, "--output-format", "json", "--allowedTools", "Read"]
+        if claude_model:
+            cmd += ["--model", claude_model]
     elif model == "dsh":
         # DeepSeek Harness headless profile (see harness/dsh/). `dsh --profile headless -p` mirrors claude -p.
         if shutil.which("dsh") is None:
@@ -56,12 +60,13 @@ def intake(source: str, kind: str = "auto", model: str = "claude", out: str = "s
     else:
         return {"error": f"unknown model adapter {model!r}"}
     last_err: list[str] = []
+    cost = 0.0
     for r in range(rounds):
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
         text = res.stdout
         try:
-            text = json.loads(text).get("result", text)
-        except json.JSONDecodeError:
+            j = json.loads(text); text = j.get("result", text); cost += float(j.get("total_cost_usd", 0) or 0)
+        except (json.JSONDecodeError, AttributeError):
             pass
         Path(out).write_text(_extract_yaml(text) + "\n")
         try:
@@ -70,7 +75,7 @@ def intake(source: str, kind: str = "auto", model: str = "claude", out: str = "s
         except Exception as e:  # noqa: BLE001
             probs = [f"parse: {e}"]
         if not probs:
-            return {"ok": True, "kind": k, "spec": out, "name": sp.name, "states": sp.state_space_size(), "rounds": r + 1}
+            return {"ok": True, "kind": k, "spec": out, "name": sp.name, "states": sp.state_space_size(), "rounds": r + 1, "cost_usd": round(cost, 3)}
         last_err = probs[:10]
         cmd = cmd[:2] + [prompt + "\n\nYour previous spec failed `nerve check`:\n" + "\n".join(last_err) + "\nFix it."] + cmd[3:]
-    return {"ok": False, "kind": k, "spec": out, "problems": last_err}
+    return {"ok": False, "kind": k, "spec": out, "problems": last_err, "cost_usd": round(cost, 3)}

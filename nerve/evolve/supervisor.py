@@ -12,10 +12,12 @@ EAT's supervisor is itself a coding agent. The harness side is identical.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -37,16 +39,57 @@ Previous iterations (newest last):
 Shared learnings:
 {learnings}
 
+Role library (you may reuse, rewrite, or invent roles; a role's `owns` is a subset of
+[spec, rollout, adversary, train, eval] and decides which pipeline verbs it may use):
+{roles}
+
+Each role runs as its own Claude Code process with the spec, the episode log, eval.json and the pipeline verbs
+`python -m nerve check|rollout|train|eval|step`. Roles that own `spec` edit a copy of the spec (never the author's
+behaviour, only missing guards/invariants/ensures). Roles that own `train` write knobs.json (TrainConfig overrides);
+the harness trains. Roles that own `eval` write to learnings.md.
+
 REFLECT in one paragraph (put it in "rationale"), then EVOLVE. You may: add/remove/rename roles, rewrite prompts,
-change knobs (rollout: episodes, horizon, negatives; train: epochs, lr, d, hidden), reorder phases.
-Output JSON with keys: rationale, roles[{{name,prompt,owns,knobs}}], phases[{{name,roles,gate}}], train{{}}, rollout{{}}.
+change knobs (rollout: episodes, horizon, negatives; train: epochs, lr, d, hidden, hole_weight), reorder phases.
+Create a role when a blocker has no owner. Output JSON only, with keys:
+rationale, roles[{{name,prompt,owns,knobs}}], phases[{{name,roles,gate}}], train{{}}, rollout{{}}.
 """
+
+ROLE_PROMPT = """You are the role `{name}` on an Evolving Agent Team building a Nerve network for the spec below.
+Your charter: {prompt}
+You own these pipeline stages: {owns}. Knobs you may set: {knobs}.
+
+Repository: {repo} (run commands from here; PYTHONPATH is set). Iteration directory: {it_dir}
+- Spec (original, read-only): {spec_path}
+- Spec working copy you may edit if you own `spec`: {spec_copy}
+- Episode log (append-only; add data with `python -m nerve rollout {spec_copy} --log {log} ...`): {log}
+- Previous eval (if any): {prev_eval}
+- Shared learnings: {learnings}
+- Knobs file you may write if you own `train` (JSON of TrainConfig overrides: epochs, lr, d, hidden, hole_weight): {knobs_file}
+
+Official score = 0.4*heldout + 0.2*all + 0.2*(1-violations) + 0.2*learned_only (blended 80/20 with hole-example
+accuracy when the spec has `learn` holes). Do only your charter, then finish with a 3-line report:
+WHAT I CHANGED / WHY / WHAT I EXPECT. Never modify files outside the iteration directory except the episode log.
+Never disable the compiled circuit. Never change the author's behaviour in the spec.
+
+Spec:
+```yaml
+{spec_text}
+```
+Last eval.json:
+{eval_text}
+"""
+
+
+REPO = Path(__file__).resolve().parents[2]
+OWNABLE = {"spec", "rollout", "adversary", "train", "eval"}
 
 
 class Supervisor:
     def __init__(self, spec_path: str, workdir: str, budget_usd: float = 5.0, iterations: int = 4, mode: str = "offline",
-                 model: str = "claude-fable-5-1"):
-        self.spec_path = spec_path
+                 model: str = "claude-fable-5-1", role_model: str = "claude-sonnet-5-5"):
+        self.spec_path = str(Path(spec_path).resolve())
+        self.role_model = role_model
+        self._pending_cost = 0.0
         self.spec = load_spec(spec_path)
         self.work = Path(workdir); self.work.mkdir(parents=True, exist_ok=True)
         self.budget = budget_usd
@@ -117,47 +160,123 @@ class Supervisor:
         tc = TeamConfig(it, "; ".join(why), roles, list(prev.phases), train, roll)
         return tc
 
-    def _claude_supervisor(self, it: int, hist: list[dict[str, Any]]) -> TeamConfig:
-        hist_txt = "\n".join(json.dumps({k: v for k, v in h.items() if k != "team"}) for h in hist[-5:])
-        prompt = SUPERVISOR_PROMPT.format(spec_path=self.spec_path, history=hist_txt, learnings=self.learnings_path.read_text()[-4000:])
-        r = subprocess.run(["claude", "-p", prompt, "--model", self.model, "--output-format", "json"],
-                           capture_output=True, text=True, timeout=600, cwd=str(self.work))
+    def _role_library(self) -> str:
+        d = REPO / "harness" / "eat" / "roles"
+        return "\n".join(f"### {p.stem}\n{p.read_text().strip()}" for p in sorted(d.glob("*.md"))) if d.exists() else ""
+
+    def _claude(self, prompt: str, model: str, cwd: Path, allowed: list[str], timeout: int = 1500) -> tuple[str, float]:
+        """One Claude Code process on the user's subscription. Returns (result text, reported cost)."""
+        cmd = ["claude", "-p", prompt, "--model", model, "--output-format", "json"]
+        if allowed:
+            cmd += ["--allowedTools", *allowed]
+        env = dict(os.environ, PYTHONPATH=str(REPO))
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(cwd), env=env)
         if r.returncode != 0:
-            raise RuntimeError(r.stderr[:500])
-        text = json.loads(r.stdout).get("result", r.stdout)
+            raise RuntimeError((r.stderr or r.stdout)[:800])
+        j = json.loads(r.stdout)
+        return j.get("result", ""), float(j.get("total_cost_usd", 0) or 0)
+
+    def _claude_supervisor(self, it: int, hist: list[dict[str, Any]]) -> TeamConfig:
+        hist_txt = "\n".join(json.dumps({k: v for k, v in h.items() if k not in ("team", "roles_report")}) for h in hist[-6:])
+        prompt = SUPERVISOR_PROMPT.format(spec_path=self.spec_path, history=hist_txt,
+                                          learnings=self.learnings_path.read_text()[-6000:], roles=self._role_library())
+        text, cost = self._claude(prompt, self.model, self.work, allowed=[], timeout=900)
+        self._pending_cost += cost
         m = re.search(r"\{.*\}", text, re.S)
         d = json.loads(m.group(0) if m else text)
-        return TeamConfig(it, d.get("rationale", ""), [Role(**x) for x in d["roles"]], [Phase(**x) for x in d["phases"]],
-                          d.get("train", {}), d.get("rollout", {}))
+        roles = []
+        for x in d["roles"]:
+            owns = [o for o in x.get("owns", []) if o in OWNABLE]
+            roles.append(Role(x["name"], x.get("prompt", ""), owns, x.get("knobs", {}) or {}))
+        return TeamConfig(it, d.get("rationale", ""), roles, [Phase(x["name"], x.get("roles", []), x.get("gate")) for x in d["phases"]],
+                          d.get("train", {}) or {}, d.get("rollout", {}) or {})
+
+    # ---- roles as Claude Code processes (EAT: the team is coding agents) ------
+    def _run_role(self, role: Role, tc: TeamConfig, it_dir: Path, log_path: Path) -> dict[str, Any]:
+        prev_eval = self.work / f"iter_{tc.iteration - 1:03d}" / "eval.json"
+        spec_copy = it_dir / "spec.nerve"
+        prompt = ROLE_PROMPT.format(
+            name=role.name, prompt=role.prompt, owns=role.owns, knobs=role.knobs or "{}", repo=REPO, it_dir=it_dir,
+            spec_path=Path(self.spec_path).resolve(), spec_copy=spec_copy, log=log_path,
+            prev_eval=prev_eval if prev_eval.exists() else "none", learnings=self.learnings_path,
+            knobs_file=it_dir / f"knobs.{role.name}.json", spec_text=spec_copy.read_text(),
+            eval_text=prev_eval.read_text()[:4000] if prev_eval.exists() else "none yet")
+        allowed = ["Read", "Bash(python -m nerve:*)", "Bash(cat:*)", "Bash(ls:*)", "Bash(wc:*)", "Bash(head:*)", "Bash(tail:*)"]
+        if "spec" in role.owns or "train" in role.owns or "eval" in role.owns:
+            allowed += ["Edit", "Write"]
+        t0 = time.time()
+        try:
+            text, cost = self._claude(prompt, self.role_model, REPO, allowed)
+            ok = True
+        except Exception as e:  # noqa: BLE001
+            text, cost, ok = f"ROLE FAILED: {e}", 0.0, False
+        (it_dir / f"role.{role.name}.md").write_text(text)
+        return {"role": role.name, "ok": ok, "cost_usd": round(cost, 4), "seconds": round(time.time() - t0), "report": text[-600:]}
 
     # ---- harness: run phases, official eval -----------------------------
     def run_team(self, tc: TeamConfig, it_dir: Path) -> dict[str, Any]:
         t0 = time.time()
-        log = EpisodeLog(it_dir / "episodes.v1.jsonl")
-        cost = 0.0
+        log_path = it_dir / "episodes.v1.jsonl"
+        log = EpisodeLog(log_path)
+        spec_copy = it_dir / "spec.nerve"
+        if not spec_copy.exists():
+            shutil.copy(self.spec_path, spec_copy)
+        spec = load_spec(spec_copy)
+        cost = self._pending_cost; self._pending_cost = 0.0
+        reports: list[dict[str, Any]] = []
+        claude = self.mode == "claude" and shutil.which("claude")
         for ph in tc.phases:
-            owned = {o for rn in ph.roles for r in tc.roles if r.name == rn for o in r.owns}
+            roles = [r for r in tc.roles if r.name in ph.roles]
+            owned = {o for r in roles for o in r.owns}
+            if claude and roles:
+                # EAT: every role is a coding agent; a phase's roles run in parallel on the shared file system
+                with ThreadPoolExecutor(max_workers=max(1, len(roles))) as ex:
+                    for rep in ex.map(lambda r: self._run_role(r, tc, it_dir, log_path), roles):
+                        reports.append(rep); cost += rep["cost_usd"]
+                        print(f"    role {rep['role']:18s} ok={rep['ok']} ${rep['cost_usd']:.3f} {rep['seconds']}s")
+                # a spec role may have edited the working copy: it must still pass check, else revert
+                try:
+                    cand = load_spec(spec_copy); probs = Oracle(cand).self_check()
+                    if probs:
+                        raise ValueError(probs[:5])
+                    spec = cand
+                except Exception as e:  # noqa: BLE001
+                    self._learn(f"iter {tc.iteration}: spec edit rejected ({str(e)[:200]}); reverted to author's spec")
+                    shutil.copy(self.spec_path, spec_copy); spec = load_spec(spec_copy)
+                subprocess.run(["git", "checkout", "--", "specs"], cwd=str(REPO), capture_output=True)   # author's specs are sacred
             if "spec" in owned:
-                probs = Oracle(self.spec).self_check()
+                probs = Oracle(spec).self_check()
                 (it_dir / "spec_audit.json").write_text(json.dumps({"problems": probs}, indent=1))
                 if ph.gate == "spec.problems == 0" and probs:
                     return {"error": "spec failed audit", "problems": probs[:10], "cost_usd": cost}
-            if "rollout" in owned or "adversary" in owned:
+            if ("rollout" in owned or "adversary" in owned) and not (claude and any(log)):
+                # offline mode (or roles that added nothing): the harness fills the log with the knobs
                 for pol in ("coverage", "random", "adversary"):
-                    rollout_dataset(self.spec, log, episodes=tc.rollout.get("episodes", 50), horizon=tc.rollout.get("horizon", 20),
+                    rollout_dataset(spec, log, episodes=tc.rollout.get("episodes", 50), horizon=tc.rollout.get("horizon", 20),
                                     policy=pol, negatives=tc.rollout.get("negatives", 3), seed=tc.iteration * 7 + hash(pol) % 100)
             if "train" in owned:
                 knobs = {k: v for k, v in tc.train.items() if k in TrainConfig.__dataclass_fields__}
-                for r in tc.roles:
-                    if r.name in ph.roles:
-                        knobs.update({k: v for k, v in r.knobs.items() if k in TrainConfig.__dataclass_fields__})
-                ev = train(self.spec, log, it_dir / "run", TrainConfig(**knobs, seed=tc.iteration))
+                for r in roles:
+                    knobs.update({k: v for k, v in r.knobs.items() if k in TrainConfig.__dataclass_fields__})
+                    kf = it_dir / f"knobs.{r.name}.json"
+                    if kf.exists():
+                        try:
+                            knobs.update({k: v for k, v in json.loads(kf.read_text()).items() if k in TrainConfig.__dataclass_fields__})
+                        except json.JSONDecodeError:
+                            pass
+                if not any(log):
+                    for pol in ("coverage", "random", "adversary"):
+                        rollout_dataset(spec, log, episodes=tc.rollout.get("episodes", 50), policy=pol, seed=tc.iteration)
+                knobs.pop("init", None); knobs["log_every"] = 10 ** 6
+                ev = train(spec, log, it_dir / "run", TrainConfig(**knobs, seed=tc.iteration))
                 (it_dir / "eval.json").write_text(json.dumps(ev, indent=1))
-            # eval roles read eval.json; in claude mode they are real agents, here the numbers speak
-        # cost: compute time only in offline mode; claude mode adds token cost reported by the CLI
-        cost += (time.time() - t0) / 3600 * 0.5     # nominal $0.50/h CPU
+                (it_dir / "knobs.effective.json").write_text(json.dumps(knobs, indent=1))
+        if not claude:
+            cost += (time.time() - t0) / 3600 * 0.5     # nominal $0.50/h CPU; claude mode uses the CLI's reported cost
+        if not (it_dir / "eval.json").exists():
+            return {"error": "no train phase ran", "cost_usd": round(cost, 4)}
         ev = json.loads((it_dir / "eval.json").read_text())
-        return {"eval": ev, "cost_usd": round(cost, 4), "seconds": round(time.time() - t0, 1)}
+        return {"eval": ev, "cost_usd": round(cost, 4), "seconds": round(time.time() - t0, 1), "roles_report": reports}
 
     # ---- the loop -------------------------------------------------------
     def run(self) -> dict[str, Any]:
@@ -175,6 +294,8 @@ class Supervisor:
             print(f"[iter {it}] rationale: {tc.rationale}")
             res = self.run_team(tc, it_dir)
             rec = {"iteration": it, "team": [r.name for r in tc.roles], "rationale": tc.rationale, **res}
+            if "roles_report" in rec:
+                rec["roles_report"] = [{k: v for k, v in r.items() if k != "report"} for r in rec["roles_report"]]
             self._record(rec)
             spent += res.get("cost_usd", 0)
             if "eval" in res:

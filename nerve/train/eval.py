@@ -20,19 +20,58 @@ def holdout_mask(spec: Spec, s: dict[str, Any], a: tuple[str, dict[str, Any]], f
     return h < frac
 
 
-def evaluate(spec: Spec, step_fn, holdout_frac: float = 0.15, learned_only_fn=None) -> dict[str, Any]:
+def close(spec: Spec, pred: dict[str, Any], truth: dict[str, Any], tol: float = 0.01) -> bool:
+    """Equality for continuous specs: discrete fields exact, continuous within tol * range."""
+    for k, f in spec.fields.items():
+        if f.continuous:
+            if abs(float(pred[k]) - float(truth[k])) > tol * (f.hi - f.lo):
+                return False
+        elif pred[k] != truth[k]:
+            return False
+    return True
+
+
+def _evaluate_continuous(spec: Spec, step_fn, n_samples: int, tol: float, learned_only_fn=None) -> dict[str, Any]:
+    import random
+    rng = random.Random(123)
+    oracle = Oracle(spec)
+    n = ok = bad = 0
+    per: dict[str, list[int]] = {}
+    err = []
+    for _ in range(n_samples):
+        s = spec.sample_state(rng); a = spec.sample_action(rng)
+        truth = oracle.step(s, a); pred = step_fn(s, a)
+        hit = int(close(spec, pred, truth, tol)); n += 1; ok += hit
+        per.setdefault(a[0], []).append(hit)
+        bad += bool(oracle.violations(s, a, pred))
+        for k in spec.continuous_fields():
+            f = spec.fields[k]; err.append(abs(float(pred[k]) - float(truth[k])) / (f.hi - f.lo))
+    c = {"n": n, "exact": ok / max(n, 1), "violation_rate": bad / max(n, 1),
+         "per_action": {k: sum(v) / len(v) for k, v in per.items()},
+         "mean_abs_err_frac": float(sum(err) / max(len(err), 1)), "tol": tol}
+    out = {"all": c, "seen": c, "heldout": c, "learned_only": c, "continuous": True}
+    out["score"] = round(0.8 * c["exact"] + 0.2 * (1 - c["violation_rate"]), 4)
+    return out
+
+
+def evaluate(spec: Spec, step_fn, holdout_frac: float = 0.15, learned_only_fn=None, n_samples: int = 1000,
+             tol: float = 0.01) -> dict[str, Any]:
+    if not spec.finite:
+        return _evaluate_continuous(spec, step_fn, n_samples, tol, learned_only_fn)
     oracle = Oracle(spec)
     enc = Encoder(spec)
     hole_actions = {h.action for h in spec.holes.values()}
     # the oracle only knows a hole's *fallback*, so holes are scored on their examples, not here
     allpairs = [(s, a) for s in enc.all_states() for a in enc.all_actions() if a[0] not in hole_actions]
+    if len(allpairs) < 20:
+        holdout_frac = 0.0     # nothing to generalise from in a handful of transitions (e.g. toggle): score on all
     held = [(s, a) for s, a in allpairs if holdout_mask(spec, s, a, holdout_frac)]
     seen = [(s, a) for s, a in allpairs if not holdout_mask(spec, s, a, holdout_frac)]
     holes = bool(hole_actions)
     out = {
         "all": conformance(oracle, step_fn, allpairs).to_dict(),
         "seen": conformance(oracle, step_fn, seen).to_dict(),
-        "heldout": conformance(oracle, step_fn, held).to_dict(),
+        "heldout": conformance(oracle, step_fn, held).to_dict() if held else conformance(oracle, step_fn, allpairs).to_dict(),
     }
     if holes:
         # for holes the oracle only knows the fallback; the real truth is the examples

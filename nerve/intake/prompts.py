@@ -35,7 +35,7 @@ FROM_CODE = """You are converting SOURCE CODE of an interface into a Nerve behav
 Read the code. Identify the state it holds, the actions a user can take, and exactly how each action changes state.
 Write invariants the code maintains and ensures clauses per action. Do not describe the code; describe the behaviour.
 {grammar}
-Return only the YAML spec in a ```yaml block, then run `python -m nerve check <file>` on it and fix problems until it reports 0.
+Return only the YAML spec in a single ```yaml block and nothing else. The harness will run `nerve check` and send back any problems.
 SOURCE CODE ({path}):
 {body}
 """
@@ -45,14 +45,14 @@ Look at the image at {path}. Name every control and every piece of visible state
 it changes and to what. Where the screenshot leaves behaviour ambiguous, prefer a `learn` hole with a conservative fallback
 over guessing. Use `futures` for anything draggable.
 {grammar}
-Return only the YAML spec in a ```yaml block, then run `python -m nerve check <file>` on it and fix problems until it reports 0.
+Return only the YAML spec in a single ```yaml block and nothing else. The harness will run `nerve check` and send back any problems.
 """
 
 FROM_PROSE = """You are converting a WRITTEN DESCRIPTION of how an interface works into a Nerve behavior spec.
 Treat the text as requirements. Every "must", "never", "always" becomes an invariant or ensures clause. Every verb a
 user performs becomes an action. Bound every numeric field.
 {grammar}
-Return only the YAML spec in a ```yaml block, then run `python -m nerve check <file>` on it and fix problems until it reports 0.
+Return only the YAML spec in a single ```yaml block and nothing else. The harness will run `nerve check` and send back any problems.
 DESCRIPTION:
 {body}
 """

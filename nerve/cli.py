@@ -136,7 +136,8 @@ def cmd_edge(a):
 
 def cmd_evolve(a):
     from .evolve import Supervisor
-    sup = Supervisor(a.spec, a.workdir, budget_usd=a.budget, iterations=a.iterations, mode=a.mode)
+    sup = Supervisor(a.spec, a.workdir, budget_usd=a.budget, iterations=a.iterations, mode=a.mode,
+                     model=a.supervisor_model, role_model=a.role_model)
     print(json.dumps(sup.run(), indent=1))
 
 
@@ -169,7 +170,8 @@ def main(argv=None) -> int:
     s = sub.add_parser("edge", help="export + run the Cloudflare Worker locally on workerd"); s.add_argument("spec"); s.add_argument("--model", required=True)
     s.add_argument("--patches"); s.add_argument("--port", type=int, default=8788); s.add_argument("--no-serve", action="store_true"); s.set_defaults(f=cmd_edge)
     s = sub.add_parser("evolve", help="EAT-style supervisor loop over team configs"); s.add_argument("spec"); s.add_argument("--workdir", required=True)
-    s.add_argument("--budget", type=float, default=5.0); s.add_argument("--iterations", type=int, default=4); s.add_argument("--mode", choices=["offline", "claude"], default="offline"); s.set_defaults(f=cmd_evolve)
+    s.add_argument("--budget", type=float, default=5.0); s.add_argument("--iterations", type=int, default=4); s.add_argument("--mode", choices=["offline", "claude"], default="offline")
+    s.add_argument("--supervisor-model", default="claude-fable-5-1"); s.add_argument("--role-model", default="claude-sonnet-5-5"); s.set_defaults(f=cmd_evolve)
     s = sub.add_parser("intake", help="code | screenshot | prose -> behavior spec (via a harness agent)"); s.add_argument("source"); s.add_argument("--kind", choices=["auto", "code", "image", "prose"], default="auto")
     s.add_argument("--model", default="claude"); s.add_argument("--out", required=True); s.set_defaults(f=cmd_intake)
 

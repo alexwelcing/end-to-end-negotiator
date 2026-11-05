@@ -30,6 +30,7 @@ class JEPAConfig:
     tau: float = 0.1            # InfoNCE temperature
     margin: float = 1.0         # hinge margin for spec-violating negatives
     var_weight: float = 0.05    # VICReg-style variance regulariser
+    action_cont_dim: int = 0    # number of continuous action params (0 for finite specs)
 
 
 def _mlp(i: int, h: int, o: int) -> nn.Sequential:
@@ -42,28 +43,37 @@ class NerveJEPA(nn.Module):
         self.cfg = cfg
         self.enc = _mlp(cfg.state_dim, cfg.hidden, cfg.d)
         self.act = nn.Embedding(cfg.action_dim, cfg.d)
+        # continuous action params (e.g. `move to=137.2`) enter through a linear map added to the action embedding
+        self.act_cont = nn.Linear(cfg.action_cont_dim, cfg.d, bias=False) if cfg.action_cont_dim else None
         self.pred = _mlp(2 * cfg.d, cfg.hidden, cfg.d)
         self.tgt = copy.deepcopy(self.enc)
         for p in self.tgt.parameters():
             p.requires_grad_(False)
 
     # ---- pieces -------------------------------------------------------
-    def predict(self, s: torch.Tensor, a_idx: torch.Tensor) -> torch.Tensor:
+    def predict(self, s: torch.Tensor, a_idx: torch.Tensor, a_cont: torch.Tensor | None = None) -> torch.Tensor:
         z = self.enc(s)
-        return self.pred(torch.cat([z, self.act(a_idx)], -1))
+        za = self.act(a_idx)
+        if self.act_cont is not None and a_cont is not None:
+            za = za + self.act_cont(a_cont)
+        return self.pred(torch.cat([z, za], -1))
 
     @torch.no_grad()
     def target(self, s_next: torch.Tensor) -> torch.Tensor:
         return self.tgt(s_next)
 
-    def energy(self, s: torch.Tensor, a_idx: torch.Tensor, s_next: torch.Tensor) -> torch.Tensor:
-        return ((self.predict(s, a_idx) - self.target(s_next)) ** 2).sum(-1)
+    def energy(self, s: torch.Tensor, a_idx: torch.Tensor, s_next: torch.Tensor, a_cont: torch.Tensor | None = None) -> torch.Tensor:
+        return ((self.predict(s, a_idx, a_cont) - self.target(s_next)) ** 2).sum(-1)
 
-    def energy_all(self, s: torch.Tensor, a_idx: torch.Tensor, cand: torch.Tensor) -> torch.Tensor:
+    def energy_all(self, s: torch.Tensor, a_idx: torch.Tensor, cand: torch.Tensor, a_cont: torch.Tensor | None = None) -> torch.Tensor:
         """[B, C] energies of every candidate next state."""
-        zh = self.predict(s, a_idx)                       # [B, d]
+        zh = self.predict(s, a_idx, a_cont)               # [B, d]
         zc = self.target(cand)                            # [C, d]
         return torch.cdist(zh, zc) ** 2
+
+    def energy_grad(self, zh: torch.Tensor, s_next: torch.Tensor) -> torch.Tensor:
+        """Energy with gradient flowing into s_next (for descent over continuous fields). zh is a fixed prediction."""
+        return ((zh - self.tgt(s_next)) ** 2).sum(-1)
 
     @torch.no_grad()
     def ema_update(self) -> None:
@@ -95,6 +105,24 @@ class NerveJEPA(nn.Module):
         total = total + self.cfg.var_weight * var
         out["total"] = total
         return out
+
+    def loss_continuous(self, s: torch.Tensor, a_idx: torch.Tensor, a_cont: torch.Tensor, s_next: torch.Tensor,
+                        negs: torch.Tensor) -> dict[str, torch.Tensor]:
+        """For specs with continuous fields there is no finite candidate set. Contrast the true successor
+        against in-batch successors and K sampled near-miss perturbations: negs is [B, K, state_dim]."""
+        zh = self.predict(s, a_idx, a_cont)                          # [B, d]
+        zp = self.target(s_next)                                     # [B, d]
+        B, K, D = negs.shape
+        zn = self.target(negs.reshape(B * K, D)).reshape(B, K, -1)   # [B, K, d]
+        e_pos = ((zh - zp) ** 2).sum(-1)                             # [B]
+        e_batch = torch.cdist(zh, zp) ** 2                           # [B, B], diagonal = e_pos
+        e_neg = ((zh[:, None, :] - zn) ** 2).sum(-1)                 # [B, K]
+        logits = -torch.cat([e_batch, e_neg], 1) / self.cfg.tau
+        nce = F.cross_entropy(logits, torch.arange(B, device=s.device))
+        z = self.enc(s)
+        var = F.relu(1 - torch.sqrt(z.var(0) + 1e-4)).mean()
+        total = nce + 0.1 * e_pos.mean() + self.cfg.var_weight * var
+        return {"nce": nce, "jepa": e_pos.mean(), "var": var, "total": total}
 
     def config_dict(self) -> dict:
         return asdict(self.cfg)

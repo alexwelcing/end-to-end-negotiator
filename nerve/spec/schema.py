@@ -33,6 +33,16 @@ class FieldType:
     def finite(self) -> bool:
         return self.kind in ("int", "enum", "bool") and (self.kind != "int" or (self.lo is not None and self.hi is not None))
 
+    @property
+    def continuous(self) -> bool:
+        """A float with a range but no step grid: inferred by gradient steps on the energy, not argmin."""
+        return self.kind == "float" and self.step is None and self.lo is not None and self.hi is not None
+
+    def sample(self, rng) -> Any:
+        if self.continuous:
+            return rng.uniform(self.lo, self.hi)
+        return rng.choice(self.domain())
+
     def domain(self) -> list[Any]:
         if self.kind == "bool":
             return [False, True]
@@ -46,8 +56,16 @@ class FieldType:
             if self.step is None or self.lo is None or self.hi is None:
                 raise ValueError(f"float field {self.name} needs lo/hi/step to enumerate")
             n = int(round((self.hi - self.lo) / self.step))
-            return [self.lo + i * self.step for i in range(n + 1)]
+            return [self.canon(self.lo + i * self.step) for i in range(n + 1)]
         raise ValueError(self.kind)
+
+    def canon(self, v: Any) -> Any:
+        """Canonical value: gridded floats snap to their grid point, rounded (0.6000000000000001 -> 0.6)."""
+        if self.kind == "float" and self.step is not None and self.lo is not None:
+            return round(self.lo + round((v - self.lo) / self.step) * self.step, 10)
+        if self.kind == "int" and isinstance(v, float) and v.is_integer():
+            return int(v)
+        return v
 
     def contains(self, v: Any) -> bool:
         if self.kind == "bool":
@@ -74,13 +92,20 @@ class Action:
     params: dict[str, FieldType] = field(default_factory=dict)
 
     def instances(self) -> Iterator[tuple[str, dict[str, Any]]]:
-        """Enumerate concrete (name, params) instances."""
-        if not self.params:
+        """Enumerate concrete (name, params) instances over *discrete* params.
+        Continuous params are not enumerated; they ride along as features."""
+        keys = [k for k, f in self.params.items() if not f.continuous]
+        if not keys:
             yield (self.name, {})
             return
-        keys = list(self.params)
         for combo in itertools.product(*(self.params[k].domain() for k in keys)):
             yield (self.name, dict(zip(keys, combo)))
+
+    def continuous_params(self) -> list[str]:
+        return [k for k, f in self.params.items() if f.continuous]
+
+    def sample(self, rng) -> tuple[str, dict[str, Any]]:
+        return (self.name, {k: f.sample(rng) for k, f in self.params.items()})
 
 
 @dataclass
@@ -143,16 +168,36 @@ class Spec:
 
     @property
     def finite(self) -> bool:
-        return all(f.finite or (f.kind == "float" and f.step is not None) for f in self.fields.values())
+        return all(f.finite or (f.kind == "float" and f.step is not None) for f in self.fields.values()) and not any(
+            f.continuous for a in self.actions.values() for f in a.params.values())
+
+    def continuous_fields(self) -> list[str]:
+        return [k for k, f in self.fields.items() if f.continuous]
+
+    def discrete_fields(self) -> list[str]:
+        return [k for k, f in self.fields.items() if not f.continuous]
 
     def state_space(self) -> list[dict[str, Any]]:
+        if not self.finite:
+            raise ValueError(f"spec {self.name} has continuous fields/params; use discrete_space() + sampling")
         keys = list(self.fields)
         return [dict(zip(keys, c)) for c in itertools.product(*(self.fields[k].domain() for k in keys))]
+
+    def discrete_space(self) -> list[dict[str, Any]]:
+        """All combinations of the discrete fields only (continuous fields absent)."""
+        keys = self.discrete_fields()
+        return [dict(zip(keys, c)) for c in itertools.product(*(self.fields[k].domain() for k in keys))]
+
+    def sample_state(self, rng) -> dict[str, Any]:
+        return {k: f.sample(rng) for k, f in self.fields.items()}
+
+    def sample_action(self, rng) -> tuple[str, dict[str, Any]]:
+        return rng.choice(list(self.actions.values())).sample(rng)
 
     def state_space_size(self) -> int:
         n = 1
         for f in self.fields.values():
-            n *= len(f.domain())
+            n *= 1 if f.continuous else len(f.domain())
         return n
 
     def action_instances(self) -> list[tuple[str, dict[str, Any]]]:
@@ -168,8 +213,10 @@ class Spec:
         return len(self.action_instances())
 
     def state_key(self, s: dict[str, Any]) -> tuple:
-        return tuple(s[k] for k in self.fields)
+        return tuple(self.fields[k].canon(s[k]) for k in self.fields)
 
     def action_key(self, a: tuple[str, dict[str, Any]]) -> tuple:
+        """Identity of an action over its discrete params (continuous params are features, not identity)."""
         name, params = a
-        return (name, tuple(sorted(params.items())))
+        cont = set(self.actions[name].continuous_params()) if name in self.actions else set()
+        return (name, tuple(sorted((k, v) for k, v in params.items() if k not in cont)))
