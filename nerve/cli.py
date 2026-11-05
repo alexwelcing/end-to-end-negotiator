@@ -53,6 +53,10 @@ def cmd_train(a):
     sp = _spec(a.spec)
     cfg = TrainConfig(epochs=a.epochs, lr=a.lr, d=a.d, hidden=a.hidden, holdout=a.holdout, seed=a.seed,
                       compile_circuit=not a.no_circuit, init=a.init, device=a.device, weight_decay=a.weight_decay)
+    if a.attach:
+        from .train.remote import wait_and_fetch
+        j = json.loads(Path(a.attach).read_text()) if Path(a.attach).exists() else {"job": a.attach.split(":")[0], "run": a.attach.split(":")[1]}
+        print(json.dumps(wait_and_fetch(j["job"], j["run"], a.out, j.get("repo", "AlexWelcing/nerve-runs")))); return 0
     if a.remote:
         from .train.remote import train_remote
         print(json.dumps(train_remote(a.spec, a.log, a.out, cfg, flavor=a.flavor))); return 0
@@ -167,7 +171,8 @@ def main(argv=None) -> int:
     s.add_argument("--no-circuit", action="store_true"); s.add_argument("--init", help="warm-start from checkpoint")
     s.add_argument("--device", default="auto", help="auto|cpu|cuda|mps"); s.add_argument("--weight-decay", type=float, default=1e-4)
     s.add_argument("--remote", choices=["hf"], help="run the training as a Hugging Face Job on a GPU (needs HF_TOKEN)")
-    s.add_argument("--flavor", default="a10g-small", help="HF Jobs hardware flavor for --remote hf"); s.set_defaults(f=cmd_train)
+    s.add_argument("--flavor", default="a10g-small", help="HF Jobs hardware flavor for --remote hf")
+    s.add_argument("--attach", help="attach to a running HF job: path to job.json or <job_id>:<run>"); s.set_defaults(f=cmd_train)
     s = sub.add_parser("eval", help="official conformance eval"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--holdout", type=float, default=0.15); s.set_defaults(f=cmd_eval)
     s = sub.add_parser("patch", help="PULSE sparse patch between two checkpoints"); s.add_argument("--prev", required=True); s.add_argument("--new", required=True); s.add_argument("--out", required=True); s.add_argument("--level", type=int, default=1); s.set_defaults(f=cmd_patch)
     s = sub.add_parser("serve", help="run an inference worker"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--patches"); s.add_argument("--host", default="127.0.0.1"); s.add_argument("--port", type=int, default=8787); s.set_defaults(f=cmd_serve)
