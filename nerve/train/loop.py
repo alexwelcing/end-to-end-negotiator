@@ -34,6 +34,7 @@ class TrainConfig:
     log_every: int = 10
     init: str | None = None        # warm-start JEPA weights from a checkpoint (continued training)
     device: str = "auto"           # auto | cpu | cuda | mps
+    weight_decay: float = 1e-4     # AdamW; raise (0.05-0.1) for grokking held-out cells of a transition table
 
 
 def _tensors(spec: Spec, enc: Encoder, log: EpisodeLog, cfg: TrainConfig):
@@ -106,7 +107,7 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
     model.jepa.to(dev)
     S, A, P, NS, NA, N = (x.to(dev) for x in (S, A, P, NS, NA, N))
     cand = torch.from_numpy(enc.all_state_vectors()).to(dev)
-    opt = torch.optim.AdamW(model.jepa.parameters(), lr=cfg.lr, weight_decay=1e-4)
+    opt = torch.optim.AdamW(model.jepa.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(cfg.epochs, 1), eta_min=cfg.lr * 0.05)
     n = len(S)
     history: list[dict[str, Any]] = []
@@ -162,7 +163,7 @@ def _train_continuous(spec, log, out, cfg, enc, model):
     dev = _device(cfg)
     model.jepa.to(dev)
     S, A, AC, NX, NEG = (x.to(dev) for x in (S, A, AC, NX, NEG))
-    opt = torch.optim.AdamW(model.jepa.parameters(), lr=cfg.lr, weight_decay=1e-4)
+    opt = torch.optim.AdamW(model.jepa.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(cfg.epochs, 1), eta_min=cfg.lr * 0.05)
     n = len(S); history = []; t0 = time.time()
     for ep in range(cfg.epochs):
