@@ -15,7 +15,7 @@ from ..data import EpisodeLog
 from ..model import JEPAConfig, NerveEnergy
 from ..spec import Spec
 from ..spec.encode import Encoder
-from .eval import evaluate, holdout_mask
+from .eval import coverage, effective_holdout, evaluate, holdout_mask
 
 
 @dataclass
@@ -39,9 +39,10 @@ class TrainConfig:
 
 def _tensors(spec: Spec, enc: Encoder, log: EpisodeLog, cfg: TrainConfig):
     S, A, P, NS, NA, N = [], [], [], [], [], []
+    frac = effective_holdout(spec, cfg.holdout)
     for st in log:
         a = (st.action[0], st.action[1])
-        if holdout_mask(spec, st.state, a, cfg.holdout):
+        if holdout_mask(spec, st.state, a, frac):
             continue
         if st.ok:
             reps = cfg.hole_weight if st.source == "hole-example" else 1
@@ -139,10 +140,10 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
             print(f"  ep {ep:3d} loss {rec['loss']:.4f} nce {rec['nce']:.4f} | exact all {rec['all']:.3f} "
                   f"heldout {rec['heldout']:.3f} learned-only {rec['learned_only']:.3f} score {rec['score']:.3f}")
         history.append(rec)
-    return _finish(spec, model, out, cfg, history, t0, n, len(NS))
+    return _finish(spec, model, out, cfg, history, t0, n, len(NS), log)
 
 
-def _finish(spec, model, out, cfg, history, t0, n, n_neg):
+def _finish(spec, model, out, cfg, history, t0, n, n_neg, log=None):
     model.jepa.eval(); model.jepa.cpu()
     model.save(str(out / "model.pt"))
     # official numbers come from the checkpoint that ships (BF16), not the FP32 training copy
@@ -150,6 +151,8 @@ def _finish(spec, model, out, cfg, history, t0, n, n_neg):
     final = evaluate(spec, shipped.step, cfg.holdout, learned_only_fn=shipped.step_learned_only)
     final["train_pairs"] = int(n); final["negatives"] = int(n_neg); final["seconds"] = round(time.time() - t0, 1)
     final["params"] = sum(p.numel() for p in model.jepa.parameters())
+    if log is not None:
+        final["coverage"] = coverage(spec, log)
     (out / "train_config.json").write_text(json.dumps(asdict(cfg), indent=1))
     (out / "history.jsonl").write_text("".join(json.dumps(h) + "\n" for h in history))
     (out / "eval.json").write_text(json.dumps(final, indent=1))
@@ -185,4 +188,4 @@ def _train_continuous(spec, log, out, cfg, enc, model):
             print(f"  ep {ep:3d} loss {rec['loss']:.4f} nce {rec['nce']:.4f} | within-tol {rec['all']:.3f} "
                   f"violations {ev['all']['violation_rate']:.3f} score {rec['score']:.3f}")
         history.append(rec)
-    return _finish(spec, model, out, cfg, history, t0, n, int(NEG.shape[0] * NEG.shape[1]))
+    return _finish(spec, model, out, cfg, history, t0, n, int(NEG.shape[0] * NEG.shape[1]), log)

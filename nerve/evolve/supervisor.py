@@ -67,7 +67,8 @@ Repository: {repo} (run commands from here; PYTHONPATH is set). Iteration direct
 - Knobs file you may write if you own `train` (JSON of TrainConfig overrides: epochs, lr, d, hidden, hole_weight): {knobs_file}
 
 Official score = 0.4*heldout + 0.2*all + 0.2*(1-violations) + 0.2*learned_only (blended 80/20 with hole-example
-accuracy when the spec has `learn` holes). Do only your charter, then finish with a 3-line report:
+accuracy when the spec has `learn` holes). You cannot run `nerve train` (the harness trains on a GPU after your phase;
+set knobs in your knobs file instead). Keep your work under 10 minutes. Do only your charter, then finish with a 3-line report:
 WHAT I CHANGED / WHY / WHAT I EXPECT. Never modify files outside the iteration directory except the episode log.
 Never disable the compiled circuit. Never change the author's behaviour in the spec.
 
@@ -223,14 +224,16 @@ class Supervisor:
             prev_eval=prev_eval if prev_eval.exists() else "none", learnings=self.learnings_path,
             knobs_file=it_dir / f"knobs.{role.name}.json", spec_text=spec_copy.read_text(),
             eval_text=prev_eval.read_text()[:4000] if prev_eval.exists() else "none yet")
-        allowed = ["Read", "Bash(python -m nerve:*)", "Bash(python3 -m nerve:*)", "Bash(python -c:*)", "Bash(python3 -c:*)",
+        # roles may inspect, check, roll out and evaluate; the harness alone trains (on the GPU) so no role can stall on it
+        allowed = ["Read"] + [f"Bash(python{v} -m nerve {verb}:*)" for v in ("", "3") for verb in ("check", "rollout", "eval", "step", "compile")]
+        allowed += ["Bash(python -c:*)", "Bash(python3 -c:*)",
                    "Bash(cat:*)", "Bash(ls:*)", "Bash(wc:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)", "Bash(sort:*)",
                    "Bash(uniq:*)", "Bash(cut:*)", "Bash(jq:*)", "Bash(diff:*)"]
         if "spec" in role.owns or "train" in role.owns or "eval" in role.owns:
             allowed += ["Edit", "Write"]
         t0 = time.time()
         try:
-            text, cost = self._claude(prompt, self.role_model, REPO, allowed)
+            text, cost = self._claude(prompt, self.role_model, REPO, allowed, timeout=900)
             ok = True
         except Exception as e:  # noqa: BLE001
             text, cost, ok = f"ROLE FAILED: {e}", 0.0, False
@@ -275,7 +278,7 @@ class Supervisor:
                     return {"error": "spec failed audit", "problems": probs[:10], "cost_usd": cost}
             if ("rollout" in owned or "adversary" in owned) and not (claude and any(log)):
                 # offline mode (or roles that added nothing): the harness fills the log with the knobs
-                for pol in ("coverage", "random", "adversary"):
+                for pol in ("exhaustive", "coverage", "random", "adversary"):
                     rollout_dataset(spec, log, episodes=tc.rollout.get("episodes", 50), horizon=tc.rollout.get("horizon", 20),
                                     policy=pol, negatives=tc.rollout.get("negatives", 3), seed=tc.iteration * 7 + hash(pol) % 100)
             if "train" in owned:
@@ -289,7 +292,7 @@ class Supervisor:
                         except json.JSONDecodeError:
                             pass
                 if not any(log):
-                    for pol in ("coverage", "random", "adversary"):
+                    for pol in ("exhaustive", "coverage", "random", "adversary"):
                         rollout_dataset(spec, log, episodes=tc.rollout.get("episodes", 50), policy=pol, seed=tc.iteration)
                 knobs.pop("init", None); knobs["log_every"] = 10 ** 6
                 knobs = _coerce_knobs(knobs)

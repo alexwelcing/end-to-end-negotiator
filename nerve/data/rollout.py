@@ -14,7 +14,7 @@ from typing import Any, Literal
 from ..spec import Oracle, Spec
 from .trajectories import EpisodeLog, Step
 
-Policy = Literal["random", "coverage", "adversary"]
+Policy = Literal["random", "coverage", "adversary", "exhaustive"]
 
 
 def _perturb(spec: Spec, truth: dict, rng: random.Random) -> dict:
@@ -44,8 +44,35 @@ def _negatives(spec: Spec, oracle: Oracle, s: dict, a: tuple, truth: dict, rng: 
     return out
 
 
+def exhaustive(spec: Spec, log: EpisodeLog, negatives: int = 3, seed: int = 0, max_pairs: int = 200_000) -> int:
+    """Every (state, action) pair of a finite spec exactly once (plus negatives). Random policies leave
+    gaps that look like generalisation failures; this removes the ambiguity. Held-out pairs are still
+    excluded at training time by the hash mask, so the log can hold everything."""
+    if not spec.finite:
+        return 0
+    rng = random.Random(seed)
+    oracle = Oracle(spec)
+    hole_actions = {h.action for h in spec.holes.values()}
+    actions = [a for a in spec.action_instances() if a[0] not in hole_actions]
+    states = spec.state_space()
+    if len(states) * len(actions) > max_pairs:
+        return 0
+    n = 0
+    for s in states:
+        steps: list[Step] = []
+        for a in actions:
+            nxt = oracle.step(s, a)
+            steps.append(Step(state=dict(s), action=[a[0], dict(a[1])], next=dict(nxt), ok=True, source="exhaustive"))
+            steps += _negatives(spec, oracle, s, a, nxt, rng, negatives)
+            n += 1
+        log.extend(steps)
+    return n
+
+
 def rollout_dataset(spec: Spec, log: EpisodeLog, episodes: int = 50, horizon: int = 20,
                     policy: Policy = "coverage", negatives: int = 3, seed: int = 0) -> int:
+    if policy == "exhaustive":
+        return exhaustive(spec, log, negatives, seed)
     rng = random.Random(seed)
     oracle = Oracle(spec)
     actions = spec.action_instances()

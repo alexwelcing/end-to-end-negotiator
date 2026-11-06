@@ -13,6 +13,16 @@ from ..spec import Oracle, Spec, conformance
 from ..spec.encode import Encoder
 
 
+def effective_holdout(spec: Spec, frac: float, min_pairs: int = 20) -> float:
+    """Tiny specs (< min_pairs transitions) have nothing to generalise from: train and score on all pairs.
+    Training and evaluation must agree on this, or a pair is held out of training yet reported as seen."""
+    if not spec.finite:
+        return frac
+    hole_actions = {h.action for h in spec.holes.values()}
+    n = spec.state_space_size() * sum(1 for a in spec.action_instances() if a[0] not in hole_actions)
+    return 0.0 if n < min_pairs else frac
+
+
 def holdout_mask(spec: Spec, s: dict[str, Any], a: tuple[str, dict[str, Any]], frac: float, salt: str = "nerve") -> bool:
     """Deterministic: is this (state, action) pair in the held-out set?"""
     key = f"{salt}|{spec.state_key(s)}|{spec.action_key(a)}".encode()
@@ -54,6 +64,24 @@ def _evaluate_continuous(spec: Spec, step_fn, n_samples: int, tol: float, learne
     return out
 
 
+def coverage(spec: Spec, log) -> dict[str, Any]:
+    """Which (valid state, action) pairs appear as positives in the log; a miss on an uncovered pair is a data gap."""
+    from ..spec.encode import Encoder
+    oracle = Oracle(spec); enc = Encoder(spec)
+    hole_actions = {h.action for h in spec.holes.values()}
+    if not spec.finite:
+        return {"finite": False}
+    valid = [s for s in enc.all_states() if not any(v.startswith("invariant") for v in oracle.violations(s, None, s))]
+    allpairs = {(spec.state_key(s), spec.action_key(a)) for s in valid for a in enc.all_actions() if a[0] not in hole_actions}
+    seen = set()
+    for st in log:
+        if st.ok and st.action[0] not in hole_actions:
+            seen.add((spec.state_key(st.state), spec.action_key((st.action[0], st.action[1]))))
+    hit = len(allpairs & seen)
+    return {"pairs": len(allpairs), "in_log": hit, "fraction": round(hit / max(len(allpairs), 1), 4), "valid_states": len(valid),
+            "all_states": len(enc.all_states())}
+
+
 def evaluate(spec: Spec, step_fn, holdout_frac: float = 0.15, learned_only_fn=None, n_samples: int = 1000,
              tol: float = 0.01) -> dict[str, Any]:
     if not spec.finite:
@@ -61,10 +89,11 @@ def evaluate(spec: Spec, step_fn, holdout_frac: float = 0.15, learned_only_fn=No
     oracle = Oracle(spec)
     enc = Encoder(spec)
     hole_actions = {h.action for h in spec.holes.values()}
+    # states that break the spec's own invariants are unreachable by construction (self_check skips them too)
+    valid = [s for s in enc.all_states() if not any(v.startswith("invariant") for v in oracle.violations(s, None, s))]
     # the oracle only knows a hole's *fallback*, so holes are scored on their examples, not here
-    allpairs = [(s, a) for s in enc.all_states() for a in enc.all_actions() if a[0] not in hole_actions]
-    if len(allpairs) < 20:
-        holdout_frac = 0.0     # nothing to generalise from in a handful of transitions (e.g. toggle): score on all
+    allpairs = [(s, a) for s in valid for a in enc.all_actions() if a[0] not in hole_actions]
+    holdout_frac = effective_holdout(spec, holdout_frac)
     held = [(s, a) for s, a in allpairs if holdout_mask(spec, s, a, holdout_frac)]
     seen = [(s, a) for s, a in allpairs if not holdout_mask(spec, s, a, holdout_frac)]
     holes = bool(hole_actions)

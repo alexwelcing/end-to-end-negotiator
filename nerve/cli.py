@@ -163,7 +163,7 @@ def main(argv=None) -> int:
     s = sub.add_parser("rollout", help="generate trajectories + spec-derived negatives into the log")
     s.add_argument("spec"); s.add_argument("--log", required=True); s.add_argument("--episodes", type=int, default=50)
     s.add_argument("--horizon", type=int, default=20); s.add_argument("--negatives", type=int, default=3)
-    s.add_argument("--policy", nargs="+", default=["coverage", "random", "adversary"]); s.add_argument("--seed", type=int, default=0); s.set_defaults(f=cmd_rollout)
+    s.add_argument("--policy", nargs="+", default=["exhaustive", "coverage", "random", "adversary"]); s.add_argument("--seed", type=int, default=0); s.set_defaults(f=cmd_rollout)
     s = sub.add_parser("train", help="train the JEPA energy from the log")
     s.add_argument("spec"); s.add_argument("--log", required=True); s.add_argument("--out", required=True)
     s.add_argument("--epochs", type=int, default=60); s.add_argument("--lr", type=float, default=3e-3); s.add_argument("--d", type=int, default=64)
