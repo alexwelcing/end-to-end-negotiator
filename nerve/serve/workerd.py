@@ -10,6 +10,7 @@ import json
 import shutil
 import subprocess
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -41,6 +42,12 @@ class Workerd:
         self.base = f"http://127.0.0.1:{port}"
 
     def __enter__(self) -> "Workerd":
+        # a stale workerd on this port would answer with old code and make every check meaningless
+        try:
+            urllib.request.urlopen(self.base + "/", timeout=0.5).read()
+            raise RuntimeError(f"something already serves on port {self.port}; stop it (pkill -f 'workerd serve') or pick another port")
+        except (urllib.error.URLError, ConnectionError, OSError):
+            pass
         bundle()
         (EDGE / ".do-storage").mkdir(exist_ok=True); (EDGE / self.export_root).mkdir(parents=True, exist_ok=True)
         cfg = (EDGE / "workerd.capnp").read_text().replace("127.0.0.1:8788", f"127.0.0.1:{self.port}")
