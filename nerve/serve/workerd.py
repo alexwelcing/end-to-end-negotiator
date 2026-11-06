@@ -56,7 +56,8 @@ class Workerd:
             cfg = cfg.replace('path = ".do-storage"', f'path = "{self.export_root}/.do-storage"')
             (EDGE / self.export_root / ".do-storage").mkdir(exist_ok=True)
         tmp = EDGE / f".workerd.{self.port}.capnp"; tmp.write_text(cfg)
-        self.proc = subprocess.Popen(["npx", "workerd", "serve", tmp.name], cwd=EDGE,
+        # own process group: `npx` spawns the native workerd as a child, and terminating npx alone orphaned it
+        self.proc = subprocess.Popen(["npx", "workerd", "serve", tmp.name], cwd=EDGE, start_new_session=True,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for _ in range(100):
             try:
@@ -69,12 +70,19 @@ class Workerd:
         raise RuntimeError("workerd did not come up")
 
     def __exit__(self, *a) -> None:
+        import os, signal
         if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)       # npx and the workerd it spawned
+            except ProcessLookupError:
+                pass
             try:
                 self.proc.wait(5)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
+                try:
+                    os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
         for f in EDGE.glob(f".workerd.{self.port}.capnp"):
             f.unlink()
 
