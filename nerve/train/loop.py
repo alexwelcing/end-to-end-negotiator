@@ -35,11 +35,13 @@ class TrainConfig:
     init: str | None = None        # warm-start JEPA weights from a checkpoint (continued training)
     device: str = "auto"           # auto | cpu | cuda | mps
     weight_decay: float = 1e-4     # AdamW; raise (0.05-0.1) for grokking held-out cells of a transition table
+    ord_weight: float = 1.0        # ordinal readout auxiliary (0 disables)
 
 
 def _tensors(spec: Spec, enc: Encoder, log: EpisodeLog, cfg: TrainConfig):
-    S, A, P, NS, NA, N = [], [], [], [], [], []
+    S, A, P, NS, NA, N, OS, ON = [], [], [], [], [], [], [], []
     frac = effective_holdout(spec, cfg.holdout)
+    ordv = (lambda x: enc.discrete(x) @ enc._ord_proj) if enc.ord_fields else (lambda x: np.zeros(0, np.float32))
     for st in log:
         a = (st.action[0], st.action[1])
         if holdout_mask(spec, st.state, a, frac):
@@ -48,10 +50,11 @@ def _tensors(spec: Spec, enc: Encoder, log: EpisodeLog, cfg: TrainConfig):
             reps = cfg.hole_weight if st.source == "hole-example" else 1
             for _ in range(reps):
                 S.append(enc.state(st.state)); A.append(enc.action_id(a)); P.append(enc.state_id(st.next))
+                OS.append(ordv(st.state)); ON.append(ordv(st.next))
         else:
             NS.append(enc.state(st.state)); NA.append(enc.action_id(a)); N.append(enc.state(st.next))
     t = lambda x, dt=torch.float32: torch.tensor(np.array(x), dtype=dt)
-    return (t(S), t(A, torch.long), t(P, torch.long)), (t(NS), t(NA, torch.long), t(N))
+    return (t(S), t(A, torch.long), t(P, torch.long), t(OS), t(ON)), (t(NS), t(NA, torch.long), t(N))
 
 
 def _tensors_continuous(spec: Spec, enc: Encoder, log: EpisodeLog, k_neg: int = 16, seed: int = 0):
@@ -96,29 +99,33 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
     enc = Encoder(spec)
     model = NerveEnergy.build(spec, JEPAConfig(enc.state_dim, enc.action_dim, d=cfg.d, hidden=cfg.hidden,
-                                               ema=cfg.ema, tau=cfg.tau, action_cont_dim=enc.action_cont_dim),
+                                               ema=cfg.ema, tau=cfg.tau, action_cont_dim=enc.action_cont_dim,
+                                               ord_dim=len(enc.ord_fields), ord_weight=cfg.ord_weight),
                               compile=cfg.compile_circuit and spec.finite)
     if not spec.finite:
         return _train_continuous(spec, log, out, cfg, enc, model)
     if cfg.init:
         prev = NerveEnergy.load(spec, cfg.init)
         model.jepa.load_state_dict(prev.jepa.state_dict())
-    (S, A, P), (NS, NA, N) = _tensors(spec, enc, log, cfg)
+    (S, A, P, OS, ON), (NS, NA, N) = _tensors(spec, enc, log, cfg)
     dev = _device(cfg)
     model.jepa.to(dev)
-    S, A, P, NS, NA, N = (x.to(dev) for x in (S, A, P, NS, NA, N))
+    S, A, P, OS, ON, NS, NA, N = (x.to(dev) for x in (S, A, P, OS, ON, NS, NA, N))
     cand = torch.from_numpy(enc.all_state_vectors()).to(dev)
     opt = torch.optim.AdamW(model.jepa.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(cfg.epochs, 1), eta_min=cfg.lr * 0.05)
     n = len(S)
     history: list[dict[str, Any]] = []
     t0 = time.time()
+    skipped = 0
     for ep in range(cfg.epochs):
         model.jepa.train()
         perm = torch.randperm(n, device=dev)
         tot = {"total": 0.0, "nce": 0.0}
         for i in range(0, n, cfg.batch):
             idx = perm[i:i + cfg.batch]
+            if len(idx) < 2:
+                continue
             neg = None
             if len(NS):
                 j = torch.randint(0, len(NS), (len(idx),), device=dev)
@@ -126,11 +133,15 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
             losses = model.jepa.loss(S[idx], A[idx], P[idx], cand,
                                      neg=None if neg is None else neg[0],
                                      neg_s=None if neg is None else neg[1],
-                                     neg_a=None if neg is None else neg[2])
+                                     neg_a=None if neg is None else neg[2],
+                                     ord_s=OS[idx] if OS.shape[1] else None, ord_next=ON[idx] if ON.shape[1] else None)
+            if not torch.isfinite(losses["total"]):
+                skipped += 1
+                continue                        # never let one bad batch poison the run
             opt.zero_grad(); losses["total"].backward(); opt.step(); model.jepa.ema_update()
             tot["total"] += losses["total"].item() * len(idx); tot["nce"] += losses["nce"].item() * len(idx)
         sched.step()
-        rec = {"epoch": ep, "loss": tot["total"] / n, "nce": tot["nce"] / n}
+        rec = {"epoch": ep, "loss": tot["total"] / n, "nce": tot["nce"] / n, "skipped_batches": skipped}
         if ep % cfg.log_every == 0 or ep == cfg.epochs - 1:
             model.jepa.eval(); model.jepa.cpu()
             ev = evaluate(spec, model.step, cfg.holdout, learned_only_fn=model.step_learned_only)

@@ -86,16 +86,40 @@ OWNABLE = {"spec", "rollout", "adversary", "train", "eval"}
 _KNOB_TYPES = {f.name: f.type for f in __import__("dataclasses").fields(TrainConfig)}
 
 
+_BOUNDS = {"epochs": (1, 2000), "d": (8, 512), "hidden": (8, 1024), "lr": (1e-6, 0.05), "weight_decay": (0.0, 1.0),
+           "hole_weight": (1, 200), "batch": (8, 4096), "holdout": (0.0, 0.5), "tau": (0.01, 10.0), "ema": (0.5, 0.9999)}
+_ROLLOUT_BOUNDS = {"episodes": (1, 400), "horizon": (1, 60), "negatives": (0, 10)}
+
+
+def _clamp(k: str, v: Any, bounds: dict) -> Any:
+    lo, hi = bounds.get(k, (None, None))
+    if lo is None:
+        return v
+    return min(hi, max(lo, v))
+
+
+def coerce_rollout(knobs: dict[str, Any]) -> dict[str, Any]:
+    """Rollout knobs from agents: ints within sane bounds (a supervisor once asked for 26000 negatives per step)."""
+    out = {}
+    for k, v in knobs.items():
+        try:
+            out[k] = _clamp(k, int(round(float(v))), _ROLLOUT_BOUNDS)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _coerce_knobs(knobs: dict[str, Any]) -> dict[str, Any]:
-    """Agents write knobs as JSON; make them the dataclass's types (an int knob given 40.0 or "40" is still 40)."""
+    """Agents write knobs as JSON; make them the dataclass's types (an int knob given 40.0 or "40" is still 40)
+    and keep them inside bounds a human would accept."""
     out: dict[str, Any] = {}
     for k, v in knobs.items():
         t = _KNOB_TYPES.get(k)
         try:
             if t == "int":
-                out[k] = int(round(float(v)))
+                out[k] = _clamp(k, int(round(float(v))), _BOUNDS)
             elif t == "float":
-                out[k] = float(v)
+                out[k] = _clamp(k, float(v), _BOUNDS)
             elif t == "bool":
                 out[k] = v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes")
             else:
@@ -212,7 +236,7 @@ class Supervisor:
             owns = [o for o in x.get("owns", []) if o in OWNABLE]
             roles.append(Role(x["name"], x.get("prompt", ""), owns, x.get("knobs", {}) or {}))
         return TeamConfig(it, d.get("rationale", ""), roles, [Phase(x["name"], x.get("roles", []), x.get("gate")) for x in d["phases"]],
-                          d.get("train", {}) or {}, d.get("rollout", {}) or {})
+                          _coerce_knobs(d.get("train", {}) or {}), coerce_rollout(d.get("rollout", {}) or {}))
 
     # ---- roles as Claude Code processes (EAT: the team is coding agents) ------
     def _run_role(self, role: Role, tc: TeamConfig, it_dir: Path, log_path: Path) -> dict[str, Any]:

@@ -32,7 +32,8 @@ class NerveEnergy:
     @classmethod
     def build(cls, spec: Spec, cfg: JEPAConfig | None = None, compile: bool = True) -> "NerveEnergy":
         enc = Encoder(spec)
-        cfg = cfg or JEPAConfig(state_dim=enc.state_dim, action_dim=enc.action_dim, action_cont_dim=enc.action_cont_dim)
+        cfg = cfg or JEPAConfig(state_dim=enc.state_dim, action_dim=enc.action_dim, action_cont_dim=enc.action_cont_dim,
+                                ord_dim=len(enc.ord_fields))
         circuit = None
         if compile and spec.finite:
             try:
