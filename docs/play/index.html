@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nerve · play</title>
+<style>
+:root{--bg:#0b0d12;--fg:#e8eaf0;--mut:#8a90a0;--card:#141824;--acc:#6ea8fe;--ok:#3ddc97;--bad:#ff6b6b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,Inter,Helvetica,sans-serif}
+main{max-width:860px;margin:0 auto;padding:24px 16px}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 18px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:640px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border-radius:14px;padding:16px}.card h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:0 0 10px}
+.state{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-family:ui-monospace,Menlo,monospace;font-size:15px}
+.state b{color:var(--mut);font-weight:500}.changed{color:var(--ok)}
+.actions{display:flex;flex-wrap:wrap;gap:8px}button{background:#1d2333;color:var(--fg);border:1px solid #2a3147;border-radius:10px;padding:10px 14px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--acc)}select{background:#1d2333;color:var(--fg);border:1px solid #2a3147;border-radius:8px;padding:8px;font:inherit}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.energy{font-family:ui-monospace,Menlo,monospace}
+.alt{color:var(--mut);font-family:ui-monospace,Menlo,monospace;font-size:13px}.log{max-height:260px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--mut)}
+.log div{padding:2px 0;border-bottom:1px solid #1d2333}.pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#1d2333;color:var(--mut);font-size:12px}
+a{color:var(--acc)}
+</style></head><body><main id="app">loading the network…</main>
+<p class="sub" style="max-width:860px;margin:0 auto;padding:0 16px 24px"><a href="https://github.com/alexwelcing/end-to-end-negotiator/tree/nerve">source</a> · the network's weights are the .json next to this page; the forward pass is nerve.js</p>
+<script src="./nerve.js"></script>
+<script>window.NerveStatic(document.getElementById("app"), ["counter","toggle","slider","negotiate","push_notifications_toggle","guest_stepper","volume_slider"]);</script>
+</body></html>

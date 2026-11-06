@@ -2,6 +2,7 @@
 // weights and PULSE patches come from R2. There is no application code anywhere in this path —
 // only a spec-derived network and the forward pass in nn.ts.
 import { Nerve, type EdgeModel } from "./nn";
+import { playPage } from "./play";
 
 export interface Env {
   // R2 bucket in production (wrangler.toml); a workerd `disk` service locally (workerd.capnp). Same keys either way.
@@ -58,7 +59,8 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     const [, spec, verb, sid] = url.pathname.split("/");
-    if (!spec) return json({ nerve: "edge", usage: "/<spec>/step  /<spec>/session/<id>  /<spec>/weights  /<spec>/sync  /<spec>/health" });
+    if (!spec) return json({ nerve: "edge", usage: "/<spec>/play  /<spec>/step  /<spec>/session/<id>  /<spec>/weights  /<spec>/sync  /<spec>/health" });
+    if (verb === "play" || verb === undefined || verb === "") return new Response(playPage(spec), { headers: { "content-type": "text/html; charset=utf-8" } });
     try {
       if (verb === "weights") {
         // Serve the current edge export and patch feed so browsers can run the network locally too.
@@ -77,6 +79,12 @@ export default {
         return env.SESSIONS.get(id).fetch(new Request(`https://do/${spec}`, req));
       }
       if (verb === "sync") { const n = await load(env, spec); return json({ ...(await sync(env, spec, n)), digest: await n.digest(), patches: n.applied }); }
+      if (verb === "meta") {
+        const n = await load(env, spec);
+        let params = 0; for (const t of Object.values(n.tensors)) params += t.data.length;
+        return json({ spec, fields: Object.fromEntries(Object.entries(n.m.fields).map(([k, f]) => [k, f.domain])), actions: n.m.actions,
+                      initial: n.m.initial, states: n.m.states.length, params, circuit: !!n.m.circuit });
+      }
       if (verb === "health") { const n = await load(env, spec); return json({ spec, digest: await n.digest(), patches: n.applied, base_digest: n.m.jepa.digest }); }
       if (verb === "reload") { models.delete(spec); return json({ reloaded: spec }); }
       return json({ error: "not found" }, 404);
@@ -97,10 +105,11 @@ export class NerveSession {
     let state = (await this.ctx.storage.get<Record<string, unknown>>("state")) ?? n.m.initial;
     if (req.method === "POST") {
       const body = (await req.json()) as { action: string; params?: Record<string, unknown> };
-      const out = n.step(state, body.action, body.params ?? {});
-      state = out.state;
+      const E = n.energies(state, body.action, body.params ?? {});
+      const order = [...E.keys()].sort((a, b) => E[a] - E[b]);
+      state = n.m.states[order[0]];
       await this.ctx.storage.put("state", state);
-      return json({ state, energy: out.energy });
+      return json({ state, energy: E[order[0]], alternatives: order.slice(1, 3).map((i) => ({ state: n.m.states[i], energy: E[i] })) });
     }
     if (req.method === "DELETE") { await this.ctx.storage.delete("state"); return json({ state: n.m.initial }); }
     return json({ state });
