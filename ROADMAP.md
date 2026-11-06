@@ -3,7 +3,7 @@
 What to build next, grouped by subsystem. Each item has a one-line acceptance test so "done" is not a feeling.
 Ordering inside a group is rough priority. The first section is the short list.
 
-## Now (the next five) — status 2026-11-06: 1 ✅  2 ✅  3 ✅  4 ✅  5 🔄 (12-iteration run in progress)
+## Now (the next five) — status 2026-11-06: all five done
 
 1. ✅ **Apply PULSE patches inside the Worker.** `nn.ts` decodes `.nrvp` (varint indices, BF16 values, zstd via a WASM
    decoder), patches its in-memory weights, verifies the digest. *Done when:* a `nerve patch` dropped in R2/export
@@ -17,7 +17,7 @@ Ordering inside a group is rough priority. The first section is the short list.
 4. ✅ **Learned-only conformance to 1.0 on all four specs.** (and on the three screenshot specs; factored energy did it) Today 0.99 on counter, 0.87–0.93 on negotiate. Curriculum
    over episodes, larger `d`, longer training, better negatives. *Done when:* `nerve train --no-circuit` scores ≥0.99
    held-out on every spec in `specs/`.
-5. 🔄 **`--mode claude` evolution run on a real budget.** (2-iteration smoke run: $2.06, supervisor dropped a role and invented `hole_tutor`; 12-iteration run on negotiate in progress) One overnight run of `nerve evolve` with Claude Code as
+5. ✅ **`--mode claude` evolution run on a real budget.** (negotiate: 11 iterations, $14.23, best 1.0, four roles invented by the supervisor; record in `docs/runs/negotiate-claude-2026-11-06/`) One overnight run of `nerve evolve` with Claude Code as
    supervisor and roles on herdr panes, $20 budget, logged to `evolution/`. *Done when:* history shows ≥10 iterations,
    roles created by the supervisor that did not exist at iteration 0, and a best score above the offline reflector's.
 

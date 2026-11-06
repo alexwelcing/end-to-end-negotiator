@@ -120,6 +120,14 @@ the energy from a handful of seeds.
 Conformance is measured on BF16 weights that ship, never on the FP32 training copy. A number the inference
 worker cannot reproduce is not a result.
 
+## The team that built the last one
+
+`nerve evolve specs/negotiate.nerve --mode claude --remote hf` ran 11 iterations for $14.23: a Claude Code supervisor
+emitting TEAM_CONFIGs, Claude Code role agents in parallel per phase, one GPU Job per iteration. It reached 1.0 on
+every metric, invented four roles that did not exist at iteration 0 (`split_prober`, `spec_verifier`,
+`margin_auditor`, `margin_checker`), and, once the score was saturated, restructured the team to cut its own cost
+per iteration. The full record (every TEAM_CONFIG, eval and role report) is in `docs/runs/negotiate-claude-2026-11-06/`.
+
 ## Layout
 
 ```
