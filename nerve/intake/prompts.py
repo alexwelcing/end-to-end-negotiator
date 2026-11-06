@@ -21,7 +21,8 @@ transitions:                # pure expressions over fields, params, and old.<fie
 invariants: ["<expr over state>", ...]
 ensures:    [{after: <action>|omit, holds: "<expr over new state, params, old.*>"}]
 futures:    { <gesture>: {kind: closest|between|vary, over: <field>, values: [...]} }   # dragology
-learn:      [{name, action, fallback: {<field>: "<expr>"}, examples: [{state: {...}, next: {...}}]}]
+learn:      [{name, action, fallback: {<field>: "<expr>"}, examples: [{state: {...}, params: {...}, next: {...}}]}]
+            # `params` is required in every example when the hole's action takes params; every field of state/next must be given
 initial:    { <field>: <value> }
 
 Expression language: literals, field names, params, old.<field>, + - * / // % **, comparisons (chained ok),

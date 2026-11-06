@@ -107,7 +107,7 @@ def evaluate(spec: Spec, step_fn, holdout_frac: float = 0.15, learned_only_fn=No
         ex = []
         for h in spec.holes.values():
             for e in h.examples:
-                ex.append((e["state"], (h.action, {}), e["next"]))
+                ex.append((e["state"], (h.action, dict(e.get("params") or {})), e["next"]))
         hit = sum(step_fn(s, a) == n for s, a, n in ex)
         out["hole_examples"] = {"n": len(ex), "exact": hit / max(len(ex), 1)}
     if learned_only_fn is not None:

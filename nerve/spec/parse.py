@@ -79,6 +79,22 @@ def parse_spec(doc: dict[str, Any]) -> Spec:
                  list(hd.get("examples") or []))
         if h.action not in actions:
             raise SpecError(f"learn hole {h.name} refers to unknown action {h.action!r}")
+        act = actions[h.action]
+        for i, ex in enumerate(h.examples):
+            if "state" not in ex or "next" not in ex:
+                raise SpecError(f"learn hole {h.name} example {i} needs `state` and `next`")
+            if act.params:
+                missing = [pk for pk in act.params if pk not in (ex.get("params") or {})]
+                if missing:
+                    raise SpecError(f"learn hole {h.name} example {i}: action {h.action!r} takes params {list(act.params)}; "
+                                    f"give them as `params: {{...}}` (missing {missing})")
+                for pk, pv in ex["params"].items():
+                    if pk not in act.params or not act.params[pk].contains(pv):
+                        raise SpecError(f"learn hole {h.name} example {i}: param {pk}={pv!r} is not in the action's type")
+            for k, f in fields.items():
+                for part in ("state", "next"):
+                    if k not in ex[part] or not f.contains(ex[part][k]):
+                        raise SpecError(f"learn hole {h.name} example {i}: {part}.{k}={ex[part].get(k)!r} is not in type")
         holes[h.name] = h
         if h.action not in transitions:
             # the fallback is the spec-visible transition; the hole is learned on top

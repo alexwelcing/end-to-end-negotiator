@@ -111,7 +111,7 @@ def rollout_dataset(spec: Spec, log: EpisodeLog, episodes: int = 50, horizon: in
     # ink `learn` holes: examples are ground truth the spec itself cannot express
     for h in spec.holes.values():
         for ex in h.examples:
-            log.append(Step(state=dict(ex["state"]), action=[h.action, {}], next=dict(ex["next"]),
+            log.append(Step(state=dict(ex["state"]), action=[h.action, dict(ex.get("params") or {})], next=dict(ex["next"]),
                             ok=True, source="hole-example"))
             n += 1
     return n
