@@ -137,6 +137,29 @@ class Encoder:
             return np.stack([self.discrete(s) for s in self._states])
         return self.states(self._states)
 
+    def field_slots(self) -> list[tuple[str, int, int, bool]]:
+        """(field, offset, n, ordinal) for every discrete field, in state-vector order."""
+        return [(k, off, len(dom), k in self.ord_fields) for k, off, dom in self._state_slots]
+
+    def field_index(self, x: np.ndarray) -> np.ndarray:
+        """Per-field domain index of a state vector (or batch): [..., n_fields] ints."""
+        cols = [np.argmax(x[..., off:off + n], axis=-1) for _, off, n, _ in self.field_slots()]
+        return np.stack(cols, -1) if cols else np.zeros(x.shape[:-1] + (0,), np.int64)
+
+    def field_masks(self) -> np.ndarray:
+        """[F, state_dim] masks that hide a discrete field's *own* value (its one-hot and its ordinal features)
+        while keeping every other feature. Used by the factored energy so a field's update rule cannot
+        depend on the field's own value except through the boundary of its domain."""
+        slots = self.field_slots()
+        M = np.ones((len(slots), self.state_dim), np.float32)
+        base = self.disc_dim + len(self.cont_fields) * CONT_WIDTH
+        for f, (k, off, n, ordinal) in enumerate(slots):
+            M[f, off:off + n] = 0.0
+            if ordinal:
+                j = self.ord_fields.index(k)
+                M[f, base + j * CONT_WIDTH: base + (j + 1) * CONT_WIDTH] = 0.0
+        return M
+
     def layout(self) -> dict:
         """What the edge Worker needs to rebuild `state()` bit for bit."""
         return {"disc_dim": self.disc_dim, "n_fourier": N_FOURIER,

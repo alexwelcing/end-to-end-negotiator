@@ -69,8 +69,13 @@ def exhaustive(spec: Spec, log: EpisodeLog, negatives: int = 3, seed: int = 0, m
     return n
 
 
+MAX_EPISODES, MAX_HORIZON, MAX_NEGATIVES = 400, 60, 10
+
+
 def rollout_dataset(spec: Spec, log: EpisodeLog, episodes: int = 50, horizon: int = 20,
                     policy: Policy = "coverage", negatives: int = 3, seed: int = 0) -> int:
+    # hard caps: an agent once asked for 26000 negatives per step and produced a 2.5 GB log
+    episodes, horizon, negatives = min(episodes, MAX_EPISODES), min(horizon, MAX_HORIZON), min(negatives, MAX_NEGATIVES)
     if policy == "exhaustive":
         return exhaustive(spec, log, negatives, seed)
     rng = random.Random(seed)

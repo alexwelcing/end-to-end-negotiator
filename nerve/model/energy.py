@@ -26,6 +26,7 @@ class NerveEnergy:
         self.circuit = circuit
         self.w = circuit_weight
         self._cand = torch.from_numpy(self.enc.all_state_vectors())
+        self._cand_idx = torch.from_numpy(self.enc.field_index(self.enc.all_state_vectors())).long()
         self.cont_steps = 60          # gradient steps on continuous fields
         self.cont_lr = 0.05
 
@@ -33,14 +34,17 @@ class NerveEnergy:
     def build(cls, spec: Spec, cfg: JEPAConfig | None = None, compile: bool = True) -> "NerveEnergy":
         enc = Encoder(spec)
         cfg = cfg or JEPAConfig(state_dim=enc.state_dim, action_dim=enc.action_dim, action_cont_dim=enc.action_cont_dim,
-                                ord_dim=len(enc.ord_fields))
+                                ord_dim=len(enc.ord_fields), fields=tuple((o, n, bool(ordn)) for _, o, n, ordn in enc.field_slots()))
         circuit = None
         if compile and spec.finite:
             try:
                 circuit = compile_circuit(spec, exclude_actions={h.action for h in spec.holes.values()})
             except ValueError:
                 circuit = None
-        return cls(spec, NerveJEPA(cfg), circuit)
+        jepa = NerveJEPA(cfg)
+        if jepa.fact is not None:
+            jepa.fact.masks.copy_(torch.from_numpy(enc.field_masks()))
+        return cls(spec, jepa, circuit)
 
     def _a_cont(self, a) -> torch.Tensor | None:
         return torch.from_numpy(self.enc.action_cont(a))[None] if self.enc.action_cont_dim else None
@@ -51,7 +55,7 @@ class NerveEnergy:
         xs = torch.from_numpy(self.enc.state(s))[None]
         ai = torch.tensor([self.enc.action_id(a)])
         with torch.no_grad():
-            E = self.jepa.energy_all(xs, ai, self._cand, self._a_cont(a))[0]
+            E = self.jepa.energy_all(xs, ai, self._cand, self._a_cont(a), self._cur_idx(xs), self._cand_idx)[0]
             if self.circuit is not None:
                 xa = torch.from_numpy(self.enc.action(a))[None]
                 E = E + self.w * self.circuit.energy_all(xs, xa, self._cand)[0]
@@ -63,13 +67,16 @@ class NerveEnergy:
         E = self.energies(s, a)
         return dict(self.enc.all_states()[int(E.argmin())])
 
+    def _cur_idx(self, xs: torch.Tensor) -> torch.Tensor:
+        return torch.from_numpy(self.enc.field_index(xs.numpy())).long()
+
     def step_learned_only(self, s: dict[str, Any], a: tuple[str, dict[str, Any]]) -> dict[str, Any]:
         if not self.spec.finite:
             return self._continuous(s, a)[0]
         xs = torch.from_numpy(self.enc.state(s))[None]
         ai = torch.tensor([self.enc.action_id(a)])
         with torch.no_grad():
-            E = self.jepa.energy_all(xs, ai, self._cand, self._a_cont(a))[0]
+            E = self.jepa.energy_all(xs, ai, self._cand, self._a_cont(a), self._cur_idx(xs), self._cand_idx)[0]
         return dict(self.enc.all_states()[int(E.argmin())])
 
     def _continuous(self, s: dict[str, Any], a: tuple[str, dict[str, Any]]) -> tuple[dict[str, Any], torch.Tensor]:
@@ -126,7 +133,8 @@ class NerveEnergy:
     @classmethod
     def load(cls, spec: Spec, path: str) -> "NerveEnergy":
         ck = torch.load(path, map_location="cpu")
-        jepa = NerveJEPA(JEPAConfig(**ck["jepa_cfg"]))
+        jc = dict(ck["jepa_cfg"]); jc["fields"] = tuple(tuple(f) for f in jc.get("fields", ()))
+        jepa = NerveJEPA(JEPAConfig(**jc))
         jepa.load_state_dict({k: v.to(torch.float32) if v.is_floating_point() else v for k, v in ck["jepa"].items()})
         jepa.eval()
         circuit = None

@@ -66,6 +66,9 @@ def train_remote(spec_path: str, log_path: str, out_dir: str, cfg: TrainConfig, 
     name = load_spec(spec_path).name
     run = f"{name}/{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%S')}"
     c = asdict(cfg); c.pop("init", None); c["device"] = "auto"
+    mb = Path(log_path).stat().st_size / 1e6
+    if mb > 300:
+        return {"error": f"episode log is {mb:.0f} MB; refusing to upload (cap 300 MB). Regenerate with sane rollout knobs."}
     for p, dest in ((spec_path, "spec.nerve"), (log_path, "episodes.v1.jsonl")):
         api.upload_file(path_or_fileobj=p, path_in_repo=f"runs/{run}/in/{dest}", repo_id=repo, repo_type="dataset")
     api.upload_file(path_or_fileobj=json.dumps(c).encode(), path_in_repo=f"runs/{run}/in/config.json", repo_id=repo, repo_type="dataset")

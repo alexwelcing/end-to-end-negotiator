@@ -32,7 +32,9 @@ def export_edge(spec: Spec, model: NerveEnergy, out: str | Path) -> dict[str, An
         "actions": [{"name": a[0], "params": a[1]} for a in enc.all_actions()],
         "states": enc.all_states(),
         "state_vectors": enc.all_state_vectors().tolist(),
-        "jepa": {"d": j.cfg.d, "tensors": tensors, "digest": checkpoint_digest(sd)},
+        "jepa": {"d": j.cfg.d, "tensors": tensors, "digest": checkpoint_digest(sd),
+                 "fact": None if j.fact is None else {"weight": j.cfg.fact_weight, "own_scale": j.fact.own_scale,
+                                                      "fields": [{"offset": o, "n": n, "ordinal": bool(ordn)} for o, n, ordn in j.fact.fields]}},
         "circuit": None if model.circuit is None else {
             "ws": arr(model.circuit.ws), "wa": arr(model.circuit.wa), "wo": arr(model.circuit.wo),
             "bias": float(model.circuit.bias), "H": int(model.circuit.ws.shape[1]), "weight": model.w,

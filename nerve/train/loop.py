@@ -36,6 +36,7 @@ class TrainConfig:
     device: str = "auto"           # auto | cpu | cuda | mps
     weight_decay: float = 1e-4     # AdamW; raise (0.05-0.1) for grokking held-out cells of a transition table
     ord_weight: float = 1.0        # ordinal readout auxiliary (0 disables)
+    fact_weight: float = 10.0      # factored per-field energy with shift kernel on ordinal fields (0 disables)
 
 
 def _tensors(spec: Spec, enc: Encoder, log: EpisodeLog, cfg: TrainConfig):
@@ -100,7 +101,9 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
     enc = Encoder(spec)
     model = NerveEnergy.build(spec, JEPAConfig(enc.state_dim, enc.action_dim, d=cfg.d, hidden=cfg.hidden,
                                                ema=cfg.ema, tau=cfg.tau, action_cont_dim=enc.action_cont_dim,
-                                               ord_dim=len(enc.ord_fields), ord_weight=cfg.ord_weight),
+                                               ord_dim=len(enc.ord_fields), ord_weight=cfg.ord_weight,
+                                               fields=tuple((o, n, bool(ordn)) for _, o, n, ordn in enc.field_slots()),
+                                               fact_weight=cfg.fact_weight),
                               compile=cfg.compile_circuit and spec.finite)
     if not spec.finite:
         return _train_continuous(spec, log, out, cfg, enc, model)
@@ -112,6 +115,8 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
     model.jepa.to(dev)
     S, A, P, OS, ON, NS, NA, N = (x.to(dev) for x in (S, A, P, OS, ON, NS, NA, N))
     cand = torch.from_numpy(enc.all_state_vectors()).to(dev)
+    cand_idx = torch.from_numpy(enc.field_index(enc.all_state_vectors())).long().to(dev)
+    cur_idx = torch.from_numpy(enc.field_index(S.cpu().numpy())).long().to(dev)
     opt = torch.optim.AdamW(model.jepa.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(cfg.epochs, 1), eta_min=cfg.lr * 0.05)
     n = len(S)
@@ -134,7 +139,8 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
                                      neg=None if neg is None else neg[0],
                                      neg_s=None if neg is None else neg[1],
                                      neg_a=None if neg is None else neg[2],
-                                     ord_s=OS[idx] if OS.shape[1] else None, ord_next=ON[idx] if ON.shape[1] else None)
+                                     ord_s=OS[idx] if OS.shape[1] else None, ord_next=ON[idx] if ON.shape[1] else None,
+                                     cur_idx=cur_idx[idx], cand_idx=cand_idx)
             if not torch.isfinite(losses["total"]):
                 skipped += 1
                 continue                        # never let one bad batch poison the run

@@ -9,7 +9,8 @@ export interface EdgeModel {
   actions: { name: string; params: Record<string, unknown> }[];
   states: Record<string, unknown>[];
   state_vectors: number[][];
-  jepa: { d: number; tensors: Record<string, { shape: number[]; data: number[] }>; digest: string };
+  jepa: { d: number; tensors: Record<string, { shape: number[]; data: number[] }>; digest: string;
+          fact?: { weight: number; own_scale: number; fields: { offset: number; n: number; ordinal: boolean }[] } | null };
   circuit: { ws: number[]; wa: number[]; wo: number[]; bias: number; H: number; weight: number } | null;
   state_dim: number;
   action_dim: number;
@@ -53,6 +54,46 @@ export class Nerve {
     };
     const mlp = (p: string) => [0, 2, 4].map((i) => lin(`${p}.${i}`));   // Sequential(Linear, GELU, Linear, GELU, Linear)
     this.enc = mlp("enc"); this.tgt = mlp("tgt"); this.pred = mlp("pred"); this.act = this.tensors["act.weight"].data;
+    const F = m.jepa.fact;
+    if (F) {
+      this.factNet = F.fields.map((_, f) => [lin(`fact.net.${f}.0`), lin(`fact.net.${f}.2`)]);
+      this.factOwn = F.fields.map((_, f) => lin(`fact.own.${f}`));
+      this.factMasks = this.tensors["fact.masks"].data;
+    }
+  }
+  factNet: Linear[][] = [];
+  factOwn: Linear[] = [];
+  factMasks: Float32Array = new Float32Array(0);
+
+  /** Factored energy of every candidate: -sum_f log p_f(cand_f). Per field: an MLP over [action embedding ;
+   *  state with the field's own value masked] gives absolute logits (and, for ordinal fields, shift logits
+   *  indexed by offset from the current value); a small own-value term from the fused latent is added. */
+  private factored(zh: Float32Array, xs: Float32Array, za: Float32Array): Float32Array {
+    const F = this.m.jepa.fact!;
+    const C = this.m.state_vectors.length;
+    const E = new Float32Array(C);
+    const D = this.m.state_dim;
+    F.fields.forEach((fl, f) => {
+      let i = 0;
+      for (let k = 0; k < fl.n; k++) if (xs[fl.offset + k] > 0.5) { i = k; break; }
+      const inp = new Float32Array(za.length + D);
+      inp.set(za, 0);
+      for (let k = 0; k < D; k++) inp[za.length + k] = xs[k] * this.factMasks[f * D + k];
+      const h = mlp(this.factNet[f], inp);                       // [n + (2n-1 if ordinal)]
+      const own = linear(this.factOwn[f], zh);
+      const lg = new Float32Array(fl.n);
+      for (let j = 0; j < fl.n; j++) lg[j] = h[j] + F.own_scale * own[j];
+      if (fl.ordinal) for (let j = 0; j < fl.n; j++) lg[j] += h[fl.n + (j - i + fl.n - 1)];
+      let mx = -Infinity; for (let j = 0; j < fl.n; j++) mx = Math.max(mx, lg[j]);
+      let z = 0; for (let j = 0; j < fl.n; j++) z += Math.exp(lg[j] - mx);
+      const lse = mx + Math.log(z);
+      for (let c = 0; c < C; c++) {
+        const v = this.m.state_vectors[c];
+        let jc = 0; for (let k = 0; k < fl.n; k++) if (v[fl.offset + k] > 0.5) { jc = k; break; }
+        E[c] -= lg[jc] - lse;
+      }
+    });
+    return E;
   }
 
   /** Apply a PULSE patch (verified bit-identical by digest) and drop cached target encodings. */
@@ -111,6 +152,10 @@ export class Nerve {
       let e = 0;
       for (let i = 0; i < d; i++) { const t = zh[i] - tg[c][i]; e += t * t; }
       E[c] = e;
+    }
+    if (this.m.jepa.fact) {
+      const Ef = this.factored(zh, xs, za.subarray(d, 2 * d));
+      for (let c = 0; c < E.length; c++) E[c] += this.m.jepa.fact.weight * Ef[c];
     }
     const C = this.m.circuit;
     if (C) {
