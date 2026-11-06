@@ -82,13 +82,40 @@ Three ideas from the projects this is built on meet in that file:
 * **qwenGPU** — weights can be *computed* by a compiler, not learned. The deterministic core of an interface is
   compiled; only the holes and the generalisation are trained.
 
+## Results (2026-11-06, learned-only: compiled circuit disabled, 15% of transitions never seen in training)
+
+| spec | source | states × actions | held-out exact | all exact | violations |
+|---|---|---|---|---|---|
+| toggle | hand-written | 2 × 1 | 1.000 | 1.000 | 0 |
+| counter (with a `learn` hole) | hand-written | 20 × 14 | 1.000 | 1.000 | 0 |
+| slider (gridded) | hand-written | 50 × 29 | 1.000 | 1.000 | 0 |
+| slider (continuous `value`, `to`) | hand-written | 2 × ∞ | 0.998 within 1% of range | — | 0.002 |
+| negotiate (Deal or No Deal, finite) | hand-written | 216 × 11 | 1.000 | 1.000 | 0 |
+| push-notifications toggle | **screenshot** | 84 × 27 | 1.000 | 1.000 | 0 |
+| guest stepper | **screenshot** | 8 × 3 | 1.000 | 1.000 | 0 |
+| volume slider | **screenshot** | 404 × 103 | 1.000 | 1.000 | 0 |
+
+Each row is one Hugging Face Job on an `a10g-small` (34 s to 9 min), 300 epochs, AdamW weight decay 0.05, the
+factored energy at weight 10. The three screenshot rows went image → spec (one or two rounds of `nerve check`
+feedback to the agent, no hand edits) → exhaustive log → network.
+
+What it took to get the last cells: ordinal features beside one-hots; an **equivariant factored energy term**
+(per-field next-value logits from the action and the *other* fields, with a shift kernel indexed by offset from
+the field's current value, so "+1" learned at 3 is the same function at 8) weighted to outvote the JEPA term;
+exhaustive logs so data gaps stop looking like generalisation failures; and the Worker computing the same
+energy bit for bit. Two bugs mattered more than any idea: a variance term on a batch of one sample produced a
+NaN that silently zeroed a whole run, and training and evaluation disagreed on hold-out for tiny specs.
+
 ## Why energy-based / JEPA
 
 Software is a state machine. A state machine is a scoring function over (state, action, next-state) with a
 unique minimum. That is an energy. A JEPA predicts in representation space instead of reconstructing pixels or
 DOM, which is the right abstraction level for "what the interface does" as opposed to "what it looks like" —
-rendering is a separate, replaceable decoder. The prediction error of the JEPA is used directly as the energy;
-the compiled circuit adds a hard term where the spec is explicit and is constant (silent) where it is not.
+rendering is a separate, replaceable decoder. The energy is a sum of three terms: the JEPA prediction error,
+a factored per-field term (an equivariant shift kernel on ordinal fields plus an absolute term, both blind to the
+field's own value), and the compiled circuit, which is exact where the spec is explicit and constant (silent)
+where it is not. Inference is argmin over candidate futures; for continuous fields it is gradient descent on
+the energy from a handful of seeds.
 
 Conformance is measured on BF16 weights that ship, never on the FP32 training copy. A number the inference
 worker cannot reproduce is not a result.
