@@ -72,7 +72,8 @@ def test_workerd_parity_and_pulse():
         bad = bytearray(patch.data); bad[-1] ^= 0xFF
         (pdir / "0002.nrvp").write_bytes(bytes(bad)); write_patch_index(pdir)
         r = json.loads(w.get("/counter/sync"))
-        assert "0002.nrvp" in r.get("rejected", "") and "digest" in r["rejected"]
+        # rejected either at decode (corrupt zstd frame) or at the digest check; either way weights are untouched
+        assert "0002.nrvp" in r.get("rejected", "") and ("digest" in r["rejected"] or "corrupt" in r["rejected"])
         assert r["digest"] == checkpoint_digest(sd2) and r["patches"] == ["0001.nrvp"]
         # sessions persist in the Durable Object
         r1 = w.post("/counter/session/t1", {"action": "inc"}); r2 = w.post("/counter/session/t1", {"action": "inc"})

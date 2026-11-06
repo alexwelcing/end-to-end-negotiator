@@ -58,7 +58,12 @@ export async function digest(tensors: Record<string, Tensor>): Promise<string> {
 /** Apply a patch in place. Throws (and restores the previous bits) if the digest does not match. */
 export async function applyPatch(tensors: Record<string, Tensor>, data: Uint8Array): Promise<PatchHeader> {
   const { header, payload } = parseHeader(data);
-  const body = decompress(payload);
+  let body: Uint8Array;
+  try {
+    body = decompress(payload);
+  } catch (e) {
+    throw new Error(`corrupt patch payload: ${String(e)}`);
+  }
   const backup: Record<string, Float32Array> = {};
   let pos = 0;
   try {
@@ -77,6 +82,6 @@ export async function applyPatch(tensors: Record<string, Tensor>, data: Uint8Arr
     return header;
   } catch (e) {
     for (const [k, b] of Object.entries(backup)) tensors[k].data.set(b);
-    throw e;
+    throw e instanceof Error && /digest/.test(e.message) ? e : new Error(`corrupt patch: ${String(e)}`);
   }
 }
