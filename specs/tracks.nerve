@@ -1,0 +1,34 @@
+# Dragology's "block on tracks": pick a track (closest), then slide along it (vary).
+# Nothing in the drag spec says how long a track is or which tracks you can reach.
+# Both come from `move`: the middle track is clamped to [60, 180] and a move may only
+# change track by one, so the drag finds its futures by asking the oracle.
+nerve: 1
+name: tracks
+state:
+  track: {type: int, range: [0, 2]}
+  pos:   {type: float, range: [0, 240]}
+actions:
+  move: {params: {t: {type: int, range: [0, 2]}, to: {type: float, range: [0, 240]}}}
+transitions:
+  move:
+    when: "abs(t - track) <= 1"
+    track: "t"
+    pos: "clamp(to, 60, 180) if t == 1 else to"
+invariants:
+  - "0 <= pos <= 240"
+  - "track != 1 or 60 <= pos <= 180"
+ensures:
+  - { after: move, holds: "track == t or abs(t - old.track) > 1" }
+render:
+  block: { x: "pos", y: "80 * track" }
+futures:
+  # each: one `vary` per track the oracle can reach; closest picks the track, vary the position
+  drag_block:
+    kind: closest
+    over: track
+    grab: block
+    stickiness: 8
+    far: 60
+    floating: true
+    each: { kind: vary, over: pos, action: move, param: to }
+initial: {track: 0, pos: 0}

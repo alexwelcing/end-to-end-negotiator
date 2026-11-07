@@ -127,6 +127,16 @@ whitelisted evaluator as everything else. The four hand-written specs carry `ren
 Not done: `between`'s Delaunay weights for three or more states, the per-drag sub-record in the episode log,
 `Encoder.candidates()` (evaluation still scores the whole space on purpose), and the Dragology-side adapter of §5.
 
+**Rust, `each` and `floating` (2026-11-07).** `crates/nerve/src/drag.rs` implements `closest` with `each: { kind:
+vary, ... }` and `floating: true` (Python parses and ignores both for now). The branches are derived, not listed:
+for every value of the outer field, the vary action's other parameters are enumerated and the oracle says which
+value each assignment lands on; assignments a guard turns into no-ops are dropped. `specs/tracks.nerve` is the
+demo: three rails, the middle one clamped to [60, 180] by `move` and moves limited to adjacent tracks by its
+`when`, neither of which the drag spec mentions. From the top rail the drag offers two rails, from the middle three,
+and past the middle rail's clamp the block stays at 180 until the outer rail is closer by more than the stickiness.
+`branch_extents()` draws each rail at the length the oracle allows; the lab's decision field shows the whole
+operator as one capsule per reachable rail inside the `far` fallback.
+
 Code that still changes for the full design: `nerve/spec/schema.py` (Future gains `grab`, `each`, `moves`, modifiers; a `Render` block),
 `nerve/spec/encode.py::candidates()` (honour the futures), a new `nerve/spec/drag.py` (frame loop: candidates,
 energies, memory, commit; pure Python, no DOM), `nerve/model/energy.py` (accept an extra per-candidate energy),

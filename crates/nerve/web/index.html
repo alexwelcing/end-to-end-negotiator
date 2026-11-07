@@ -138,6 +138,7 @@ async function init() {
 async function select(name) {
   cur = specs.find(s => s.name === name);
   for (const t of $("tabs").children) t.setAttribute("aria-selected", t.textContent === name);
+  $("model").textContent = cur.model ? `model: ${cur.model.summary}` : "no trained network for this interface";
   state = structuredClone(cur.initial); drag = null; lastFrame = null; fieldCache = null;
   $("log").innerHTML = ""; $("bars").innerHTML = '<span class="sub">Start a drag to see every candidate scored.</span>'; $("spark").innerHTML = "";
   buildActions();
@@ -157,6 +158,7 @@ async function refresh(changed = []) {
   for (const g of gestures) {
     for (const c of g.candidates) pts.push([c.x, c.y]);
     if (g.track) pts.push([g.track.from.x, g.track.from.y], [g.track.to.x, g.track.to.y]);
+    for (const t of g.tracks || []) pts.push([t.from.x, t.from.y], [t.to.x, t.to.y]);
   }
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
   let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
@@ -202,18 +204,22 @@ function render() {
   for (const g of view.gestures) {
     if (drag && drag.gesture !== g.name) continue;
     if (g.track) el("line", {x1: g.track.from.x, y1: g.track.from.y, x2: g.track.to.x, y2: g.track.to.y, stroke: "var(--track)", "stroke-width": 4 / k, "stroke-linecap": "round"}, layer);
+    // `each`: one rail per branch the oracle can reach, as long as the spec lets it be.
+    for (const t of g.tracks || []) el("line", {x1: t.from.x, y1: t.from.y, x2: t.to.x, y2: t.to.y, stroke: "var(--track)", "stroke-width": 4 / k, "stroke-linecap": "round"}, layer);
     const cs = [...g.candidates].sort((a, b) => a.x - b.x || a.y - b.y);
-    if (cs.length > 1) el("polyline", {points: cs.map(c => `${c.x},${c.y}`).join(" "), fill: "none", stroke: "var(--track)", "stroke-width": 2 / k, "stroke-dasharray": `${4 / k} ${4 / k}`}, layer);
+    if (cs.length > 1 && !(g.tracks || []).length) el("polyline", {points: cs.map(c => `${c.x},${c.y}`).join(" "), fill: "none", stroke: "var(--track)", "stroke-width": 2 / k, "stroke-dasharray": `${4 / k} ${4 / k}`}, layer);
     if (!showGhosts) continue;
     const scores = drag && drag.gesture === g.name && lastFrame ? lastFrame.scores : null;
     const probs = scores ? softmin(scores.map(s => s.total)) : null;
     g.candidates.forEach((c, i) => {
       const si = scores ? scores.findIndex(s => key(s.value) === key(c.value)) : -1;
       const p = si >= 0 ? probs[si] : 0;
+      // A branch's ghost sits where its own minimisation put the element this frame.
+      const at = si >= 0 ? {x: scores[si].x, y: scores[si].y} : c;
       const win = lastFrame && drag && key(lastFrame.branch) === key(c.value);
       const color = PAL[i % PAL.length];
-      el("circle", {cx: c.x, cy: c.y, r: small + p * R * 0.9, fill: color, "fill-opacity": scores ? 0.18 + 0.6 * p : 0.22, stroke: color, "stroke-width": (win ? 2.5 : 1) / k}, layer);
-      const t = el("text", {x: c.x, y: c.y - R - 4 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--mut)", class: "mono"}, layer);
+      el("circle", {cx: at.x, cy: at.y, r: small + p * R * 0.9, fill: color, "fill-opacity": scores ? 0.18 + 0.6 * p : 0.22, stroke: color, "stroke-width": (win ? 2.5 : 1) / k}, layer);
+      const t = el("text", {x: at.x, y: at.y - R - 4 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--mut)", class: "mono"}, layer);
       t.textContent = fmt(c.value);
     });
   }
@@ -226,20 +232,31 @@ function render() {
   }
   const positions = drag && lastFrame ? lastFrame.positions : view.positions;
   for (const name of cur.render) {
-    const p = positions[name]; if (!p) continue;
     const g = view.gestures.find(x => x.grab === name);
-    const grp = el("g", {class: g ? "handle" : "", "data-el": name}, layer);
     const active = drag && g && drag.gesture === g.name;
+    // Dragology `withFloating`: the element rides the pointer; an outline marks where it drops.
+    const floating = active && g.floating && drag.pointer && lastFrame;
+    if (floating) {
+      const d = positions[name];
+      el("circle", {cx: d.x, cy: d.y, r: R, fill: "none", stroke: lastFrame.far ? "var(--bad)" : "var(--acc)", "stroke-width": 1.5 / k, "stroke-dasharray": `${4 / k} ${3 / k}`}, layer);
+      const t = el("text", {x: d.x, y: d.y + R + 14 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--mut)"}, layer);
+      t.textContent = lastFrame.far ? "stays" : "drops here";
+    }
+    const p = floating ? drag.pointer : positions[name]; if (!p) continue;
+    const grp = el("g", {class: g ? "handle" : "", "data-el": name}, layer);
     if (active && lastFrame && cur.futures.find(f => f.name === g.name).far) {
-      const far = cur.futures.find(f => f.name === g.name).far;
-      el("circle", {cx: p.x, cy: p.y, r: far, fill: "none", stroke: lastFrame.far ? "var(--bad)" : "var(--track)", "stroke-width": 1.5 / k, "stroke-dasharray": `${6 / k} ${5 / k}`}, grp);
+      const far = cur.futures.find(f => f.name === g.name).far, c = positions[name];
+      el("circle", {cx: c.x, cy: c.y, r: far, fill: "none", stroke: lastFrame.far ? "var(--bad)" : "var(--track)", "stroke-width": 1.5 / k, "stroke-dasharray": `${6 / k} ${5 / k}`}, grp);
     }
     el("circle", {cx: p.x, cy: p.y, r: R, fill: active ? "var(--acc)" : "var(--panel)", stroke: "var(--acc)", "stroke-width": 2.5 / k, style: "transition:cx .12s ease-out, cy .12s ease-out"}, grp);
-    const t = el("text", {x: p.x, y: p.y + R + 14 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--ink)"}, grp);
-    t.textContent = name;
+    if (!floating) {
+      const t = el("text", {x: p.x, y: p.y + R + 14 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--ink)"}, grp);
+      t.textContent = name;
+    }
     if (g) grp.addEventListener("pointerdown", e => startDrag(e, g));
   }
-  if (drag && drag.pointer && lastFrame) {
+  const g0 = drag && view.gestures.find(x => x.name === drag.gesture);
+  if (drag && drag.pointer && lastFrame && !g0.floating) {
     const p = drag.pointer, g = view.gestures.find(x => x.name === drag.gesture), q = lastFrame.positions[g.grab];
     el("line", {x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: lastFrame.far ? "var(--bad)" : "var(--acc)", "stroke-width": 1.5 / k, "stroke-dasharray": `${3 / k} ${3 / k}`}, layer);
     el("circle", {cx: p.x, cy: p.y, r: R * 0.75, fill: "var(--acc)", "fill-opacity": 0.25, stroke: "var(--acc)", "stroke-width": 1 / k}, layer);
@@ -290,7 +307,7 @@ async function startDrag(e, g) {
   document.body.classList.add("dragging");
   const s = await api(`/api/${cur.name}/drag`, {gesture: g.name, state});
   drag = {gesture: g.name, sid: s.session, pointer: toLocal(e), busy: false, pending: null};
-  $("hint").textContent = `${g.name}: ${g.kind} over ${g.field}${g.stickiness ? ` · stickiness ${g.stickiness}px` : ""}${g.far ? ` · far ${g.far}px` : ""}`;
+  $("hint").textContent = `${g.name}: ${g.kind} over ${g.field}${g.each ? `, each ${g.each.kind} over ${g.each.field}` : ""}${g.stickiness ? ` · stickiness ${g.stickiness}px` : ""}${g.far ? ` · far ${g.far}px` : ""}${g.floating ? " · floating" : ""}`;
   await sendFrame(drag.pointer);
   svg.onpointermove = ev => { if (!drag) return; drag.pointer = toLocal(ev); queueFrame(drag.pointer); };
   svg.onpointerup = svg.onpointercancel = ev => endDrag(toLocal(ev));

@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn shipped_specs_pass_self_check() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(0);
-        for name in ["toggle", "counter", "slider", "negotiate", "slider_continuous"] {
+        for name in ["toggle", "counter", "slider", "negotiate", "slider_continuous", "tracks"] {
             let s = spec(name);
             let problems = Oracle::new(&s).self_check(&mut rng).unwrap();
             assert!(problems.is_empty(), "{name}: {problems:?}");

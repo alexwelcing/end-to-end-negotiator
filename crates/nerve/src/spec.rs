@@ -194,6 +194,12 @@ pub struct Future {
     pub far: Option<f64>,
     pub action: Option<String>,
     pub param: Option<String>,
+    /// Dragology `closest` with a spec per branch: one `vary` for every value of `field`
+    /// the oracle can reach, realised through the vary's action with the branch fixed.
+    pub each: Option<Box<Future>>,
+    /// Dragology `withFloating`: the grabbed element follows the pointer while the
+    /// scene previews the drop. Presentation only; the minimisation is unchanged.
+    pub floating: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -412,6 +418,56 @@ fn num(y: &Yaml) -> Option<(f64, bool)> {
     }
 }
 
+fn parse_future(name: String, fm: &Mapping, field_idx: &dyn Fn(&str) -> Option<usize>) -> Result<Future> {
+    let over = as_str(key(fm, "over").with_context(|| format!("future {name} needs `over`"))?)?;
+    let field = field_idx(&over).with_context(|| format!("future {name} is over unknown field {over:?}"))?;
+    let kind = match key(fm, "kind").map(as_str).transpose()?.as_deref().unwrap_or("closest") {
+        "closest" => FutureKind::Closest,
+        "between" => FutureKind::Between,
+        "vary" => FutureKind::Vary,
+        other => bail!("future {name}: unknown kind {other:?}"),
+    };
+    let values = key(fm, "values")
+        .and_then(Yaml::as_sequence)
+        .map(|vs| vs.iter().map(Value::from_yaml).collect::<Result<Vec<_>>>())
+        .transpose()?;
+    let opt_str = |k: &str| key(fm, k).filter(|v| !v.is_null()).map(as_str).transpose();
+    let grab = opt_str("grab")?;
+    let each = match key(fm, "each").filter(|v| !v.is_null()) {
+        None => None,
+        Some(Yaml::Mapping(em)) => {
+            ensure!(kind == FutureKind::Closest, "future {name}: `each` nests under `closest` only");
+            for k in ["stickiness", "far", "floating", "values", "each"] {
+                ensure!(key(em, k).is_none(), "future {name}: set `{k}` on the outer future, not inside `each`");
+            }
+            let mut inner = parse_future(format!("{name}.each"), em, field_idx)?;
+            ensure!(inner.kind == FutureKind::Vary, "future {name}: `each` must be a `vary` (got {:?})", inner.kind);
+            ensure!(inner.field != field, "future {name}: `each` must vary a different field than {over}");
+            inner.grab = inner.grab.or_else(|| grab.clone());
+            Some(Box::new(inner))
+        }
+        Some(_) => bail!("future {name}: `each` must be a mapping"),
+    };
+    let floating = match key(fm, "floating") {
+        None | Some(Yaml::Null) => false,
+        Some(Yaml::Bool(b)) => *b,
+        Some(other) => bail!("future {name}: `floating` must be true or false, got {other:?}"),
+    };
+    Ok(Future {
+        name,
+        kind,
+        field,
+        values,
+        grab,
+        stickiness: key(fm, "stickiness").and_then(num).map_or(0.0, |x| x.0),
+        far: key(fm, "far").and_then(num).map(|x| x.0),
+        action: opt_str("action")?,
+        param: opt_str("param")?,
+        each,
+        floating,
+    })
+}
+
 fn parse_field(name: &str, y: &Yaml) -> Result<FieldType> {
     let m = match y {
         Yaml::String(s) => {
@@ -570,30 +626,7 @@ fn parse_doc(doc: &Yaml) -> Result<Spec> {
     let mut futures = Vec::new();
     for (fname, fd) in entries(key(doc, "futures"))? {
         let Yaml::Mapping(fm) = &fd else { bail!("future {fname} must be a mapping") };
-        let over = as_str(key(fm, "over").with_context(|| format!("future {fname} needs `over`"))?)?;
-        let field = field_idx(&over).with_context(|| format!("future {fname} is over unknown field {over:?}"))?;
-        let kind = match key(fm, "kind").map(as_str).transpose()?.as_deref().unwrap_or("closest") {
-            "closest" => FutureKind::Closest,
-            "between" => FutureKind::Between,
-            "vary" => FutureKind::Vary,
-            other => bail!("future {fname}: unknown kind {other:?}"),
-        };
-        let values = key(fm, "values")
-            .and_then(Yaml::as_sequence)
-            .map(|vs| vs.iter().map(Value::from_yaml).collect::<Result<Vec<_>>>())
-            .transpose()?;
-        let opt_str = |k: &str| key(fm, k).filter(|v| !v.is_null()).map(as_str).transpose();
-        futures.push(Future {
-            name: fname,
-            kind,
-            field,
-            values,
-            grab: opt_str("grab")?,
-            stickiness: key(fm, "stickiness").and_then(num).map_or(0.0, |x| x.0),
-            far: key(fm, "far").and_then(num).map(|x| x.0),
-            action: opt_str("action")?,
-            param: opt_str("param")?,
-        });
+        futures.push(parse_future(fname, fm, &field_idx)?);
     }
 
     let mut render = Vec::new();
@@ -659,6 +692,24 @@ mod tests {
         let c = Spec::parse(COUNTER).unwrap();
         let set3 = c.action_instances().unwrap().into_iter().find(|a| a.name == "set" && a.param("to") == Some(&Value::Int(3)));
         assert_eq!(c.action_key(&set3.unwrap()), "('set', (('to', 3),))");
+    }
+
+    #[test]
+    fn each_nests_a_vary_under_closest() {
+        let tracks = include_str!("../../../specs/tracks.nerve");
+        let t = Spec::parse(tracks).unwrap();
+        let f = t.future("drag_block").unwrap();
+        assert!(f.floating);
+        let inner = f.each.as_deref().unwrap();
+        assert_eq!((inner.kind.clone(), t.fields[inner.field].name.as_str()), (FutureKind::Vary, "pos"));
+        assert_eq!((inner.action.as_deref(), inner.param.as_deref()), (Some("move"), Some("to")));
+        assert!(!Spec::parse(SLIDER).unwrap().future("drag_handle").unwrap().floating);
+        let not_closest = tracks.replace("    kind: closest\n", "    kind: between\n");
+        assert!(Spec::parse(&not_closest).unwrap_err().to_string().contains("each"));
+        let not_vary = tracks.replace("each: { kind: vary,", "each: { kind: closest,");
+        assert!(Spec::parse(&not_vary).unwrap_err().to_string().contains("vary"));
+        let inner_far = tracks.replace("each: { kind: vary,", "each: { far: 10, kind: vary,");
+        assert!(Spec::parse(&inner_far).unwrap_err().to_string().contains("outer future"));
     }
 
     #[test]

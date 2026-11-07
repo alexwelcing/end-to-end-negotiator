@@ -122,6 +122,11 @@ async fn list_specs(AxState(app): AxState<Arc<App>>) -> ApiResult {
                     "grab": f.grab,
                     "stickiness": f.stickiness,
                     "far": f.far,
+                    "floating": f.floating,
+                    "each": f.each.as_ref().map(|i| json!({
+                        "kind": format!("{:?}", i.kind).to_lowercase(),
+                        "field": sp.fields[i.field].name,
+                    })),
                 })
             })
             .collect();
@@ -209,8 +214,8 @@ async fn drag_start(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, J
     let start = sp.state_from_json(&req.state)?;
     let f = sp.future(&req.gesture).with_context(|| format!("unknown gesture {:?}", req.gesture))?;
     let sess = DragSession::new(sp, f, start.clone(), None)?;
-    let cands: Vec<J> = sess
-        .candidates()
+    let listed = if f.each.is_some() { sess.branch_candidates()? } else { sess.candidates().to_vec() };
+    let cands: Vec<J> = listed
         .iter()
         .map(|c| {
             let (x, y) = element_position(sp, sess.grab(), &c.state)?;
@@ -234,12 +239,20 @@ async fn drag_start(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, J
     };
     // Track geometry for `vary`: where the element lands at each end of the range.
     let track = if f.kind == FutureKind::Vary { vary_track(sp, f.field, sess.grab(), &start)? } else { J::Null };
+    // `each`: one track per reachable branch, as long as the oracle lets it be.
+    let tracks: Vec<J> = sess
+        .branch_extents()?
+        .into_iter()
+        .map(|(v, a, b)| json!({"value": v.to_json(), "from": {"x": a.0, "y": a.1}, "to": {"x": b.0, "y": b.1}}))
+        .collect();
     Ok(Json(json!({
         "session": sid,
         "grab": sess.grab(),
         "kind": format!("{:?}", f.kind).to_lowercase(),
+        "floating": f.floating,
         "candidates": cands,
         "track": track,
+        "tracks": tracks,
         "start": App::positions(sp, &start)?,
     })))
 }
@@ -342,40 +355,76 @@ fn default_res() -> usize {
     48
 }
 
+impl FieldReq {
+    /// Grid resolution, clamped so one request cannot ask for unbounded work.
+    fn cells(&self) -> (usize, usize) {
+        (self.nx.clamp(4, 96), self.ny.clamp(2, 96))
+    }
+}
+
 /// The decision field: which future a memoryless drag would pick at each pointer position.
-async fn field(
-    AxState(app): AxState<Arc<App>>,
-    Path(spec): Path<String>,
-    Json(req): Json<FieldReq>,
-) -> ApiResult {
-    let e = app.entry(&spec)?;
-    let sp = &e.spec;
-    let start = sp.state_from_json(&req.state)?;
-    let f = sp.future(&req.gesture).with_context(|| format!("unknown gesture {:?}", req.gesture))?;
+async fn field(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, Json(req): Json<FieldReq>) -> ApiResult {
+    // A `vary` per pixel (three for a three-track `each`) is real work: keep it off the runtime.
+    let out = tokio::task::spawn_blocking(move || field_grid(&app, &spec, &req)).await.context("field worker panicked")??;
+    Ok(Json(out))
+}
+
+/// `(branch, gap)` per cell of one row; `None` is the `far` fallback.
+type FieldRow = Vec<(Option<Value>, f64)>;
+
+/// One row of the field: `(branch, gap)` per cell, from a session whose memory is reset per cell.
+fn field_row(app: &App, e: &Entry, f: &crate::spec::Future, start: &State, req: &FieldReq, j: usize) -> Result<FieldRow> {
+    let (nx, ny) = req.cells();
     let energy = app.energy_fn(e);
-    let (nx, ny) = (req.nx.clamp(4, 96), req.ny.clamp(2, 96));
-    let mut grid = Vec::with_capacity(nx * ny);
-    let mut values: Vec<Value> = Vec::new();
-    for j in 0..ny {
-        for i in 0..nx {
+    let mut sess = DragSession::new(&e.spec, f, start.clone(), energy.as_deref())?;
+    (0..nx)
+        .map(|i| {
             let p = (
                 req.x0 + (req.x1 - req.x0) * (i as f64 + 0.5) / nx as f64,
                 req.y0 + (req.y1 - req.y0) * (j as f64 + 0.5) / ny as f64,
             );
-            let mut sess = DragSession::new(sp, f, start.clone(), energy.as_deref())?;
+            sess.restore_memory(None, false);
+            sess.frames.clear();
             let fr = sess.frame(p)?;
-            let idx = match &fr.branch {
+            Ok((fr.branch, fr.gap))
+        })
+        .collect()
+}
+
+fn field_grid(app: &App, spec: &str, req: &FieldReq) -> Result<J> {
+    let e = app.entry(spec)?;
+    let start = e.spec.state_from_json(&req.state)?;
+    let f = e.spec.future(&req.gesture).with_context(|| format!("unknown gesture {:?}", req.gesture))?;
+    let (nx, ny) = req.cells();
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(ny);
+    let rows: Vec<Result<FieldRow>> = std::thread::scope(|sc| {
+        let handles: Vec<_> = (0..workers)
+            .map(|w| {
+                let start = &start;
+                sc.spawn(move || (w..ny).step_by(workers).map(|j| (j, field_row(app, e, f, start, req, j))).collect::<Vec<_>>())
+            })
+            .collect();
+        let mut rows: Vec<(usize, Result<FieldRow>)> =
+            handles.into_iter().flat_map(|h| h.join().unwrap_or_else(|_| vec![(usize::MAX, Err(anyhow::anyhow!("field row panicked")))])).collect();
+        rows.sort_by_key(|(j, _)| *j);
+        rows.into_iter().map(|(_, r)| r).collect()
+    });
+    let mut grid = Vec::with_capacity(nx * ny);
+    let mut values: Vec<Value> = Vec::new();
+    for row in rows {
+        for (branch, gap) in row? {
+            let idx = match branch {
                 None => -1,
-                Some(v) => match values.iter().position(|x| x == v) {
+                Some(v) => match values.iter().position(|x| *x == v) {
                     Some(k) => k as i64,
                     None => {
-                        values.push(v.clone());
+                        values.push(v);
                         values.len() as i64 - 1
                     }
                 },
             };
-            grid.push(json!([idx, fr.gap]));
+            grid.push(json!([idx, gap]));
         }
     }
-    Ok(Json(json!({"nx": nx, "ny": ny, "values": values.iter().map(Value::to_json).collect::<Vec<_>>(), "grid": grid})))
+    Ok(json!({"nx": nx, "ny": ny, "values": values.iter().map(Value::to_json).collect::<Vec<_>>(), "grid": grid}))
 }
