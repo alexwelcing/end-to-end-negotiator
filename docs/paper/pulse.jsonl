@@ -1,0 +1,8 @@
+{"lr": "3e-6", "epochs": 1, "bytes": 30615, "full_bf16_bytes": 280456, "ratio": 9.16, "sparsity": 0.9219, "n_changed": 10950, "n_total": 140228}
+{"lr": "3e-6", "epochs": 5, "bytes": 58700, "full_bf16_bytes": 280456, "ratio": 4.78, "sparsity": 0.832, "n_changed": 23552, "n_total": 140228}
+{"lr": "3e-5", "epochs": 1, "bytes": 77930, "full_bf16_bytes": 280456, "ratio": 3.6, "sparsity": 0.7563, "n_changed": 34168, "n_total": 140228}
+{"lr": "3e-5", "epochs": 5, "bytes": 107192, "full_bf16_bytes": 280456, "ratio": 2.62, "sparsity": 0.6478, "n_changed": 49393, "n_total": 140228}
+{"lr": "3e-4", "epochs": 1, "bytes": 150635, "full_bf16_bytes": 280456, "ratio": 1.86, "sparsity": 0.4515, "n_changed": 76922, "n_total": 140228}
+{"lr": "3e-4", "epochs": 5, "bytes": 170247, "full_bf16_bytes": 280456, "ratio": 1.65, "sparsity": 0.3754, "n_changed": 87590, "n_total": 140228}
+{"lr": "3e-3", "epochs": 1, "bytes": 226781, "full_bf16_bytes": 280456, "ratio": 1.24, "sparsity": 0.0245, "n_changed": 136793, "n_total": 140228}
+{"lr": "3e-3", "epochs": 5, "bytes": 227333, "full_bf16_bytes": 280456, "ratio": 1.23, "sparsity": 0.0128, "n_changed": 138439, "n_total": 140228}

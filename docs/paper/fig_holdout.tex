@@ -1,0 +1,11 @@
+\begin{tikzpicture}
+\begin{axis}[width=0.98\linewidth,height=4.1cm,xlabel={fraction of cells held out},ylabel={held-out exact},
+ymin=0.85,ymax=1.01,xmin=0.1,xmax=0.55,xtick={0.15,0.3,0.5},legend style={at={(0.5,-0.42)},anchor=north,font=\tiny,cells={anchor=west}},legend columns=3,grid=major,font=\scriptsize]
+\addplot[mark=*,thick] coordinates {(0.15,1.0000) (0.3,1.0000) (0.5,1.0000)}; \addlegendentry{negotiate}
+\addplot[mark=square*,thick] coordinates {(0.15,1.0000) (0.3,0.9978) (0.5,0.9986)}; \addlegendentry{slider}
+\addplot[mark=triangle*,thick] coordinates {(0.15,0.9706) (0.3,0.9342) (0.5,0.9313)}; \addlegendentry{counter}
+\addplot[mark=*,dashed,gray] coordinates {(0.15,1.0000) (0.3,1.0000)}; \addlegendentry{negotiate, no factored head}
+\addplot[mark=square*,dashed,gray] coordinates {(0.15,0.9906) (0.3,0.9710)}; \addlegendentry{slider, no factored head}
+\addplot[mark=triangle*,dashed,gray] coordinates {(0.15,0.9412) (0.3,0.8816)}; \addlegendentry{counter, no factored head}
+\end{axis}
+\end{tikzpicture}

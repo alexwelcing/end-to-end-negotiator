@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from .expr import compile_expr
 from .schema import Action, Ensures, FieldType, Future, Hole, Spec, Transition
 
 
@@ -107,7 +108,17 @@ def parse_spec(doc: dict[str, Any]) -> Spec:
     ensures = [Ensures(e.get("after"), str(e["holds"])) for e in doc.get("ensures") or []]
     futures: dict[str, Future] = {}
     for fname, fd in (doc.get("futures") or {}).items():
-        futures[fname] = Future(fname, fd.get("kind", "closest"), fd["over"], fd.get("values"))
+        futures[fname] = Future(fname, fd.get("kind", "closest"), fd["over"], fd.get("values"), grab=fd.get("grab"),
+                                stickiness=float(fd.get("stickiness", 0) or 0), far=fd.get("far"), action=fd.get("action"),
+                                param=fd.get("param"))
+        if fd["over"] not in fields:
+            raise SpecError(f"future {fname} is over unknown field {fd['over']!r}")
+    render = dict(doc.get("render") or {})
+    for ename, ed in render.items():
+        if not isinstance(ed, dict) or "x" not in ed or "y" not in ed:
+            raise SpecError(f"render.{ename} needs x and y expressions")
+        for k in ("x", "y"):
+            compile_expr(str(ed[k]))
 
     initial = dict(doc.get("initial") or {})
     for k, f in fields.items():
@@ -118,7 +129,7 @@ def parse_spec(doc: dict[str, Any]) -> Spec:
 
     return Spec(name=name, fields=fields, actions=actions, transitions=transitions,
                 invariants=[str(i) for i in doc.get("invariants") or []], ensures=ensures,
-                futures=futures, holes=holes, initial=initial, render=dict(doc.get("render") or {}))
+                futures=futures, holes=holes, initial=initial, render=render)
 
 
 def load_spec(path: str | Path) -> Spec:

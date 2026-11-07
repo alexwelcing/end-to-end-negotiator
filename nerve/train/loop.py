@@ -37,6 +37,7 @@ class TrainConfig:
     weight_decay: float = 1e-4     # AdamW; raise (0.05-0.1) for grokking held-out cells of a transition table
     ord_weight: float = 1.0        # ordinal readout auxiliary (0 disables)
     fact_weight: float = 10.0      # factored per-field energy with shift kernel on ordinal fields (0 disables)
+    holdout_salt: str = "nerve"    # which cells are held out; vary it with the seed to measure split variance
 
 
 def _tensors(spec: Spec, enc: Encoder, log: EpisodeLog, cfg: TrainConfig):
@@ -45,7 +46,7 @@ def _tensors(spec: Spec, enc: Encoder, log: EpisodeLog, cfg: TrainConfig):
     ordv = (lambda x: enc.discrete(x) @ enc._ord_proj) if enc.ord_fields else (lambda x: np.zeros(0, np.float32))
     for st in log:
         a = (st.action[0], st.action[1])
-        if holdout_mask(spec, st.state, a, frac):
+        if holdout_mask(spec, st.state, a, frac, cfg.holdout_salt):
             continue
         if st.ok:
             reps = cfg.hole_weight if st.source == "hole-example" else 1
@@ -150,7 +151,7 @@ def train(spec: Spec, log: EpisodeLog, out_dir: str | Path, cfg: TrainConfig | N
         rec = {"epoch": ep, "loss": tot["total"] / n, "nce": tot["nce"] / n, "skipped_batches": skipped}
         if ep % cfg.log_every == 0 or ep == cfg.epochs - 1:
             model.jepa.eval(); model.jepa.cpu()
-            ev = evaluate(spec, model.step, cfg.holdout, learned_only_fn=model.step_learned_only)
+            ev = evaluate(spec, model.step, cfg.holdout, learned_only_fn=model.step_learned_only, salt=cfg.holdout_salt)
             model.jepa.to(dev)
             rec.update({"heldout": ev["heldout"]["exact"], "all": ev["all"]["exact"],
                         "learned_only": ev["learned_only"]["exact"], "score": ev["score"]})
@@ -165,7 +166,7 @@ def _finish(spec, model, out, cfg, history, t0, n, n_neg, log=None):
     model.save(str(out / "model.pt"))
     # official numbers come from the checkpoint that ships (BF16), not the FP32 training copy
     shipped = NerveEnergy.load(spec, str(out / "model.pt"))
-    final = evaluate(spec, shipped.step, cfg.holdout, learned_only_fn=shipped.step_learned_only)
+    final = evaluate(spec, shipped.step, cfg.holdout, learned_only_fn=shipped.step_learned_only, salt=cfg.holdout_salt)
     final["train_pairs"] = int(n); final["negatives"] = int(n_neg); final["seconds"] = round(time.time() - t0, 1)
     final["params"] = sum(p.numel() for p in model.jepa.parameters())
     if log is not None:

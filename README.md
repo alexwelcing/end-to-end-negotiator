@@ -96,14 +96,32 @@ Three ideas from the projects this is built on meet in that file:
 | volume slider | **screenshot** | 404 × 103 | 1.000 | 1.000 | 0 |
 
 Each row is one Hugging Face Job on an `a10g-small` (34 s to 9 min), 300 epochs, AdamW weight decay 0.05, the
-factored energy at weight 10. The three screenshot rows went image → spec (one or two rounds of `nerve check`
-feedback to the agent, no hand edits) → exhaustive log → network.
+factored energy at weight 10, one seed. Toggle has two (state, action) cells and no held-out set (specs under 20
+cells train and score on everything). The held-out sets are 34 cells (counter), 213 (slider) and 367 (negotiate).
+The three screenshot rows went image → spec (one or two rounds of `nerve check` feedback to the agent, no hand
+edits) → exhaustive log → network.
+
+Re-run on a two-core CPU with the same configuration and three seeds (`docs/paper/`), held-out exact match per seed:
+
+| spec | held-out cells | seed 0 | seed 1 | seed 2 | violations |
+|---|---|---|---|---|---|
+| toggle | n/a (2 cells) | 2/2 | 2/2 | 2/2 | 0 |
+| counter (with hole) | 34 | 33/34 | 33/34 | 34/34 | 0 |
+| slider (gridded) | 213 | 213/213 | 213/213 | 212/213 | 0 |
+| negotiate | 367 | 367/367 | 367/367 | 367/367 | 0 |
+
+One seed is not a result; the misses are single cells next to a range boundary (`inc` at count 8, `arm` at count 9,
+one slider cell). The ablations in `docs/paper/` say where the factored head matters: on the shift-rule specs as more
+is held out (slider with 30% of cells held out: 436 → 448 of 449; counter: 67 → 71 of 76) and not on negotiate,
+which the JEPA term alone recovers exactly from half of its 2,376 cells. The continuous-slider row did not
+reproduce from the default log on CPU (0.915 within tolerance, 8% violations); that row's log is not committed.
 
 What it took to get the last cells: ordinal features beside one-hots; an **equivariant factored energy term**
 (per-field next-value logits from the action and the *other* fields, with a shift kernel indexed by offset from
 the field's current value, so "+1" learned at 3 is the same function at 8) weighted to outvote the JEPA term;
-exhaustive logs so data gaps stop looking like generalisation failures; and the Worker computing the same
-energy bit for bit. Two bugs mattered more than any idea: a variance term on a batch of one sample produced a
+exhaustive logs so data gaps stop looking like generalisation failures; and the Worker holding the same weights
+bit for bit (checked by digest) and computing the same argmin (energies agree to 0.05 in the parity test; the
+Worker's GELU is the tanh approximation, Python's is exact). Two bugs mattered more than any idea: a variance term on a batch of one sample produced a
 NaN that silently zeroed a whole run, and training and evaluation disagreed on hold-out for tiny specs.
 
 ## Why energy-based / JEPA
@@ -114,7 +132,10 @@ DOM, which is the right abstraction level for "what the interface does" as oppos
 rendering is a separate, replaceable decoder. The energy is a sum of three terms: the JEPA prediction error,
 a factored per-field term (an equivariant shift kernel on ordinal fields plus an absolute term, both blind to the
 field's own value), and the compiled circuit, which is exact where the spec is explicit and constant (silent)
-where it is not. Inference is argmin over candidate futures; for continuous fields it is gradient descent on
+where it is not. The circuit's energy is the Hamming distance to the true successor over the number of fields,
+and its weight is raised per query above that number times the spread of the learned term, so every explicit
+transition is decided by the circuit whatever the learned weights say (`tests/test_circuit_dominates.py` checks
+this with random and hostile weights). Inference is argmin over candidate futures; for continuous fields it is gradient descent on
 the energy from a handful of seeds.
 
 Conformance is measured on BF16 weights that ship, never on the FP32 training copy. A number the inference
@@ -128,11 +149,19 @@ every metric, invented four roles that did not exist at iteration 0 (`split_prob
 `margin_auditor`, `margin_checker`), and, once the score was saturated, restructured the team to cut its own cost
 per iteration. The full record (every TEAM_CONFIG, eval and role report) is in `docs/runs/negotiate-claude-2026-11-06/`.
 
+## Paper
+
+`docs/paper/` holds the manuscript (NeurIPS format, 9 pages + appendix), its sources, the CPU sweep that re-derives
+the results table with seeds and ablations (`sweep.py`, `results.jsonl`), and `make_tables.py`, which regenerates
+every number in the paper from `results.jsonl`. `docs/paper/GUIDANCE.md` is the list of what the paper exposed in
+this branch and what to do next.
+
 ## Layout
 
 ```
 specs/*.nerve            behavior specs (toggle, counter, slider, negotiate)
-nerve/spec               schema, safe expression language, parser, oracle, self-check, exact circuit compiler
+nerve/spec               schema, safe expression language, parser, oracle, self-check, exact circuit compiler,
+                         drag.py: gestures as energy minimisation over spec-derived futures (docs/dragology.md)
 nerve/data               append-only episode log; coverage / random / adversarial rollouts; spec-derived negatives
 nerve/model              action-conditioned JEPA; combined energy (circuit + learned)
 nerve/train              training loop; official eval (all / held-out / learned-only / holes / violations)
@@ -162,7 +191,8 @@ harness/herdr            how the team lives on herdr
          └────────────────┬────────────────────┴──────────── official eval ◄──────────┘
                           ▼
                     nerve train  (GPU box, a herdr "machine")
-                          │  nerve patch  (PULSE: ~100× smaller than a checkpoint at RL learning rates)
+                          │  nerve patch  (PULSE: bit-identical sparse patches; 92% of BF16 values unchanged
+                          │               after an epoch at lr 3e-6 on negotiate, 9x smaller than the checkpoint)
                           ▼
             R2 nerve-weights/<spec>/{edge.json, patches/*.nrvp}
                           │

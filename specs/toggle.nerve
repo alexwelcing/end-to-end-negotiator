@@ -7,8 +7,10 @@ actions:
   flip: {}
 transitions:
   flip: { status: "'on' if status == 'off' else 'off'" }
+render:                    # derived geometry, so a drag has a gap (docs/dragology.md)
+  knob: { x: "90 if status == 'on' else 30", y: 30 }
 futures:
   # dragology: dragging the knob leads to one of exactly these states
-  drag_knob: { kind: between, over: status, values: [off, on] }
+  drag_knob: { kind: between, over: status, values: [off, on], grab: knob }
 ensures:
   - { after: flip, holds: "status != old.status" }

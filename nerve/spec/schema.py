@@ -123,11 +123,24 @@ class Transition:
 
 @dataclass
 class Future:
-    """dragology-style declaration: a gesture leads to one of these states."""
+    """dragology-style declaration: a gesture leads to one of these states.
+
+    ``grab`` names the rendered element the gesture drags (a key of the spec's ``render`` block), which is what
+    gives the gesture a geometry: the gap between the pointer and where that element lands in a candidate state.
+    ``stickiness`` (pixels) keeps the current branch until another is better by that much; ``far`` (pixels) is the
+    gap beyond which the gesture falls back to the current state (dragology's ``whenFar``), with hysteresis at
+    ``far`` in and ``1.2 * far`` out. ``action``/``param`` name the action instance that realises a candidate when
+    it cannot be inferred. See docs/dragology.md.
+    """
     name: str
     kind: str                       # "closest" | "between" | "vary"
     field_name: str
     values: list[Any] | None = None
+    grab: str | None = None
+    stickiness: float = 0.0
+    far: float | None = None
+    action: str | None = None
+    param: str | None = None
 
 
 @dataclass

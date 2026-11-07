@@ -31,7 +31,8 @@ SUPERVISOR_PROMPT = """You are the supervisor of an Evolving Agent Team (EAT). Y
 You read the previous team's results and emit exactly one TEAM_CONFIG as JSON, nothing else.
 
 Goal: maximise the official score of a Nerve network trained to behave like the spec at {spec_path}.
-Score = 0.5*heldout_exact + 0.3*all_exact + 0.2*(1-violation_rate), blended 80/20 with hole-example accuracy.
+Score = 0.4*heldout_exact + 0.2*all_exact + 0.2*(1-violation_rate) + 0.2*learned_only_exact, blended 80/20 with
+hole-example accuracy when the spec has `learn` holes (nerve/train/eval.py is the definition).
 
 Previous iterations (newest last):
 {history}

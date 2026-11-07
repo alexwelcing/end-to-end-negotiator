@@ -21,8 +21,10 @@ ensures:
   - { after: inc, holds: "count >= old.count" }
   - { after: dec, holds: "count <= old.count" }
   - { after: set, holds: "count == to" }
+render:
+  dial: { x: "20 + 20 * count", y: 40 }
 futures:
-  drag_dial: { kind: closest, over: count, values: [0,1,2,3,4,5,6,7,8,9] }
+  drag_dial: { kind: closest, over: count, values: [0,1,2,3,4,5,6,7,8,9], grab: dial, action: set, stickiness: 4 }
 learn:
   # ink-style hole: the spec cannot write `nudge` down, only show it and bound it.
   # The fallback is the spec-visible behaviour the network must never do worse than.

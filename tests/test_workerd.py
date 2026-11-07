@@ -75,6 +75,8 @@ def test_workerd_parity_and_pulse():
         # rejected either at decode (corrupt zstd frame) or at the digest check; either way weights are untouched
         assert "0002.nrvp" in r.get("rejected", "") and ("digest" in r["rejected"] or "corrupt" in r["rejected"])
         assert r["digest"] == checkpoint_digest(sd2) and r["patches"] == ["0001.nrvp"]
-        # sessions persist in the Durable Object
-        r1 = w.post("/counter/session/t1", {"action": "inc"}); r2 = w.post("/counter/session/t1", {"action": "inc"})
+        # sessions persist in the Durable Object (and survive runs: a fresh id per run, or the count carries over)
+        import uuid
+        sid = f"t-{uuid.uuid4().hex[:8]}"
+        r1 = w.post(f"/counter/session/{sid}", {"action": "inc"}); r2 = w.post(f"/counter/session/{sid}", {"action": "inc"})
         assert r1["state"]["count"] == 1 and r2["state"]["count"] == 2

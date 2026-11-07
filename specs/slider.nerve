@@ -21,6 +21,8 @@ invariants:
 ensures:
   - { after: move, holds: "value == to or not old.grabbed" }
   - { after: release, holds: "not grabbed" }
+render:
+  handle: { x: "value", y: 0 }
 futures:
-  drag_handle: { kind: vary, over: value }
+  drag_handle: { kind: vary, over: value, grab: handle, action: move, param: to }
 initial: {value: 0, grabbed: false}

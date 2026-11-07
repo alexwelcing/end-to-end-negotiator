@@ -21,6 +21,20 @@ Ordering inside a group is rough priority. The first section is the short list.
    supervisor and roles on herdr panes, $20 budget, logged to `evolution/`. *Done when:* history shows ≥10 iterations,
    roles created by the supervisor that did not exist at iteration 0, and a best score above the offline reflector's.
 
+## Next (proposed 2026-11-07, from writing the paper; details in `docs/paper/GUIDANCE.md`)
+
+1. **Commit the evidence.** `docs/runs/negotiate-claude-2026-11-06/` (it was gitignored by `runs/`), the three
+   screenshot specs with their intake transcripts, and each GPU row's `eval.json`/`train_config.json`. *Done when:*
+   a fresh clone regenerates Table 1 of the paper from committed files.
+2. **Seeds and salts in CI.** toggle/counter/slider at three (seed, `--holdout-salt`) pairs, negotiate at one,
+   learned-only, `--log-every 1000`. *Done when:* green, and the README table is generated from the CI artifact.
+3. **The boundary cells.** counter misses `inc` at 8 / `arm` at 9 on two of three seeds. Hard negatives from the
+   model's near-misses (item 23) plus boundary-adjacent cells in the adversary policy. *Done when:* 34/34 on all
+   seeds and salts.
+4. **Exact Worker parity.** Same GELU on both sides; tighten `test_workerd.py` to 1e-4; add negotiate.
+5. **Cross-spec generalisation** (items 21, 69): one network over several specs, scored on a spec it never saw.
+   *Done when:* a held-out-spec row exists in the results table, whatever its value.
+
 ## Spec language
 
 6. **Composition.** `import` a spec into another and reference its state as a sub-record; actions namespaced. A

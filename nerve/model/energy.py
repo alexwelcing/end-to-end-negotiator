@@ -49,6 +49,20 @@ class NerveEnergy:
     def _a_cont(self, a) -> torch.Tensor | None:
         return torch.from_numpy(self.enc.action_cont(a))[None] if self.enc.action_cont_dim else None
 
+    def circuit_weight(self, learned: torch.Tensor) -> float:
+        """Weight of the circuit term for one query.
+
+        The circuit's energy is the Hamming distance to the true successor over the number of fields n, so it is
+        0 on the true successor and at least 1/n elsewhere. Where it speaks, it must outvote the learned term no
+        matter what the learned term says: that needs w/n > (max - min) of the learned energies over the
+        candidates. The floor ``self.w`` (1000) is kept for small spreads; a trained factored head can spread
+        the learned energies over thousands of units, so the weight is raised per query to n * spread + 1.
+        With this, the compiled transitions are exact unconditionally (also against corrupt or untrained weights),
+        and on hole actions the circuit is constant, so the learned term still decides there.
+        """
+        spread = float(learned.max() - learned.min()) if learned.numel() > 1 else 0.0
+        return max(self.w, len(self.spec.fields) * spread + 1.0)
+
     def energies(self, s: dict[str, Any], a: tuple[str, dict[str, Any]]) -> torch.Tensor:
         if not self.spec.finite:
             return self._continuous(s, a)[1]
@@ -58,7 +72,7 @@ class NerveEnergy:
             E = self.jepa.energy_all(xs, ai, self._cand, self._a_cont(a), self._cur_idx(xs), self._cand_idx)[0]
             if self.circuit is not None:
                 xa = torch.from_numpy(self.enc.action(a))[None]
-                E = E + self.w * self.circuit.energy_all(xs, xa, self._cand)[0]
+                E = E + self.circuit_weight(E) * self.circuit.energy_all(xs, xa, self._cand)[0]
         return E
 
     def step(self, s: dict[str, Any], a: tuple[str, dict[str, Any]]) -> dict[str, Any]:

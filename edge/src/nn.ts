@@ -166,11 +166,15 @@ export class Nerve {
         for (let i = 0; i < this.m.state_dim; i++) if (xs[i]) act += C.ws[i * C.H + h];
         if (act > 0) for (let o = 0; o < this.m.state_dim; o++) y[o] += act * C.wo[h * this.m.state_dim + o];
       }
+      // per-query weight: the circuit must outvote the learned term wherever it speaks (nerve/model/energy.py)
+      let lo = Infinity, hi = -Infinity;
+      for (let c = 0; c < E.length; c++) { if (E[c] < lo) lo = E[c]; if (E[c] > hi) hi = E[c]; }
+      const w = Math.max(C.weight, C.bias * (hi - lo) + 1);
       for (let c = 0; c < E.length; c++) {
         let dot = 0;
         const v = this.m.state_vectors[c];
         for (let i = 0; i < v.length; i++) dot += v[i] * y[i];
-        E[c] += C.weight * (1 - dot / C.bias);
+        E[c] += w * (1 - dot / C.bias);
       }
     }
     return E;

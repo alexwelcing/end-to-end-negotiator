@@ -1,0 +1,25 @@
+\newcommand{\mainsummary}{On the CPU re-runs, counter (with hole) misses 1, 1, 0 of 34 held-out cells across seeds 0--2; slider (gridded) misses 0, 0, 1 of 213 held-out cells across seeds 0--2; negotiate is exact on all 367 held-out cells in all 3 seeds; in total 6 of 9 (spec, seed) runs are exact on every held-out cell, and no run produces a spec violation.}
+\newcommand{\holesummary}{$1.00/1.00/1.00$ on the five examples, seeds 0--2}
+\newcommand{\nofactheld}{100.0}
+\newcommand{\ablatesummary}{Without the factored head, negotiation falls to 1.000/1.000/1.000 held-out exact (seeds 0--2) while seen cells stay at 1.000 overall; the slider falls to 0.991 and the counter to 0.941; removing the ordinal read-out as well gives 1.000, 0.991 and 0.971; with the factored head present, lowering weight decay to $10^{-4}$ gives 1.000, 1.000 and 0.971.}
+\newcommand{\holdoutsummary}{negotiate: 1.000 at 15\% (367 cells), 1.000 at 30\% (741 cells), 1.000 at 50\% (1195 cells); slider: 1.000 at 15\% (213 cells), 0.998 at 30\% (449 cells), 0.999 at 50\% (731 cells); counter: 0.971 at 15\% (34 cells), 0.934 at 30\% (76 cells), 0.931 at 50\% (131 cells); without the factored head at 30\%: negotiate 1.000, slider 0.971, counter 0.882.}
+\newcommand{\toggleparams}{96,196}
+\newcommand{\counterparams}{111,212}
+\newcommand{\sliderparams}{121,832}
+\newcommand{\negparams}{140,018}
+\newcommand{\counterH}{280}
+\newcommand{\counterCparams}{15{,}680}
+\newcommand{\negH}{2{,}376}
+\newcommand{\negCparams}{225{,}720}
+\newcommand{\negmarginmin}{74}
+\newcommand{\negmarginmed}{93}
+\newcommand{\negmarginminseen}{75}
+\newcommand{\negspread}{1665}
+\newcommand{\negcpu}{5.3}
+\newcommand{\contexact}{99.8}
+\newcommand{\contexactcpu}{0.915}
+\newcommand{\contexactcpupct}{91.5}
+\newcommand{\sweephours}{1.2}
+\newcommand{\pulseonesparsity}{7.8\%}
+\newcommand{\pulseonekb}{31}
+\newcommand{\pulsesummary}{at the training learning rate ($3\times10^{-3}$, five epochs) 99\% of values change and the patch is 1.2$\times$ smaller than the checkpoint only through compression (\cref{tab:pulse}).}

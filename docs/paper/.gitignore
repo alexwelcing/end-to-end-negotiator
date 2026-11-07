@@ -1,0 +1,11 @@
+runs/
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+pg-*.png
+main.txt

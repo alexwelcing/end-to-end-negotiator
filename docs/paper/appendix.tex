@@ -1,0 +1,143 @@
+\section{The spec language}
+\label{app:grammar}
+
+A \texttt{.nerve} file is YAML with the following keys. Types: \texttt{\{type: int, range: [lo, hi]\}}, \texttt{\{type: enum, values: [\dots]\}}, \texttt{\{type: bool\}}, \texttt{\{type: float, range: [lo, hi], step: s\}} (gridded) or without \texttt{step} (continuous).
+
+\begin{lstlisting}
+nerve: 1
+name: <identifier>
+state:        { <field>: <type>, ... }
+actions:      { <action>: {} | {params: {<p>: <type>}}, ... }
+transitions:  { <action>: { when: "<guard>", <field>: "<expr>", ... }, ... }
+invariants:   [ "<expr over state>", ... ]
+ensures:      [ { after: <action> | omitted, holds: "<expr over new state, params, old.*>" }, ... ]
+futures:      { <gesture>: { kind: closest | between | vary, over: <field>, values: [...] } }
+learn:        [ { name, action, fallback: {<field>: "<expr>"},
+                  examples: [ { state: {...}, params: {...}, next: {...} } ] } ]
+initial:      { <field>: <value> }
+\end{lstlisting}
+
+Expressions: literals, field names, parameter names, \texttt{old.}$f$, the operators \texttt{+ - * / // \% **}, chained comparisons, \texttt{and/or/not}, \texttt{x if c else y}, and the builtins \texttt{min max abs clamp len int bool}. The parser rejects any other syntax node, any call that is not a builtin, and any attribute access that is not on \texttt{old}. YAML's \texttt{on}/\texttt{off}/\texttt{yes}/\texttt{no} are strings, not booleans, so enum values such as \texttt{[off, on]} survive. A hole example must give every field of \texttt{state} and \texttt{next} and, if the hole's action takes parameters, a \texttt{params} block; an example outside the declared types is a parse error.
+
+\paragraph{The negotiation spec.} Two agents split two books and two hats; a proposal is what the proposer keeps; at most three rounds; terminal states absorb.
+\begin{lstlisting}
+nerve: 1
+name: negotiate
+state:
+  turn:   {type: enum, values: [a, b]}
+  books:  {type: int, range: [0, 2]}
+  hats:   {type: int, range: [0, 2]}
+  status: {type: enum, values: [open, deal, no_deal]}
+  rounds: {type: int, range: [0, 3]}
+actions:
+  propose: {params: {b: {type: int, range: [0, 2]}, h: {type: int, range: [0, 2]}}}
+  accept: {}
+  walk: {}
+transitions:
+  propose: { when: "status == 'open' and rounds < 3",
+             books: "b", hats: "h", turn: "'b' if turn == 'a' else 'a'", rounds: "rounds + 1" }
+  accept:  { when: "status == 'open' and rounds > 0", status: "'deal'" }
+  walk:    { when: "status == 'open'", status: "'no_deal'" }
+invariants: ["0 <= books <= 2 and 0 <= hats <= 2", "rounds <= 3"]
+ensures:
+  - { after: propose, holds: "turn != old.turn or old.status != 'open' or old.rounds >= 3" }
+  - { after: accept,  holds: "status != 'open' or old.rounds == 0" }
+  - { holds: "status == old.status or old.status == 'open'" }
+initial: {turn: a, books: 0, hats: 0, status: open, rounds: 0}
+\end{lstlisting}
+
+\section{Encoding, sizes and hyper-parameters}
+\label{app:details}
+
+\begin{table}[h]
+\centering
+\caption{Per-spec sizes. $d_s$ is the state feature width (one-hots plus $9$ ordinal features per ordinal field), $|\Aset|$ the number of action instances, $H$ the number of compiled hidden units, and ``learned'' the number of trainable parameters of the JEPA and factored head ($d=64$, hidden $128$).}
+\label{tab:sizes}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+spec & $|\Sset|$ & $|\Aset|$ & $d_s$ & $H$ & circuit params & learned params\\
+\midrule
+toggle & 2 & 1 & 2 & 2 & 10 & \toggleparams\\
+counter & 20 & 14 & 21 & 280 & 15{,}680 & \counterparams\\
+slider (gridded) & 50 & 29 & 36 & 1{,}450 & 146{,}450 & \sliderparams\\
+negotiate & 216 & 11 & 42 & 2{,}376 & 225{,}720 & \negparams\\
+push-notifications toggle & 84 & 27 & 34 & 2{,}268 & -- & 126{,}594$^\dagger$\\
+guest stepper & 8 & 3 & 17 & 24 & -- & 102{,}961$^\dagger$\\
+volume slider & 404 & 103 & 114 & 41{,}612 & -- & 188{,}338$^\dagger$\\
+\bottomrule
+\end{tabular}
+
+\smallskip
+{\footnotesize $^\dagger$Counted from the exported browser weights (includes the factored head's mask buffer); the specs themselves were not yet committed at the time of writing.}
+\end{table}
+
+Training configuration for every finite run in this paper unless stated: $300$ epochs, batch $128$, AdamW ($\beta$ defaults) with learning rate $3\times10^{-3}$, cosine decay to $5\%$, weight decay $0.05$, EMA momentum $0.99$, InfoNCE temperature $\tau=0.1$, hinge margin $1$, variance weight $0.05$, ordinal read-out weight $1$, factored weight $\lambda_F=10$, own-value scale $\epsilon=0.1$, hole oversampling $20\times$, hold-out $15\%$, circuit weight $w_c=1000$. The continuous slider used $200$ epochs and $d=128$. The episode log for each spec is produced by \texttt{nerve rollout} with its default policies (exhaustive, coverage, random, adversary; $40$ episodes of horizon $20$ each; $3$ negatives per positive). Rollout knobs are capped ($400$ episodes, horizon $60$, $10$ negatives) because an agent once asked for $26{,}000$ negatives per step and produced a $2.5$~GB log.
+
+\section{Every run}
+\label{app:runs}
+
+\Cref{tab:allruns} lists every training run behind \cref{tab:main,tab:ablate,fig:gen}, from the raw \texttt{results.jsonl} written by the sweep script. ``held'' is held-out exact match with the number of held-out cells, ``all'' is exact match over all valid cells, ``viol'' the violation rate, ``holes'' the hole-example accuracy where the spec has holes.
+
+\begin{table}[h]
+\centering
+\caption{All CPU runs for this paper (learned-only unless the tag says \texttt{circuit}).}
+\label{tab:allruns}
+\scriptsize
+\begin{tabular}{llrrrrrrr}
+\toprule
+tag & configuration & held & $n_{\text{held}}$ & all & viol & holes & params & wall (s)\\
+\midrule
+\input{table_all_rows}
+\end{tabular}
+\end{table}
+
+\section{Sparse patches}
+\label{app:pulse}
+
+\begin{table}[h]
+\centering
+\caption{PULSE patches on the negotiation network ($140{,}018$ learned parameters; the full BF16 checkpoint is $280{,}456$ bytes). Continued training from the seed-0 model on the same log for the given number of epochs and learning rate; sparsity is the fraction of BF16 values unchanged; every patch verified bit-identical by digest in Python and in the Worker's decoder.}
+\label{tab:pulse}
+\small
+\begin{tabular}{rrrrr}
+\toprule
+learning rate & epochs & BF16 values changed & patch bytes & ratio\\
+\midrule
+\input{table_pulse_rows}
+\end{tabular}
+\end{table}
+
+Patch format: \texttt{"NRVP"} $\mid$ version $\mid$ header length $\mid$ JSON header (per-tensor: kind, shape, count, byte lengths; the SHA-256 of the full post-patch checkpoint over sorted tensor names and little-endian BF16 bits) $\mid$ zstd(body), where the body holds, per tensor, varint-encoded index deltas followed by the new BF16 values. Decoding is a memory copy; no floating-point arithmetic is performed, which is why chained patches cannot drift.
+
+\section{The evolving team}
+\label{app:eat}
+
+The supervisor prompt asks for one JSON team configuration with \texttt{rationale}, \texttt{roles[\{name, prompt, owns, knobs\}]}, \texttt{phases[\{name, roles, gate\}]}, \texttt{train\{\}} and \texttt{rollout\{\}}. The default team is \texttt{spec\_auditor} (owns \texttt{spec}; gate \texttt{spec.problems == 0}), \texttt{coverage\_hunter} and \texttt{adversary} (data), \texttt{trainer} (knobs only; the harness trains), and \texttt{energy\_auditor} (writes to the shared learnings). Role agents may run \texttt{nerve check|rollout|eval|step|compile} and a small set of shell tools; they may edit only the iteration directory and the episode log; a spec edit that fails \texttt{nerve check} is reverted and the author's specs are restored with \texttt{git checkout}. Agent-supplied knobs are coerced to the dataclass types and clamped to bounds (epochs $1$--$2000$, $d$ $8$--$512$, learning rate $10^{-6}$--$0.05$, hold-out $0$--$0.5$, \ldots). The offline reflector encodes six rules of the form ``learned-only $<0.9$: more coverage and longer training'', ``held-out trails seen by $>0.02$: wider $d$, more negatives'', ``holes $<1$: add a \texttt{hole\_tutor} role, lower the learning rate'', ``violations $>0$: more negatives'', and ``plateau: halve the learning rate''.
+
+\section{Use of language models}
+\label{app:llm}
+The \texttt{nerve} branch and this manuscript were written by the author with Claude (Anthropic) acting as a coding and writing agent under the author's direction; the evolving-team experiment uses Claude Code as supervisor and role agents by design and the intake experiments use it as the vision agent. Every number reported from the repository record was re-derived by running the committed code where a CPU sufficed, and is marked as the repository's where it did not.
+
+
+\section{NeurIPS paper checklist}
+\label{app:checklist}
+
+\begin{enumerate}\setlength{\itemsep}{0pt}
+\item \textbf{Claims.} The abstract and introduction claim exact-match conformance on small specified interfaces, a compilation theorem, an equivariance proposition, and system properties (BF16 scoring, runtime parity, bit-identical patches). Each is tied to a theorem, a table, or a test in the repository. [Yes]
+\item \textbf{Limitations.} \Cref{sec:limits}. [Yes]
+\item \textbf{Theory.} \Cref{thm:circuit,cor:dominate,prop:equiv} state their assumptions and are proved in the text. [Yes]
+\item \textbf{Experimental reproducibility.} Specs, logs, configurations, seeds and the sweep script are in the repository; every CPU run in \cref{tab:allruns} is reproducible by the listed command. The three screenshot specs and the evolution record were not committed at the time of writing and are flagged as such. [Partially; flagged]
+\item \textbf{Open access to data and code.} Yes: one public branch; no external dataset.
+\item \textbf{Experimental settings.} \Cref{app:details}. [Yes]
+\item \textbf{Statistical significance.} Exact-match scores are reported per seed with held-out counts rather than as intervals: with $34$--$367$ held-out cells and scores at or near $1.0$ an interval is degenerate, and the honest statistic is the number of cells missed. [Yes]
+\item \textbf{Compute.} Each GPU run is one \texttt{a10g-small} job of $34$~s to $9$~min; the full CPU sweep in \cref{tab:allruns} took \sweephours{} hours on two cores. Development compute, including the \$14.23 evolution run, is disclosed in the text. [Yes]
+\item \textbf{Code of ethics.} Conforms. [Yes]
+\item \textbf{Broader impacts.} The work replaces small interface code with checked networks; the risks are those of any learned component in a user-facing system (silent errors), which the spec, the violation metric and the proposed hard refusal address. No dual-use concern is apparent. [Yes]
+\item \textbf{Safeguards.} Not applicable (no released pretrained model with misuse potential).
+\item \textbf{Licenses.} The repository descends from \texttt{facebookresearch/end-to-end-negotiator} and keeps its license; Dragology, ink, PULSE and EAT are cited and not redistributed. [Yes]
+\item \textbf{New assets.} The spec language, pipeline and specs are released with documentation. [Yes]
+\item \textbf{Crowdsourcing / human subjects.} None.
+\item \textbf{IRB.} Not applicable.
+\item \textbf{LLM usage.} Language-model agents are part of the method (intake; the evolving team) and are described in \cref{sec:spec,sec:ship}; their use in writing is disclosed in \cref{app:llm}. [Yes]
+\end{enumerate}

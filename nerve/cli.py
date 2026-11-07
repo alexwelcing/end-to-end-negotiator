@@ -52,7 +52,8 @@ def cmd_train(a):
     from .train import TrainConfig, train
     sp = _spec(a.spec)
     cfg = TrainConfig(epochs=a.epochs, lr=a.lr, d=a.d, hidden=a.hidden, holdout=a.holdout, seed=a.seed,
-                      compile_circuit=not a.no_circuit, init=a.init, device=a.device, weight_decay=a.weight_decay, ord_weight=a.ord_weight, fact_weight=a.fact_weight)
+                      compile_circuit=not a.no_circuit, init=a.init, device=a.device, weight_decay=a.weight_decay, ord_weight=a.ord_weight, fact_weight=a.fact_weight,
+                      log_every=a.log_every, holdout_salt=a.holdout_salt)
     if a.attach:
         from .train.remote import wait_and_fetch
         j = json.loads(Path(a.attach).read_text()) if Path(a.attach).exists() else {"job": a.attach.split(":")[0], "run": a.attach.split(":")[1]}
@@ -70,7 +71,7 @@ def cmd_eval(a):
     from .model import NerveEnergy
     from .train import evaluate
     sp = _spec(a.spec); m = NerveEnergy.load(sp, a.model)
-    print(json.dumps(evaluate(sp, m.step, a.holdout, learned_only_fn=m.step_learned_only), indent=1))
+    print(json.dumps(evaluate(sp, m.step, a.holdout, learned_only_fn=m.step_learned_only, salt=a.holdout_salt), indent=1))
 
 
 def cmd_patch(a):
@@ -148,6 +149,28 @@ def cmd_evolve(a):
     print(json.dumps(sup.run(), indent=1))
 
 
+def cmd_drag(a):
+    """Run a gesture along a pointer path: one energy minimisation per frame over spec-derived futures."""
+    from .spec.drag import DragSession
+    sp = _spec(a.spec)
+    s = json.loads(a.state) if a.state else dict(sp.initial)
+    energy = None
+    if a.model:
+        from .model import NerveEnergy
+        m = NerveEnergy.load(sp, a.model); enc = m.enc
+        def energy(start, action, cand):   # the learned term breaks ties where the spec is silent
+            if action is None or not sp.finite:
+                return 0.0
+            E = m.energies(start, action); return float(E[enc.state_id(cand)] - E.min())
+    sess = DragSession(sp, sp.futures[a.gesture], s, energy)
+    for pt in a.path:
+        x, y = (float(v) for v in pt.split(","))
+        fr = sess.frame((x, y))
+        print(json.dumps({"pointer": [x, y], "branch": fr.branch, "gap": round(fr.gap, 2), "far": fr.far,
+                          "preview": fr.preview, **({"weights": fr.weights} if fr.weights else {})}))
+    print(json.dumps({"drop": sess.release()}))
+
+
 def cmd_intake(a):
     from .intake import intake
     out = intake(a.source, kind=a.kind, model=a.model, out=a.out)
@@ -170,10 +193,12 @@ def main(argv=None) -> int:
     s.add_argument("--hidden", type=int, default=128); s.add_argument("--holdout", type=float, default=0.15); s.add_argument("--seed", type=int, default=0)
     s.add_argument("--no-circuit", action="store_true"); s.add_argument("--init", help="warm-start from checkpoint")
     s.add_argument("--device", default="auto", help="auto|cpu|cuda|mps"); s.add_argument("--weight-decay", type=float, default=1e-4); s.add_argument("--ord-weight", type=float, default=1.0); s.add_argument("--fact-weight", type=float, default=10.0)
+    s.add_argument("--log-every", type=int, default=10, help="evaluate every N epochs (the eval dominates CPU time on larger specs; raise it)")
+    s.add_argument("--holdout-salt", default="nerve", help="salt of the hold-out hash: a different salt holds out different cells")
     s.add_argument("--remote", choices=["hf"], help="run the training as a Hugging Face Job on a GPU (needs HF_TOKEN)")
     s.add_argument("--flavor", default="a10g-small", help="HF Jobs hardware flavor for --remote hf")
     s.add_argument("--attach", help="attach to a running HF job: path to job.json or <job_id>:<run>"); s.set_defaults(f=cmd_train)
-    s = sub.add_parser("eval", help="official conformance eval"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--holdout", type=float, default=0.15); s.set_defaults(f=cmd_eval)
+    s = sub.add_parser("eval", help="official conformance eval"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--holdout", type=float, default=0.15); s.add_argument("--holdout-salt", default="nerve"); s.set_defaults(f=cmd_eval)
     s = sub.add_parser("patch", help="PULSE sparse patch between two checkpoints"); s.add_argument("--prev", required=True); s.add_argument("--new", required=True); s.add_argument("--out", required=True); s.add_argument("--level", type=int, default=1); s.set_defaults(f=cmd_patch)
     s = sub.add_parser("serve", help="run an inference worker"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--patches"); s.add_argument("--host", default="127.0.0.1"); s.add_argument("--port", type=int, default=8787); s.set_defaults(f=cmd_serve)
     s = sub.add_parser("step", help="drive the network from the shell"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--patches"); s.add_argument("--state"); s.add_argument("action", nargs="+", help="name or name:{json params}"); s.set_defaults(f=cmd_step)
@@ -184,6 +209,9 @@ def main(argv=None) -> int:
     s.add_argument("--budget", type=float, default=5.0); s.add_argument("--iterations", type=int, default=4); s.add_argument("--mode", choices=["offline", "claude"], default="offline")
     s.add_argument("--supervisor-model", default="claude-fable-5-1"); s.add_argument("--role-model", default="claude-sonnet-5-5")
     s.add_argument("--remote", choices=["hf"], help="train each iteration as a Hugging Face GPU Job"); s.add_argument("--flavor", default="a10g-small"); s.set_defaults(f=cmd_evolve)
+    s = sub.add_parser("drag", help="simulate a gesture: pointer path -> per-frame preview, gap, branch; drop on release")
+    s.add_argument("spec"); s.add_argument("--gesture", required=True); s.add_argument("--state"); s.add_argument("--model", help="add a trained network's learned energies as tie-breaker")
+    s.add_argument("path", nargs="+", help="pointer positions x,y in render coordinates"); s.set_defaults(f=cmd_drag)
     s = sub.add_parser("intake", help="code | screenshot | prose -> behavior spec (via a harness agent)"); s.add_argument("source"); s.add_argument("--kind", choices=["auto", "code", "image", "prose"], default="auto")
     s.add_argument("--model", default="claude"); s.add_argument("--out", required=True); s.set_defaults(f=cmd_intake)
 

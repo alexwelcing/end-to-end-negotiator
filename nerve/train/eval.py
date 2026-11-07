@@ -83,7 +83,8 @@ def coverage(spec: Spec, log) -> dict[str, Any]:
 
 
 def evaluate(spec: Spec, step_fn, holdout_frac: float = 0.15, learned_only_fn=None, n_samples: int = 1000,
-             tol: float = 0.01) -> dict[str, Any]:
+             tol: float = 0.01, salt: str = "nerve") -> dict[str, Any]:
+    """``salt`` picks the held-out set (a different salt is a different split); training must use the same one."""
     if not spec.finite:
         return _evaluate_continuous(spec, step_fn, n_samples, tol, learned_only_fn)
     oracle = Oracle(spec)
@@ -94,8 +95,8 @@ def evaluate(spec: Spec, step_fn, holdout_frac: float = 0.15, learned_only_fn=No
     # the oracle only knows a hole's *fallback*, so holes are scored on their examples, not here
     allpairs = [(s, a) for s in valid for a in enc.all_actions() if a[0] not in hole_actions]
     holdout_frac = effective_holdout(spec, holdout_frac)
-    held = [(s, a) for s, a in allpairs if holdout_mask(spec, s, a, holdout_frac)]
-    seen = [(s, a) for s, a in allpairs if not holdout_mask(spec, s, a, holdout_frac)]
+    held = [(s, a) for s, a in allpairs if holdout_mask(spec, s, a, holdout_frac, salt)]
+    seen = [(s, a) for s, a in allpairs if not holdout_mask(spec, s, a, holdout_frac, salt)]
     holes = bool(hole_actions)
     out = {
         "all": conformance(oracle, step_fn, allpairs).to_dict(),

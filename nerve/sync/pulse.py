@@ -154,7 +154,7 @@ def apply_patch(prev: dict[str, torch.Tensor], patch: Patch | bytes, verify: boo
     """Decode: W_t <- W_{t-1}; W_t[I] <- V. Memory copy only; returns BF16 tensors."""
     data = patch.data if isinstance(patch, Patch) else patch
     hdr = _read_header(data)
-    hlen = 9 + len(json.dumps(hdr, separators=(",", ":")).encode()) if False else 9 + struct.unpack("<I", data[5:9])[0]
+    hlen = 9 + struct.unpack("<I", data[5:9])[0]
     body = zstd.ZstdDecompressor().decompress(data[hlen:], max_output_size=1 << 31)
     out: dict[str, torch.Tensor] = {}
     pos = 0

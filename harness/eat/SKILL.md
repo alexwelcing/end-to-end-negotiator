@@ -19,5 +19,5 @@ runs the official eval, records cost and score, and keeps `best.pt`.
 Roles available by default are in `harness/eat/roles/`. Role agents are `claude -p` processes on the user's
 subscription; they may only touch the spec, the episode log, and training knobs.
 
-Budget is in dollars; the loop stops when it is spent. Score = 0.5·heldout + 0.3·all + 0.2·(1−violations),
-blended 80/20 with hole-example accuracy when the spec has `learn` holes.
+Budget is in dollars; the loop stops when it is spent. Score = 0.4·heldout + 0.2·all + 0.2·(1−violations) + 0.2·learned-only,
+blended 80/20 with hole-example accuracy when the spec has `learn` holes (`nerve/train/eval.py` is the definition).
