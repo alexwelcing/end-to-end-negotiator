@@ -1,0 +1,20 @@
+﻿[package]
+name = "negotiator"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Rust + CUDA port of 'Deal or No Deal? End-to-End Learning for Negotiation Dialogues'"
+
+[features]
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
+
+[dependencies]
+candle-core = "=0.10.2"
+candle-nn = "=0.10.2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+rand = "0.8"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

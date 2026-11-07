@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nerve Drag Lab</title>
+<style>
+:root{
+  --bg:#f6f7fb;--panel:#ffffff;--ink:#141824;--mut:#646b7d;--line:#dfe3ec;--track:#c9cfdc;
+  --acc:#3b6cf6;--learn:#9b5cf6;--ok:#12a17a;--bad:#e5484d;--ghost:#8da2d8;--shadow:0 1px 2px rgba(20,24,36,.06),0 6px 24px rgba(20,24,36,.06);
+  --f0:#3b6cf6;--f1:#12a17a;--f2:#e8833a;--f3:#9b5cf6;--f4:#e5484d;--f5:#0aa2c0;--f6:#c2a20a;--f7:#d6409f;--f8:#5c7a29;--f9:#7a5c3a;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0d12;--panel:#141824;--ink:#e8eaf0;--mut:#8a90a0;--line:#232a3b;--track:#39425a;
+  --acc:#6ea8fe;--learn:#b794f6;--ok:#3ddc97;--bad:#ff6b6b;--ghost:#5d6f9e;--shadow:none;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0d12;--panel:#141824;--ink:#e8eaf0;--mut:#8a90a0;--line:#232a3b;--track:#39425a;
+  --acc:#6ea8fe;--learn:#b794f6;--ok:#3ddc97;--bad:#ff6b6b;--ghost:#5d6f9e;--shadow:none;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,-apple-system,"Segoe UI",Helvetica,sans-serif}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 40px}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--mut);margin:4px 0 0;max-width:720px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 16px}
+.tab{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:6px 14px;cursor:pointer;font:inherit}
+.tab[aria-selected="true"]{border-color:var(--acc);color:var(--acc);font-weight:600}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px}
+@media(max-width:900px){.layout{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 10px;font-weight:600}
+.stagecard{padding:0;overflow:hidden}
+.stagebar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.stagebar .hint{color:var(--mut);font-size:13px}
+.toggles{display:flex;gap:12px;color:var(--mut);font-size:13px}
+.toggles label{display:flex;gap:5px;align-items:center;cursor:pointer}
+svg#stage{display:block;width:100%;height:420px;touch-action:none;user-select:none}
+.handle{cursor:grab}.dragging .handle{cursor:grabbing}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+.side{display:flex;flex-direction:column;gap:16px}
+.state{display:grid;grid-template-columns:auto 1fr;gap:4px 14px}
+.state b{color:var(--mut);font-weight:500}
+.state span{font-variant-numeric:tabular-nums}
+.state .changed{color:var(--ok);font-weight:600}
+.bars{display:flex;flex-direction:column;gap:5px}
+.bar{display:grid;grid-template-columns:62px 1fr 56px;gap:8px;align-items:center;font-size:12px}
+.bar .lab{color:var(--mut);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .track{height:12px;border-radius:6px;background:var(--line);position:relative;overflow:hidden}
+.bar .g{position:absolute;left:0;top:0;bottom:0;background:var(--acc);opacity:.75}
+.bar .l{position:absolute;top:0;bottom:0;background:var(--learn);opacity:.85}
+.bar.win .lab{color:var(--ink);font-weight:600}.bar.win .track{outline:2px solid var(--ok);outline-offset:1px}
+.bar .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--mut)}
+.legend{display:flex;gap:12px;margin-top:8px;color:var(--mut);font-size:12px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:-1px;margin-right:4px}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--bg);border:1px solid var(--line);color:var(--mut);font-size:12px}
+.pill.far{color:var(--bad);border-color:var(--bad)}.pill.ok{color:var(--ok);border-color:var(--ok)}
+.actions{display:flex;flex-wrap:wrap;gap:6px}
+.actions .row{display:flex;gap:6px;align-items:center}
+button.act{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:6px 11px;font:inherit;cursor:pointer}
+button.act:hover{border-color:var(--acc)}
+select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px;font:inherit}
+.log{max-height:200px;overflow:auto;font-size:12px;color:var(--mut)}
+.log div{padding:4px 0;border-bottom:1px solid var(--line)}
+.log b{color:var(--ink);font-weight:600}
+.spark{width:100%;height:46px;display:block}
+.err{color:var(--bad)}
+footer{color:var(--mut);font-size:12px;margin-top:18px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Nerve Drag Lab</h1>
+      <p class="sub">Each pointer frame is one energy minimisation: the spec derives the legal futures, the gap is the distance from your pointer to where the element would land, and a trained network (on the GPU) adds its learned energy. Grab a handle and drag.</p>
+    </div>
+    <span class="pill" id="who">loading…</span>
+  </header>
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+  <div class="layout">
+    <section class="card stagecard">
+      <div class="stagebar">
+        <span class="hint" id="hint">Drag a handle.</span>
+        <div class="toggles">
+          <label><input type="checkbox" id="showField" checked> decision field</label>
+          <label><input type="checkbox" id="showGhosts" checked> futures</label>
+        </div>
+      </div>
+      <svg id="stage" role="img" aria-label="Draggable interface"></svg>
+    </section>
+    <aside class="side">
+      <div class="card"><h2>State</h2><div class="state mono" id="state"></div><div style="margin-top:8px" id="status"></div></div>
+      <div class="card"><h2>Energy per future</h2><div class="bars" id="bars"><span class="sub">Start a drag to see every candidate scored.</span></div>
+        <div class="legend"><span><i class="sw" style="background:var(--acc)"></i>gap (px)</span><span><i class="sw" style="background:var(--learn)"></i>learned</span><span><i class="sw" style="outline:2px solid var(--ok)"></i>argmin</span></div>
+        <svg class="spark" id="spark" viewBox="0 0 300 46" preserveAspectRatio="none" aria-label="gap over the drag"></svg>
+      </div>
+      <div class="card"><h2>Click actions</h2><div class="actions" id="actions"></div><div class="mono" id="click" style="margin-top:8px;font-size:12px"></div></div>
+      <div class="card"><h2>Trace</h2><div class="log mono" id="log"></div></div>
+    </aside>
+  </div>
+  <footer>Rust + candle on CUDA · spec, oracle and drag semantics match the Python reference · <span id="model"></span></footer>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const PAL = Array.from({length:10}, (_, i) => `var(--f${i})`);
+let specs = [], cur = null, state = null, view = null, drag = null, fieldCache = null, lastFrame = null;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (j && j.error) throw new Error(j.error);
+  return j;
+}
+const el = (tag, attrs = {}, parent) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); if (parent) parent.append(n); return n; };
+const fmt = v => typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : String(v);
+const key = v => JSON.stringify(v);
+
+async function init() {
+  specs = (await api("/api/specs")).filter(s => s.futures.length);
+  const m = specs.find(s => s.model);
+  $("who").textContent = `${specs.length} interfaces · ${m ? "network loaded" : "oracle energy only"}`;
+  $("model").textContent = m ? `model: ${m.model.summary}` : "no trained network loaded (pass --models)";
+  const tabs = $("tabs");
+  for (const s of specs) {
+    const b = document.createElement("button");
+    b.className = "tab"; b.role = "tab"; b.textContent = s.name;
+    b.onclick = () => select(s.name);
+    tabs.append(b);
+  }
+  $("showField").onchange = () => drawField();
+  $("showGhosts").onchange = () => render();
+  select(specs[0].name);
+}
+
+async function select(name) {
+  cur = specs.find(s => s.name === name);
+  for (const t of $("tabs").children) t.setAttribute("aria-selected", t.textContent === name);
+  state = structuredClone(cur.initial); drag = null; lastFrame = null; fieldCache = null;
+  $("log").innerHTML = ""; $("bars").innerHTML = '<span class="sub">Start a drag to see every candidate scored.</span>'; $("spark").innerHTML = "";
+  buildActions();
+  await refresh();
+}
+
+/** Geometry for the current state: element positions plus each gesture's futures. */
+async function refresh(changed = []) {
+  const v = await api(`/api/${cur.name}/view`, {state});
+  const gestures = [];
+  for (const f of cur.futures) {
+    const g = await api(`/api/${cur.name}/drag`, {gesture: f.name, state, preview: true});
+    gestures.push({...f, ...g});
+  }
+  const pts = [];
+  for (const p of Object.values(v.positions)) pts.push([p.x, p.y]);
+  for (const g of gestures) {
+    for (const c of g.candidates) pts.push([c.x, c.y]);
+    if (g.track) pts.push([g.track.from.x, g.track.from.y], [g.track.to.x, g.track.to.y]);
+  }
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const w = Math.max(x1 - x0, 60), h = Math.max(y1 - y0, 0);
+  const padX = w * 0.18 + 30, padY = Math.max(h * 0.25, 45);
+  const prev = view && view.spec === cur.name ? view.fixed : null;
+  view = {spec: cur.name, positions: v.positions, gestures, box: fitStage([x0 - padX, y0 - padY, w + 2 * padX, h + 2 * padY])};
+  view.fixed = prev && inside(prev, view.box) ? prev : view.box;
+  renderState(changed);
+  render();
+  drawField();
+}
+const inside = (a, b) => b[0] >= a[0] && b[1] >= a[1] && b[0] + b[2] <= a[0] + a[2] && b[1] + b[3] <= a[1] + a[3];
+/** Grow a box around its centre so it has the stage's aspect ratio (the field then fills the stage). */
+function fitStage([x, y, w, h]) {
+  const r = $("stage").getBoundingClientRect(), aspect = r.height / Math.max(r.width, 1);
+  if (h / w < aspect) { const nh = w * aspect; return [x, y - (nh - h) / 2, w, nh]; }
+  const nw = h / aspect; return [x - (nw - w) / 2, y, nw, h];
+}
+const cssColor = (() => { const cache = {}; return v => cache[v] || (cache[v] = getComputedStyle(document.documentElement).getPropertyValue(v.slice(4, -1)).trim()); })();
+function hexRgb(c) { const m = c.match(/^#([0-9a-f]{6})$/i); if (!m) return [128, 128, 128]; const n = parseInt(m[1], 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+
+function renderState(changed = []) {
+  const box = $("state"); box.innerHTML = "";
+  for (const f of cur.fields) {
+    const b = document.createElement("b"); b.textContent = f.name;
+    const s = document.createElement("span"); s.textContent = fmt(state[f.name]);
+    if (changed.includes(f.name)) s.className = "changed";
+    box.append(b, s);
+  }
+}
+
+function scale() { const r = $("stage").getBoundingClientRect(); return Math.min(r.width / view.fixed[2], r.height / view.fixed[3]); }
+
+function render() {
+  const svg = $("stage"); svg.innerHTML = "";
+  svg.setAttribute("viewBox", view.fixed.join(" "));
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  el("g", {id: "field"}, svg);
+  const k = scale(), R = 14 / k, small = 6 / k, fs = 11 / k;
+  const layer = el("g", {}, svg);
+  const showGhosts = $("showGhosts").checked;
+  for (const g of view.gestures) {
+    if (drag && drag.gesture !== g.name) continue;
+    if (g.track) el("line", {x1: g.track.from.x, y1: g.track.from.y, x2: g.track.to.x, y2: g.track.to.y, stroke: "var(--track)", "stroke-width": 4 / k, "stroke-linecap": "round"}, layer);
+    const cs = [...g.candidates].sort((a, b) => a.x - b.x || a.y - b.y);
+    if (cs.length > 1) el("polyline", {points: cs.map(c => `${c.x},${c.y}`).join(" "), fill: "none", stroke: "var(--track)", "stroke-width": 2 / k, "stroke-dasharray": `${4 / k} ${4 / k}`}, layer);
+    if (!showGhosts) continue;
+    const scores = drag && drag.gesture === g.name && lastFrame ? lastFrame.scores : null;
+    const probs = scores ? softmin(scores.map(s => s.total)) : null;
+    g.candidates.forEach((c, i) => {
+      const si = scores ? scores.findIndex(s => key(s.value) === key(c.value)) : -1;
+      const p = si >= 0 ? probs[si] : 0;
+      const win = lastFrame && drag && key(lastFrame.branch) === key(c.value);
+      const color = PAL[i % PAL.length];
+      el("circle", {cx: c.x, cy: c.y, r: small + p * R * 0.9, fill: color, "fill-opacity": scores ? 0.18 + 0.6 * p : 0.22, stroke: color, "stroke-width": (win ? 2.5 : 1) / k}, layer);
+      const t = el("text", {x: c.x, y: c.y - R - 4 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--mut)", class: "mono"}, layer);
+      t.textContent = fmt(c.value);
+    });
+  }
+  // `between`: Dragology interpolates the scene; draw the interpolated element.
+  if (drag && lastFrame && lastFrame.weights.length) {
+    const g = view.gestures.find(x => x.name === drag.gesture);
+    let bx = 0, by = 0;
+    for (const w of lastFrame.weights) { const c = g.candidates.find(c => key(c.value) === key(w.value)); bx += w.w * c.x; by += w.w * c.y; }
+    el("circle", {cx: bx, cy: by, r: R * 0.8, fill: "none", stroke: "var(--learn)", "stroke-width": 2 / k, "stroke-dasharray": `${3 / k} ${3 / k}`}, layer);
+  }
+  const positions = drag && lastFrame ? lastFrame.positions : view.positions;
+  for (const name of cur.render) {
+    const p = positions[name]; if (!p) continue;
+    const g = view.gestures.find(x => x.grab === name);
+    const grp = el("g", {class: g ? "handle" : "", "data-el": name}, layer);
+    const active = drag && g && drag.gesture === g.name;
+    if (active && lastFrame && cur.futures.find(f => f.name === g.name).far) {
+      const far = cur.futures.find(f => f.name === g.name).far;
+      el("circle", {cx: p.x, cy: p.y, r: far, fill: "none", stroke: lastFrame.far ? "var(--bad)" : "var(--track)", "stroke-width": 1.5 / k, "stroke-dasharray": `${6 / k} ${5 / k}`}, grp);
+    }
+    el("circle", {cx: p.x, cy: p.y, r: R, fill: active ? "var(--acc)" : "var(--panel)", stroke: "var(--acc)", "stroke-width": 2.5 / k, style: "transition:cx .12s ease-out, cy .12s ease-out"}, grp);
+    const t = el("text", {x: p.x, y: p.y + R + 14 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--ink)"}, grp);
+    t.textContent = name;
+    if (g) grp.addEventListener("pointerdown", e => startDrag(e, g));
+  }
+  if (drag && drag.pointer && lastFrame) {
+    const p = drag.pointer, g = view.gestures.find(x => x.name === drag.gesture), q = lastFrame.positions[g.grab];
+    el("line", {x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: lastFrame.far ? "var(--bad)" : "var(--acc)", "stroke-width": 1.5 / k, "stroke-dasharray": `${3 / k} ${3 / k}`}, layer);
+    el("circle", {cx: p.x, cy: p.y, r: R * 0.75, fill: "var(--acc)", "fill-opacity": 0.25, stroke: "var(--acc)", "stroke-width": 1 / k}, layer);
+  }
+  drawField(true);
+}
+
+function softmin(xs) { const m = Math.min(...xs), T = 12; const e = xs.map(x => Math.exp(-(x - m) / T)); const z = e.reduce((a, b) => a + b, 0); return e.map(x => x / z); }
+
+async function drawField(cached = false) {
+  const layer = document.getElementById("field"); if (!layer) return;
+  layer.innerHTML = "";
+  if (!$("showField").checked) return;
+  const g = drag ? view.gestures.find(x => x.name === drag.gesture) : view.gestures[0];
+  if (!g) return;
+  const [x0, y0, w, h] = view.fixed;
+  const ck = key([cur.name, g.name, state, view.fixed]);
+  if (!fieldCache || fieldCache.k !== ck) {
+    if (cached) return;
+    const nx = 96, ny = Math.max(8, Math.min(96, Math.round(96 * h / w)));
+    const r = await api(`/api/${cur.name}/field`, {gesture: g.name, state, x0, x1: x0 + w, y0, y1: y0 + h, nx, ny});
+    fieldCache = {k: ck, r, g: g.name, url: null};
+  }
+  if (!fieldCache.url) {
+    // One pixel per cell; the browser's bilinear scaling softens the region borders.
+    const {nx, ny, grid, values} = fieldCache.r;
+    const order = view.gestures.find(x => x.name === fieldCache.g).candidates.map(c => key(c.value));
+    const cv = document.createElement("canvas"); cv.width = nx; cv.height = ny;
+    const ctx = cv.getContext("2d"), img = ctx.createImageData(nx, ny);
+    for (let c = 0; c < nx * ny; c++) {
+      const [idx] = grid[c];
+      const ci = idx < 0 ? -1 : order.indexOf(key(values[idx]));
+      const [r, g2, b] = hexRgb(cssColor(ci < 0 ? "var(--bad)" : PAL[ci % PAL.length]));
+      img.data.set([r, g2, b, ci < 0 ? 30 : 58], c * 4);
+    }
+    ctx.putImageData(img, 0, 0);
+    fieldCache.url = cv.toDataURL();
+  }
+  el("image", {href: fieldCache.url, x: x0, y: y0, width: w, height: h, preserveAspectRatio: "none"}, layer);
+}
+
+function toLocal(e) { const svg = $("stage"); const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const p = pt.matrixTransform(svg.getScreenCTM().inverse()); return {x: p.x, y: p.y}; }
+
+async function startDrag(e, g) {
+  e.preventDefault();
+  const svg = $("stage");
+  svg.setPointerCapture(e.pointerId);
+  document.body.classList.add("dragging");
+  const s = await api(`/api/${cur.name}/drag`, {gesture: g.name, state});
+  drag = {gesture: g.name, sid: s.session, pointer: toLocal(e), busy: false, pending: null};
+  $("hint").textContent = `${g.name}: ${g.kind} over ${g.field}${g.stickiness ? ` · stickiness ${g.stickiness}px` : ""}${g.far ? ` · far ${g.far}px` : ""}`;
+  await sendFrame(drag.pointer);
+  svg.onpointermove = ev => { if (!drag) return; drag.pointer = toLocal(ev); queueFrame(drag.pointer); };
+  svg.onpointerup = svg.onpointercancel = ev => endDrag(toLocal(ev));
+}
+function queueFrame(p) { if (drag.busy) { drag.pending = p; return; } sendFrame(p); }
+async function sendFrame(p) {
+  drag.busy = true;
+  try { lastFrame = await api(`/api/drag/${drag.sid}/frame`, p); showFrame(); render(); }
+  catch (err) { $("hint").innerHTML = `<span class="err">${err.message}</span>`; }
+  drag.busy = false;
+  if (drag && drag.pending) { const q = drag.pending; drag.pending = null; sendFrame(q); }
+}
+
+function showFrame() {
+  const f = lastFrame, bars = $("bars"); bars.innerHTML = "";
+  const max = Math.max(...f.scores.map(s => s.gap + Math.max(0, s.learned)), 1);
+  const hasLearned = f.scores.some(s => s.learned !== 0);
+  for (const s of [...f.scores].sort((a, b) => a.total - b.total).slice(0, 10)) {
+    const d = document.createElement("div");
+    d.className = "bar" + (key(s.value) === key(f.branch) ? " win" : "");
+    const gw = 100 * s.gap / max, lw = 100 * Math.max(0, s.learned) / max;
+    d.innerHTML = `<span class="lab mono">${fmt(s.value)}</span><span class="track"><i class="g" style="width:${gw}%"></i><i class="l" style="left:${gw}%;width:${lw}%"></i></span><span class="num mono">${s.total.toFixed(1)}${hasLearned ? "" : "px"}</span>`;
+    bars.append(d);
+  }
+  $("status").innerHTML = `<span class="pill ${f.far ? "far" : "ok"}">${f.far ? "far: falls back to start" : "branch " + fmt(f.branch)}</span> <span class="pill">frame ${f.frames}</span> <span class="pill">gap ${f.gap.toFixed(1)}</span>`;
+  const sp = $("spark"); sp.innerHTML = "";
+  const pg = f.path_gap, m = Math.max(...pg, 1);
+  el("polyline", {points: pg.map((v, i) => `${(300 * i) / Math.max(pg.length - 1, 1)},${44 - 40 * v / m}`).join(" "), fill: "none", stroke: "var(--acc)", "stroke-width": 1.5, "vector-effect": "non-scaling-stroke"}, sp);
+  const st = $("state"); st.innerHTML = "";
+  for (const fl of cur.fields) {
+    const b = document.createElement("b"); b.textContent = fl.name;
+    const s = document.createElement("span"); s.textContent = fmt(f.preview[fl.name]);
+    if (key(f.preview[fl.name]) !== key(state[fl.name])) s.className = "changed";
+    st.append(b, s);
+  }
+}
+
+async function endDrag(p) {
+  if (!drag) return;
+  const d = drag; drag = null;
+  document.body.classList.remove("dragging");
+  const svg = $("stage"); svg.onpointermove = svg.onpointerup = svg.onpointercancel = null;
+  try {
+    const r = await api(`/api/drag/${d.sid}/release`, p);
+    const before = state; state = r.state; lastFrame = null;
+    const line = document.createElement("div");
+    const delta = r.changed.length ? r.changed.map(k => `${k} ${fmt(before[k])}→${fmt(state[k])}`).join(", ") : "no change";
+    line.innerHTML = `<b>${d.gesture}</b> ${delta} · ${r.frames} frames · ${r.violations.length ? `<span class="err">${r.violations.join("; ")}</span>` : "0 violations"}`;
+    $("log").prepend(line);
+    $("hint").textContent = "Committed. Drag again, or click an action.";
+    fieldCache = null;
+    await refresh(r.changed);
+  } catch (err) { $("hint").innerHTML = `<span class="err">${err.message}</span>`; await refresh(); }
+}
+
+function buildActions() {
+  const box = $("actions"); box.innerHTML = "";
+  for (const a of cur.actions) {
+    const row = document.createElement("div"); row.className = "row";
+    const sels = {};
+    for (const p of a.params) {
+      if (!p.domain) continue;
+      const s = document.createElement("select");
+      for (const v of p.domain) { const o = document.createElement("option"); o.value = JSON.stringify(v); o.textContent = `${p.name}=${fmt(v)}`; s.append(o); }
+      sels[p.name] = s;
+    }
+    const b = document.createElement("button"); b.className = "act"; b.textContent = a.name;
+    b.onclick = async () => {
+      const params = Object.fromEntries(Object.entries(sels).map(([k, s]) => [k, JSON.parse(s.value)]));
+      try {
+        const r = await api(`/api/${cur.name}/step`, {state, action: a.name, params});
+        const before = state; state = r.network || r.oracle;
+        const changed = cur.fields.map(f => f.name).filter(k => key(before[k]) !== key(state[k]));
+        $("click").innerHTML = r.network ? `network ${r.agrees ? '<span style="color:var(--ok)">agrees with the oracle</span>' : '<span class="err">disagrees with the oracle</span>'}` + (r.futures ? `<br>runner-up E = ${r.futures[1] ? r.futures[1].energy.toFixed(2) : "-"} vs ${r.futures[0].energy.toFixed(2)}` : "") : "oracle step";
+        const line = document.createElement("div");
+        line.innerHTML = `<b>${a.name}</b>${Object.keys(params).length ? " " + JSON.stringify(params) : ""} → ${changed.length ? changed.map(k => `${k} ${fmt(before[k])}→${fmt(state[k])}`).join(", ") : "no change"}`;
+        $("log").prepend(line);
+        fieldCache = null;
+        await refresh(changed);
+      } catch (err) { $("click").innerHTML = `<span class="err">${err.message}</span>`; }
+    };
+    row.append(b, ...Object.values(sels));
+    box.append(row);
+  }
+}
+
+window.addEventListener("resize", () => view && render());
+init().catch(err => { $("who").textContent = "error"; $("hint").innerHTML = `<span class="err">${err.message}</span>`; });
+</script>
+</body>
+</html>

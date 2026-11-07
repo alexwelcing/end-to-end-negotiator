@@ -1,0 +1,381 @@
+//! Local play server: every spec in `specs/` as a draggable interface.
+//!
+//! Each pointer frame is one minimisation (see `drag`), scored by the
+//! oracle-derived candidates, the render gap and, when a trained network is
+//! loaded, its learned energies computed on the GPU.
+
+use crate::drag::{element_position, DragSession, Frame, Point};
+use crate::oracle::Oracle;
+use crate::spec::{ActionInst, FutureKind, Spec, State};
+use crate::value::Value;
+use anyhow::{Context, Result};
+use axum::extract::{Path, State as AxState};
+use axum::http::StatusCode;
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use serde::Deserialize;
+use serde_json::{json, Value as J};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+const INDEX: &str = include_str!("../web/index.html");
+
+/// Learned energy for drags and clicks: `(start, action, candidate) -> energy`.
+pub trait LearnedEnergy: Send + Sync {
+    fn energy(&self, start: &State, action: Option<&ActionInst>, cand: &State) -> Result<f64>;
+    /// Energies of every candidate future for one click, if the model can score the whole space.
+    fn step_energies(&self, start: &State, action: &ActionInst) -> Result<Option<Vec<(State, f64)>>>;
+    fn describe(&self) -> J;
+}
+
+pub struct Entry {
+    pub spec: Spec,
+    pub model: Option<Arc<dyn LearnedEnergy>>,
+}
+
+struct Session {
+    spec: String,
+    gesture: String,
+    start: State,
+    last_branch: Option<Value>,
+    far: bool,
+    frames: usize,
+    path_gap: Vec<f64>,
+}
+
+pub struct App {
+    specs: Vec<Entry>,
+    sessions: Mutex<HashMap<String, Session>>,
+    counter: Mutex<u64>,
+    /// Weight of the learned term relative to the pixel gap.
+    pub lambda: f64,
+}
+
+struct ApiError(anyhow::Error);
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("{:#}", self.0) }))).into_response()
+    }
+}
+
+impl<E: Into<anyhow::Error>> From<E> for ApiError {
+    fn from(e: E) -> Self {
+        Self(e.into())
+    }
+}
+
+type ApiResult = std::result::Result<Json<J>, ApiError>;
+
+impl App {
+    pub fn new(specs: Vec<Entry>, lambda: f64) -> Self {
+        Self { specs, sessions: Mutex::new(HashMap::new()), counter: Mutex::new(0), lambda }
+    }
+
+    fn entry(&self, name: &str) -> Result<&Entry> {
+        self.specs.iter().find(|e| e.spec.name == name).with_context(|| format!("unknown spec {name:?}"))
+    }
+
+    fn energy_fn(&self, entry: &Entry) -> Option<Box<dyn Fn(&State, Option<&ActionInst>, &State) -> Result<f64> + '_>> {
+        let model = entry.model.clone()?;
+        let lambda = self.lambda;
+        Some(Box::new(move |s, a, c| Ok(lambda * model.energy(s, a, c)?)))
+    }
+
+    fn positions(spec: &Spec, s: &State) -> Result<J> {
+        let mut out = serde_json::Map::new();
+        for r in &spec.render {
+            let (x, y) = element_position(spec, &r.name, s)?;
+            out.insert(r.name.clone(), json!({"x": x, "y": y}));
+        }
+        Ok(J::Object(out))
+    }
+}
+
+pub fn router(app: Arc<App>) -> Router {
+    Router::new()
+        .route("/", get(|| async { Html(INDEX) }))
+        .route("/api/specs", get(list_specs))
+        .route("/api/{spec}/view", post(view))
+        .route("/api/{spec}/step", post(step))
+        .route("/api/{spec}/field", post(field))
+        .route("/api/{spec}/drag", post(drag_start))
+        .route("/api/drag/{sid}/frame", post(drag_frame))
+        .route("/api/drag/{sid}/release", post(drag_release))
+        .with_state(app)
+}
+
+async fn list_specs(AxState(app): AxState<Arc<App>>) -> ApiResult {
+    let mut out = Vec::new();
+    for e in &app.specs {
+        let sp = &e.spec;
+        let futures: Vec<J> = sp
+            .futures
+            .iter()
+            .filter(|f| f.grab.as_ref().is_some_and(|g| sp.render_element(g).is_some()))
+            .map(|f| {
+                json!({
+                    "name": f.name,
+                    "kind": format!("{:?}", f.kind).to_lowercase(),
+                    "field": sp.fields[f.field].name,
+                    "grab": f.grab,
+                    "stickiness": f.stickiness,
+                    "far": f.far,
+                })
+            })
+            .collect();
+        let actions: Vec<J> = sp
+            .actions
+            .iter()
+            .map(|a| {
+                let params: Vec<J> = a
+                    .params
+                    .iter()
+                    .map(|p| json!({"name": p.name, "domain": p.domain().ok().map(|d| d.iter().map(Value::to_json).collect::<Vec<_>>())}))
+                    .collect();
+                json!({"name": a.name, "params": params})
+            })
+            .collect();
+        out.push(json!({
+            "name": sp.name,
+            "fields": sp.fields.iter().map(|f| json!({"name": f.name, "kind": format!("{:?}", f.kind).to_lowercase()})).collect::<Vec<_>>(),
+            "initial": sp.state_json(&sp.initial),
+            "render": sp.render.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
+            "futures": futures,
+            "actions": actions,
+            "finite": sp.finite(),
+            "states": sp.state_space_size().unwrap_or(0),
+            "model": e.model.as_ref().map(|m| m.describe()),
+        }));
+    }
+    Ok(Json(J::Array(out)))
+}
+
+#[derive(Deserialize)]
+struct ViewReq {
+    state: J,
+}
+
+async fn view(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, Json(req): Json<ViewReq>) -> ApiResult {
+    let e = app.entry(&spec)?;
+    let s = e.spec.state_from_json(&req.state)?;
+    Ok(Json(json!({"positions": App::positions(&e.spec, &s)?})))
+}
+
+#[derive(Deserialize)]
+struct StepReq {
+    state: J,
+    action: String,
+    #[serde(default)]
+    params: J,
+}
+
+/// One click: the oracle's answer, and the network's argmin over every candidate future when loaded.
+async fn step(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, Json(req): Json<StepReq>) -> ApiResult {
+    let e = app.entry(&spec)?;
+    let sp = &e.spec;
+    let s = sp.state_from_json(&req.state)?;
+    let a = sp.action_from_json(&req.action, if req.params.is_null() { &J::Null } else { &req.params })?;
+    let oracle = Oracle::new(sp);
+    let truth = oracle.step(&s, &a)?;
+    let mut out = json!({"oracle": sp.state_json(&truth), "positions": App::positions(sp, &truth)?});
+    if let Some(m) = &e.model {
+        if let Some(mut energies) = m.step_energies(&s, &a)? {
+            energies.sort_by(|x, y| x.1.total_cmp(&y.1));
+            let pred = energies[0].0.clone();
+            out["network"] = sp.state_json(&pred);
+            out["agrees"] = J::Bool(pred == truth);
+            out["violations"] = json!(oracle.violations(&s, Some(&a), &pred, 0.01));
+            out["futures"] = J::Array(energies.iter().take(6).map(|(st, en)| json!({"state": sp.state_json(st), "energy": en})).collect());
+            out["positions"] = App::positions(sp, &pred)?;
+        }
+    }
+    Ok(Json(out))
+}
+
+#[derive(Deserialize)]
+struct DragReq {
+    gesture: String,
+    state: J,
+    /// Only describe the futures; do not open a session.
+    #[serde(default)]
+    preview: bool,
+}
+
+async fn drag_start(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, Json(req): Json<DragReq>) -> ApiResult {
+    let e = app.entry(&spec)?;
+    let sp = &e.spec;
+    let start = sp.state_from_json(&req.state)?;
+    let f = sp.future(&req.gesture).with_context(|| format!("unknown gesture {:?}", req.gesture))?;
+    let sess = DragSession::new(sp, f, start.clone(), None)?;
+    let cands: Vec<J> = sess
+        .candidates()
+        .iter()
+        .map(|c| {
+            let (x, y) = element_position(sp, sess.grab(), &c.state)?;
+            Ok(json!({
+                "value": c.value.to_json(),
+                "x": x, "y": y,
+                "action": c.action.as_ref().map(|a| json!({"name": a.name, "params": a.params_json()})),
+                "positions": App::positions(sp, &c.state)?,
+            }))
+        })
+        .collect::<Result<_>>()?;
+    let sid = if req.preview {
+        String::new()
+    } else {
+        let mut n = app.counter.lock().map_err(|_| anyhow::anyhow!("poisoned"))?;
+        *n += 1;
+        let sid = format!("d{}", *n);
+        let session = Session { spec, gesture: req.gesture, start: start.clone(), last_branch: None, far: false, frames: 0, path_gap: Vec::new() };
+        app.sessions.lock().map_err(|_| anyhow::anyhow!("poisoned"))?.insert(sid.clone(), session);
+        sid
+    };
+    // Track geometry for `vary`: where the element lands at each end of the range.
+    let track = if f.kind == FutureKind::Vary { vary_track(sp, f.field, sess.grab(), &start)? } else { J::Null };
+    Ok(Json(json!({
+        "session": sid,
+        "grab": sess.grab(),
+        "kind": format!("{:?}", f.kind).to_lowercase(),
+        "candidates": cands,
+        "track": track,
+        "start": App::positions(sp, &start)?,
+    })))
+}
+
+fn vary_track(sp: &Spec, field: usize, grab: &str, start: &State) -> Result<J> {
+    let (lo, hi) = sp.fields[field].range();
+    let at = |v: f64| -> Result<Point> {
+        let mut s = start.clone();
+        s[field] = sp.fields[field].canon(&Value::Float(v));
+        element_position(sp, grab, &s)
+    };
+    let (a, b) = (at(lo)?, at(hi)?);
+    Ok(json!({"from": {"x": a.0, "y": a.1, "value": lo}, "to": {"x": b.0, "y": b.1, "value": hi}}))
+}
+
+#[derive(Deserialize)]
+struct FrameReq {
+    x: f64,
+    y: f64,
+}
+
+fn frame_json(sp: &Spec, fr: &Frame, frames: usize, path_gap: &[f64]) -> Result<J> {
+    Ok(json!({
+        "preview": sp.state_json(&fr.preview),
+        "positions": App::positions(sp, &fr.preview)?,
+        "branch": fr.branch.as_ref().map(Value::to_json),
+        "gap": fr.gap,
+        "far": fr.far,
+        "weights": fr.weights.iter().map(|(v, w)| json!({"value": v.to_json(), "w": w})).collect::<Vec<_>>(),
+        "scores": fr.scores.iter().map(|s| json!({
+            "value": s.value.to_json(), "gap": s.gap, "learned": s.learned, "total": s.total,
+            "x": s.position.0, "y": s.position.1,
+        })).collect::<Vec<_>>(),
+        "frames": frames,
+        "path_gap": path_gap,
+    }))
+}
+
+async fn drag_frame(AxState(app): AxState<Arc<App>>, Path(sid): Path<String>, Json(req): Json<FrameReq>) -> ApiResult {
+    let mut sessions = app.sessions.lock().map_err(|_| anyhow::anyhow!("poisoned"))?;
+    let s = sessions.get_mut(&sid).with_context(|| format!("unknown session {sid}"))?;
+    let e = app.entry(&s.spec)?;
+    let sp = &e.spec;
+    let f = sp.future(&s.gesture).context("gesture vanished")?;
+    let energy = app.energy_fn(e);
+    let mut sess = DragSession::new(sp, f, s.start.clone(), energy.as_deref())?;
+    sess.restore_memory(s.last_branch.clone(), s.far);
+    let fr = sess.frame((req.x, req.y))?;
+    (s.last_branch, s.far) = sess.memory();
+    s.frames += 1;
+    s.path_gap.push(fr.gap);
+    if s.path_gap.len() > 120 {
+        s.path_gap.remove(0);
+    }
+    Ok(Json(frame_json(sp, &fr, s.frames, &s.path_gap)?))
+}
+
+#[derive(Deserialize)]
+struct ReleaseReq {
+    x: f64,
+    y: f64,
+}
+
+async fn drag_release(AxState(app): AxState<Arc<App>>, Path(sid): Path<String>, Json(req): Json<ReleaseReq>) -> ApiResult {
+    let s = app.sessions.lock().map_err(|_| anyhow::anyhow!("poisoned"))?.remove(&sid).with_context(|| format!("unknown session {sid}"))?;
+    let e = app.entry(&s.spec)?;
+    let sp = &e.spec;
+    let f = sp.future(&s.gesture).context("gesture vanished")?;
+    let energy = app.energy_fn(e);
+    let mut sess = DragSession::new(sp, f, s.start.clone(), energy.as_deref())?;
+    sess.restore_memory(s.last_branch, s.far);
+    sess.frame((req.x, req.y))?;
+    let drop = sess.release()?;
+    let changed: Vec<String> =
+        sp.fields.iter().zip(s.start.iter().zip(&drop)).filter(|(_, (a, b))| a != b).map(|(f, _)| f.name.clone()).collect();
+    Ok(Json(json!({
+        "state": sp.state_json(&drop),
+        "positions": App::positions(sp, &drop)?,
+        "changed": changed,
+        "frames": s.frames + 1,
+        "violations": Oracle::new(sp).violations(&s.start, None, &drop, 0.01),
+    })))
+}
+
+#[derive(Deserialize)]
+struct FieldReq {
+    gesture: String,
+    state: J,
+    x0: f64,
+    x1: f64,
+    y0: f64,
+    y1: f64,
+    #[serde(default = "default_res")]
+    nx: usize,
+    #[serde(default = "default_res")]
+    ny: usize,
+}
+
+fn default_res() -> usize {
+    48
+}
+
+/// The decision field: which future a memoryless drag would pick at each pointer position.
+async fn field(
+    AxState(app): AxState<Arc<App>>,
+    Path(spec): Path<String>,
+    Json(req): Json<FieldReq>,
+) -> ApiResult {
+    let e = app.entry(&spec)?;
+    let sp = &e.spec;
+    let start = sp.state_from_json(&req.state)?;
+    let f = sp.future(&req.gesture).with_context(|| format!("unknown gesture {:?}", req.gesture))?;
+    let energy = app.energy_fn(e);
+    let (nx, ny) = (req.nx.clamp(4, 96), req.ny.clamp(2, 96));
+    let mut grid = Vec::with_capacity(nx * ny);
+    let mut values: Vec<Value> = Vec::new();
+    for j in 0..ny {
+        for i in 0..nx {
+            let p = (
+                req.x0 + (req.x1 - req.x0) * (i as f64 + 0.5) / nx as f64,
+                req.y0 + (req.y1 - req.y0) * (j as f64 + 0.5) / ny as f64,
+            );
+            let mut sess = DragSession::new(sp, f, start.clone(), energy.as_deref())?;
+            let fr = sess.frame(p)?;
+            let idx = match &fr.branch {
+                None => -1,
+                Some(v) => match values.iter().position(|x| x == v) {
+                    Some(k) => k as i64,
+                    None => {
+                        values.push(v.clone());
+                        values.len() as i64 - 1
+                    }
+                },
+            };
+            grid.push(json!([idx, fr.gap]));
+        }
+    }
+    Ok(Json(json!({"nx": nx, "ny": ny, "values": values.iter().map(Value::to_json).collect::<Vec<_>>(), "grid": grid})))
+}

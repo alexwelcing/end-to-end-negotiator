@@ -4,3 +4,5 @@ __pycache__/
 /runs/
 *.egg-info/
 .wrangler/
+/target
+*.safetensors
