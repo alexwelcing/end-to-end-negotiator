@@ -26,6 +26,20 @@ Three questions decide it, in this order.
 | `stickiness` | `counter` | `closest` with stickiness, plus a `learn` hole |
 | `lock-past`, `snap-to-islands` (by name) | `tracks` | `closest` with `each` vary per branch, `floating`, `far` |
 | **`perm`†** | **`reorder`** | **Dragology's permutation demo: 5 items, futures = `moveItem(items, i, j)`** |
+| `hanoi`† | `hanoi` | rules that depend on other fields (only a top disk moves, never onto a smaller one), plus a solver given only by example (`learn` hole `hint`) |
+| `kanban`† | `kanban` | a 2-D reorder: 4 cards in 3 columns, 360 boards among 20,736 slot tuples |
+| `fifteen`† | `fifteen` | sliding puzzle scaled to 3×2: a tile trades places only with the adjacent blank |
+| `rush-hour`† | `rush_hour` | 6 cars on 5×5: slide until blocked, never through another car |
+| `sokoban`† | `sokoban` | pushing: three objects in one rule (player, box, the cell beyond) |
+| `insert-and-remove`† | `insert_remove` | a list whose length changes (4 tiles, each in the list or in the toolbar) |
+| `todo`† | `todo` | reorder plus a completed flag per card (no text: there is no text type) |
+| `scheduler`† | `scheduler` | 3 meetings, 2 rooms, a 3-slot timeline; ends move without crossing; overlaps allowed, as in Dragology |
+| `study-three-way-switch`† | `three_way_switch` | `between` over three states, and a mode that allows only the next one clockwise |
+| `linked-sliders`† | `linked_sliders` | continuous: 3 sliders that move together and stop together at a track end |
+
+Every spec header says what was scaled down and what Dragology does that Nerve cannot yet (chained drags, snap
+radii, text, drawing anything but points). Each has tests in `crates/nerve/tests/demo_*.rs` showing its drag
+futures equal Dragology's rule, computed independently. Training results: `experiments/round2/`.
 
 ### Reorder: how far the network generalises (2026-11-07, local GPU)
 
@@ -66,27 +80,24 @@ wrong one, sometimes with the moved item not where it was dropped (the remaining
 That is the part a permutation-equivariant head ([dragology.md](dragology.md) §4, question 1) would have to fix:
 the same update rule whichever item moves.
 
-## Next: doable with today's language, and hard
+## Not built yet: doable with today's language
 
-| demo | state in Dragology | Nerve encoding | why it is hard |
+| demo | state in Dragology | Nerve encoding | note |
 |---|---|---|---|
-| **`hanoi`†** | `pegs: number[][]`, 3–4 disks | peg per disk: 3⁴ = 81 states | legality depends on other fields: Dragology writes `amb([0, 1, 2])` plus `require(newPeg[0] < newPeg[1])`, an oracle inside the drag spec. Illegal drops exist, unlike reorder |
-| `kanban`† | `columns: { cards }[]` | column and position per card | a 2-D reorder: moves between columns shift two lists |
 | `study-reorderable-list`† | `items: string[]`, 4 items | as reorder | subsumed by `reorder` |
-| `tromino`† | `missingSquare: Vec2`, board level | the square's coordinates | the state is tiny; the tiling is all render |
-| `insert-and-remove` (by name) | — | count plus positions | a list whose length changes |
+| `tromino`† | `missingSquare: Vec2`, board level | the square's coordinates | the state is tiny; the tiling is all render, which the lab cannot draw |
+| `perm-floating`, `perm-double` (by name) | — | as reorder | variants of `perm` |
 
-## Needs restricted candidates or a structured state
+## Needs a structured state
 
 | demo | state in Dragology | blocker |
 |---|---|---|
-| `fifteen`† | 4×4 tile positions | 16!/2 ≈ 10¹³ states. Even the 3×3 version has 181,440 |
-| `rush-hour`† | cars `{x, y, w, h, dir}` on 6×6 | large state space; a move slides one car until it is blocked |
-| `sokoban`† | player plus boxes, walls and goals on a grid | large state space; pushing chains through two objects |
 | `card-piles`† | piles of cards with continuous offsets | continuous positions plus grouping that merges and splits |
 | `lists-in-lists`†, `lists-in-lists-vanilla` | rows of tiles or nested rows | a recursive list type |
-| `todo`† | todos with free text | text fields |
 | `lists-2d`, `lists-2d-sizes`, `canvas-of-lists`, `outline`, `two-kinds-of-tree`, `sprouting-tree` | (by name) | lists of lists and trees |
+
+Full-size `fifteen` (4×4, about 10¹³ states), `rush-hour` and `sokoban` levels need candidates restricted to a
+gesture's futures instead of every enumerable state; the built versions are scaled down to fit.
 
 ## Mathematical structure editors
 

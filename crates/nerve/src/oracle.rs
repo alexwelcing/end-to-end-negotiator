@@ -244,10 +244,26 @@ mod tests {
     #[test]
     fn shipped_specs_pass_self_check() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(0);
-        for name in ["toggle", "counter", "slider", "negotiate", "slider_continuous", "tracks", "reorder"] {
+        for name in ["toggle", "counter", "slider", "negotiate", "slider_continuous", "tracks", "reorder", "hanoi", "kanban"] {
             let s = spec(name);
             let problems = Oracle::new(&s).self_check(&mut rng).unwrap();
             assert!(problems.is_empty(), "{name}: {problems:?}");
+        }
+    }
+
+    #[test]
+    fn every_hole_example_obeys_the_spec_that_bounds_it() {
+        // A `learn` hole is behaviour the spec shows but cannot write; its examples must still keep the rules.
+        for name in ["counter", "hanoi"] {
+            let s = spec(name);
+            let o = Oracle::new(&s);
+            for h in &s.holes {
+                for ex in &h.examples {
+                    let a = ActionInst { name: h.action.clone(), params: ex.params.clone() };
+                    let v = o.violations(&ex.state, Some(&a), &ex.next, 0.01);
+                    assert!(v.is_empty(), "{name}/{}: {} -> {}: {v:?}", h.name, s.state_key(&ex.state), s.state_key(&ex.next));
+                }
+            }
         }
     }
 

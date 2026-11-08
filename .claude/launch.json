@@ -4,7 +4,7 @@
     {
       "name": "nerve-drag-lab",
       "runtimeExecutable": "cargo",
-      "runtimeArgs": ["run", "-q", "--release", "-p", "nerve", "--bin", "nerve", "--", "serve", "--specs", "specs", "--addr", "127.0.0.1:8787", "--models", "runs/rs"],
+      "runtimeArgs": ["run", "-q", "--release", "-p", "nerve", "--bin", "nerve", "--", "serve", "--specs", "specs", "--addr", "127.0.0.1:8787", "--models", "runs/served"],
       "port": 8787
     }
   ]

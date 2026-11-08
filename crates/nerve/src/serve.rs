@@ -27,6 +27,10 @@ pub trait LearnedEnergy: Send + Sync {
     /// Energies of every candidate future for one click, if the model can score the whole space.
     fn step_energies(&self, start: &State, action: &ActionInst) -> Result<Option<Vec<(State, f64)>>>;
     fn describe(&self) -> J;
+    /// Whether training never saw this (state, action), when the model knows its hold-out.
+    fn unseen(&self, _start: &State, _action: &ActionInst) -> Option<bool> {
+        None
+    }
     /// Whether one energy per probe is cheap enough for the decision field (thousands of
     /// pixels, each a few hundred probes). Drags use the energy either way.
     fn cheap(&self) -> bool {
@@ -214,6 +218,7 @@ async fn step(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, Json(re
             let violations = oracle.violations(&s, Some(&a), &pred, 0.01);
             let (verdict, hole) = verdict(sp, &s, &a, &pred, agrees, &violations);
             out["verdict"] = json!(verdict);
+            out["unseen"] = json!(m.unseen(&s, &a));
             out["hole"] = hole;
             out["violations"] = json!(violations);
             out["futures"] = J::Array(energies.iter().take(6).map(|(st, en)| json!({"state": sp.state_json(st), "energy": en})).collect());

@@ -216,6 +216,95 @@ const STORIES = {
       "Drag an item back and forth across a neighbour: it keeps its slot for 6 px before switching (<code>stickiness</code>).",
     ],
   },
+  hanoi: {
+    title: "Hanoi: rules written, solver learned",
+    what: "Four disks on three pegs. The spec writes the rules (only a top disk moves, never onto a smaller one), so a drag only offers legal drops. It does not write how to solve the puzzle: <code>hint</code> is the best next move toward peg 2, given only by example, one per position. The network learned the solver from those examples; no rule in the spec describes it.",
+    tryit: [
+      "Drag the smallest disk to another peg, then try the largest: it has nowhere to go until it is on top.",
+      "Click <b>hint</b> again and again: the network plays the puzzle toward peg 2 in the fewest moves, and the spec checks every move is legal.",
+      "Click <b>move</b> with src=0, dst=1 when peg 1 holds a smaller disk: the spec refuses, and so does the network.",
+    ],
+  },
+  kanban: {
+    title: "Kanban: a board, not a list",
+    what: "Four cards in three columns. Dragging a card lifts it out of its column and drops it into any place in any column; the cards below close the gap or make room. Of the 20,736 ways to put four cards in twelve slots, only 360 are boards, and the network answers only with those.",
+    tryit: [
+      "Drag card <b>a</b> into the middle of another column: the cards below it move down to make room.",
+      "Drag a card far below the last card of a column: it lands right under that card, because a column has no gaps.",
+      "Click <b>move_d</b> with to=0: d jumps to the top of the first column, and the spec checks every card.",
+    ],
+  },
+  fifteen: {
+    title: "Fifteen: slide into the blank",
+    what: "Dragology's sliding puzzle on a 3 × 2 board: tiles 1–5 and a blank. A tile can only trade places with the blank, and only when they are side by side. Of the 7,776 ways to place the pieces, 720 are boards, and only half of those can be reached from any one board, as in the real puzzle.",
+    tryit: [
+      "Drag a tile next to the blank into it: they trade places.",
+      "Drag a tile that is not next to the blank: it has nowhere to go.",
+      "Drag the blank itself onto a neighbour, which Dragology allows too. Four slides solve the starting board.",
+    ],
+  },
+  rush_hour: {
+    title: "Rush hour: slide until something is in the way",
+    what: "Six cars on a 5 × 5 board, each sliding along its own row or column. A car may stop anywhere it can reach without passing through another car, and the red car alone can drive off the right edge. The spec writes the blocking rule once, so every drag offers exactly the stops that are open.",
+    tryit: [
+      "Drag the red car right: car <b>b</b> stands across its row, so it cannot move yet.",
+      "Free it in four drags: <b>d</b> left, <b>b</b> down, <b>c</b> up, then <b>red</b> off the right edge.",
+      "Drag a car through another one: the drop stops short of it, because the spec forbids passing through.",
+    ],
+  },
+  sokoban: {
+    title: "Sokoban: pushing, not carrying",
+    what: "The top of Dragology's level: the player and two boxes in a small walled room. Drag the player one cell; a box in the way is pushed one cell further, but only onto empty floor. The rule involves three objects at once, the player, the box ahead and the cell beyond it.",
+    tryit: [
+      "Drag the <b>player</b> right into box 1: the box moves one cell ahead of it.",
+      "Try to push a box into a wall or into the other box: the drag stays put.",
+      "Both boxes reach the goals (cells 5 and 14) in twelve drags.",
+    ],
+  },
+  insert_remove: {
+    title: "Insert and remove: a list that grows and shrinks",
+    what: "Fruit tiles in a list above a toolbar. Drag a tile to any place in the list (the others make room) or onto its toolbar slot to remove it; pull it back out to insert it again. The list holds two to four tiles, so its length is part of the state.",
+    tryit: [
+      "Drag <b>d</b> (grapes) from the toolbar into the middle of the list.",
+      "Drag a list tile onto its toolbar slot: it leaves, and the tiles after it close up.",
+      "Pull a tile far from every place it could go: past 50 px the drag gives up (<code>far</code>).",
+    ],
+  },
+  todo: {
+    title: "Todo: reorder and complete",
+    what: "Four cards: drag one to reorder the list, tick its box to complete it (a completed card sits 50 px to the right). Two independent rules, a reorder and a toggle, in one 384-state interface. Text is not part of the spec yet, so cards cannot be added or edited.",
+    tryit: [
+      "Drag card <b>a</b> below <b>c</b>: the cards in between move up.",
+      "Click <b>toggle_c</b>: c is completed, and nothing else changes.",
+      "Drag the completed card <b>b</b> to the top: it keeps its tick.",
+    ],
+  },
+  scheduler: {
+    title: "Scheduler: meetings on a timeline",
+    what: "Three meetings in two rooms on a three-slot timeline. Drag a bar to change a meeting's room; drag a dot to move one end, never off the timeline and never shorter than one slot. As in Dragology, two meetings may overlap; Dragology only colours a double booking red.",
+    tryit: [
+      "Drag meeting 0's right dot to the end of the timeline.",
+      "Drag a left dot past its right dot: it stops one slot short.",
+      "Drag <b>bar2</b> into room 0, where meeting 0 overlaps it: the spec allows the double booking, as Dragology does.",
+    ],
+  },
+  three_way_switch: {
+    title: "Three-way switch: between three places",
+    what: "A knob with three resting places, red at the top and green and blue below. Dragging blends between the places the knob may reach and lets go at the nearest. Turn on clockwise-only and the spec allows just the next place clockwise, so the drag only offers that one.",
+    tryit: [
+      "Drag the knob toward the bottom right and let go: it rests at b.",
+      "Click <b>toggle_clockwise_only</b>, then drag from r toward g: it refuses, because clockwise from r is b.",
+    ],
+  },
+  linked_sliders: {
+    title: "Linked sliders: values that push each other",
+    what: "Three sliders on tracks. Dragging one moves it and every slider below it by the same amount, and the group stops as soon as any of them reaches the end of its track. The values are continuous, so the network finds its answer by gradient descent over three numbers at once.",
+    tryit: [
+      "Drag slider 1 right: sliders 2 and 3 move with it.",
+      "Keep going: everything stops when slider 3 reaches the end of its track.",
+      "Drag slider 3 alone: the sliders above it do not move.",
+    ],
+  },
   tracks: {
     title: "Tracks: the drag asks the spec",
     what: "A block on three rails. The drag spec only says <i>pick the closest rail, then slide along it</i>. How long each rail is, and which rails you can reach, both come from the <code>move</code> rule, so the drag finds out by asking the spec.",
@@ -276,7 +365,8 @@ function renderNetwork() {
   } else if (held.n && held.n < all.n) {
     big = `${Math.round(held.exact * held.n)}/${held.n}`; caption = `transitions it never saw in training, right (${pct(t.holdout)} held out)`;
   } else if (all.n) {
-    big = `${Math.round(all.exact * all.n)}/${all.n}`; caption = "transitions right (the spec is small enough to train on all of them)";
+    big = `${Math.round(all.exact * all.n)}/${all.n}`;
+    caption = t.holdout ? "transitions right (the spec is small enough to train on all of them)" : "transitions right, trained on the whole spec";
   }
   const viol = all.violation_rate === 0 ? "No rule broken on any of them." : all.violation_rate !== undefined ? `${pct(all.violation_rate)} break a rule.` : "";
   const he = t.hole_examples;
@@ -548,7 +638,8 @@ function verdictHtml(r, a, before) {
   else if (r.verdict === "disagrees") why = "No rule is broken, but it is not the answer the spec writes down.";
   else if (r.verdict === "agrees" && !cur.finite) why = "Within 1% of the range, the tolerance it is scored at.";
   const spec = r.hole ? (r.hole.example ? `example: ${delta(before, r.hole.example)}` : "no rule here, only examples") : delta(before, r.oracle);
-  return `<div class="verdict ${cls}"><div class="head"><span class="icon">${icon}</span>${head}</div>${why ? `<small>${why}</small>` : ""}</div>
+  const seen = r.unseen === true ? ' <span class="pill">never seen in training</span>' : r.unseen === false ? ' <span class="pill">seen in training</span>' : "";
+  return `<div class="verdict ${cls}"><div class="head"><span class="icon">${icon}</span>${head}${seen}</div>${why ? `<small>${why}</small>` : ""}</div>
     <div class="cmp"><b>Network</b><span>${delta(before, r.network)}</span><b>Spec</b><span>${spec}</span></div>`;
 }
 

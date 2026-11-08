@@ -288,8 +288,21 @@ impl Jepa {
         a_cont: Option<&Tensor>,
         fact: Option<(&FactInputs, &Tensor)>,
     ) -> Result<Tensor> {
+        self.energy_all_z(s, a_idx, &self.target(cand)?, a_cont, fact)
+    }
+
+    /// `energy_all` with the candidates' target latents `zc` already computed: they do not change
+    /// between calls once the target encoder stops moving, so a served model encodes them once.
+    pub fn energy_all_z(
+        &self,
+        s: &Tensor,
+        a_idx: &Tensor,
+        zc: &Tensor,
+        a_cont: Option<&Tensor>,
+        fact: Option<(&FactInputs, &Tensor)>,
+    ) -> Result<Tensor> {
         let zh = self.predict(s, a_idx, a_cont)?;
-        let mut e = sqdist(&zh, &self.target(cand)?)?;
+        let mut e = sqdist(&zh, zc)?;
         if let (Some((fi, cand_idx)), true) = (fact, self.fact.is_some()) {
             let za = self.action_embed(a_idx, a_cont)?;
             for (f, lp) in self.fact_logprobs(&za, s, &zh, fi)?.iter().enumerate() {

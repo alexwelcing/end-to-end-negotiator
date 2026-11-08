@@ -24,8 +24,14 @@ enum Cmd {
         /// Directory holding `model.json` and `model.safetensors`.
         model: PathBuf,
         /// Answer only with states the invariants allow, whatever the model was trained with.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "all_states")]
         valid_only: bool,
+        /// Answer from every enumerable state: the network on its own, without the spec's invariants.
+        #[arg(long)]
+        all_states: bool,
+        /// Print one JSON line (for an experiment log) instead of a summary.
+        #[arg(long)]
+        json: bool,
     },
     /// Print every (state, action) transition as JSON lines (finite specs).
     Table {
@@ -81,6 +87,12 @@ enum Cmd {
         /// Finite specs: score every enumerable state, including ones that break an invariant (for ablations).
         #[arg(long)]
         all_states: bool,
+        /// Which hashed hold-out split: a different salt is a different set of unseen cells.
+        #[arg(long, default_value = "nerve")]
+        salt: String,
+        /// Hold out every cell where this expression over the state (and action params) is true.
+        #[arg(long)]
+        holdout_rule: Option<String>,
         /// Train on the GPU (needs a `--features cuda` build).
         #[arg(long)]
         cuda: bool,
@@ -98,9 +110,9 @@ fn device(cuda: bool) -> Result<candle_core::Device> {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Serve { specs, addr, lambda, models, cuda } => serve(&specs, &addr, lambda, models.as_deref(), &device(cuda)?)?,
-        Cmd::Train { spec, out, epochs, batch, lr, seed, holdout, weight_decay, pairs, log_every, fact_weight, all_states, cuda } => {
+        Cmd::Train { spec, out, epochs, batch, lr, seed, holdout, weight_decay, pairs, log_every, fact_weight, all_states, salt, holdout_rule, cuda } => {
             let s = Spec::load(&spec)?;
-            let cfg = nerve::train::TrainConfig { epochs, batch, lr, seed, holdout, weight_decay, cont_pairs: pairs, log_every, fact_weight, candidates: if all_states { nerve::train::Candidates::All } else { nerve::train::Candidates::Valid }, ..Default::default() };
+            let cfg = nerve::train::TrainConfig { epochs, batch, lr, seed, holdout, weight_decay, cont_pairs: pairs, log_every, fact_weight, candidates: if all_states { nerve::train::Candidates::All } else { nerve::train::Candidates::Valid }, holdout_salt: salt, holdout_rule, ..Default::default() };
             let dir = out.join(&s.name);
             // Finite specs score every enumerable successor; continuous ones descend the energy.
             let report = if s.finite() {
@@ -115,23 +127,50 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
             println!("saved {}", dir.display());
         }
-        Cmd::Eval { spec, model, valid_only } => {
+        Cmd::Eval { spec, model, valid_only, all_states, json } => {
+            use nerve::train::Candidates;
             let s = Spec::load(&spec)?;
-            let m = nerve::train::Model::load_as(s, &model, &candle_core::Device::Cpu, valid_only.then_some(nerve::train::Candidates::Valid))?;
-            let t = &m.meta().context("checkpoint has no model.json")?["train"];
-            let (holdout, salt) = (t["holdout"].as_f64().unwrap_or(0.15), t["holdout_salt"].as_str().unwrap_or("nerve").to_string());
-            let r = nerve::train::evaluate(&m, holdout, &salt)?;
-            let h = &r["heldout"];
-            println!(
-                "{} ({:?} candidates, {}): held-out {}/{} ({:.3}), violations {:.4}",
-                model.display(),
-                m.candidates,
-                m.candidate_count(),
-                (h["exact"].as_f64().unwrap_or(0.0) * h["n"].as_f64().unwrap_or(0.0)).round(),
-                h["n"],
-                h["exact"].as_f64().unwrap_or(0.0),
-                r["all"]["violation_rate"].as_f64().unwrap_or(0.0)
-            );
+            let force = if valid_only { Some(Candidates::Valid) } else if all_states { Some(Candidates::All) } else { None };
+            let m = nerve::train::Model::load_as(s.clone(), &model, &candle_core::Device::Cpu, force)?;
+            // The same hold-out the model was trained with: fraction, salt and rule.
+            let t: nerve::train::TrainConfig = serde_json::from_value(m.meta().context("checkpoint has no model.json")?["train"].clone())?;
+            let r = nerve::train::evaluate(&m, &nerve::train::HoldOut::new(&s, &t)?)?;
+            if json {
+                let line = serde_json::json!({
+                    "spec": s.name,
+                    "model": model.display().to_string(),
+                    "candidates": m.candidates,
+                    "candidate_count": m.candidate_count(),
+                    "seed": t.seed,
+                    "holdout": t.holdout,
+                    "salt": t.holdout_salt,
+                    "rule": t.holdout_rule,
+                    "epochs": t.epochs,
+                    "fact_weight": t.fact_weight,
+                    "heldout": r["heldout"],
+                    "seen": r["seen"],
+                    "all": r["all"],
+                    "hole_examples": r["hole_examples"],
+                });
+                println!("{line}");
+            } else {
+                let (h, he) = (&r["heldout"], &r["hole_examples"]);
+                let holes = if he.is_null() {
+                    String::new()
+                } else {
+                    format!(", hole examples seen {} / unseen {}", he["seen"]["exact"], he["heldout"]["exact"])
+                };
+                println!(
+                    "{} ({:?} candidates, {}): held-out {}/{} ({:.3}), violations {:.4}{holes}",
+                    model.display(),
+                    m.candidates,
+                    m.candidate_count(),
+                    (h["exact"].as_f64().unwrap_or(0.0) * h["n"].as_f64().unwrap_or(0.0)).round(),
+                    h["n"],
+                    h["exact"].as_f64().unwrap_or(0.0),
+                    r["all"]["violation_rate"].as_f64().unwrap_or(0.0)
+                );
+            }
         }
         Cmd::Check { spec } => {
             let s = Spec::load(&spec)?;

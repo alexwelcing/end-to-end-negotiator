@@ -757,6 +757,82 @@ mod tests {
         assert!(Oracle::new(&sp).violations(&sp.initial, None, &fin, 0.01).is_empty());
     }
 
+    /// Hanoi state from pegs of disks 1 (smallest) to 4.
+    fn pegs(sp: &Spec, d: [i64; 4]) -> State {
+        st(sp, serde_json::json!({"d1": d[0], "d2": d[1], "d3": d[2], "d4": d[3]}))
+    }
+
+    fn landing_pegs(sp: &Spec, start: &State, disk: usize) -> Vec<i64> {
+        let sess = DragSession::new(sp, sp.future(&format!("drag_disk{disk}")).unwrap(), start.clone(), None).unwrap();
+        let mut v: Vec<i64> = sess.candidates().iter().map(|c| c.value.as_f64().unwrap() as i64).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn hanoi_only_top_disks_move_and_never_onto_smaller_ones() {
+        let sp = spec("hanoi");
+        // All four on peg 0: only disk 1 is on top, and it can go anywhere.
+        assert_eq!(landing_pegs(&sp, &sp.initial, 1), vec![0, 1, 2]);
+        for disk in 2..=4 {
+            assert_eq!(landing_pegs(&sp, &sp.initial, disk), vec![0], "disk {disk} is buried");
+        }
+        // Disk 1 on peg 1: disk 2 is now on top of peg 0, and may only go to the empty peg 2.
+        let s = pegs(&sp, [1, 0, 0, 0]);
+        assert_eq!(landing_pegs(&sp, &s, 2), vec![0, 2]);
+        assert_eq!(landing_pegs(&sp, &s, 1), vec![0, 1, 2]);
+        // Dropping disk 2 on peg 2 commits; a drag of buried disk 3 goes nowhere.
+        let (_, fin) = drag(&sp, "drag_disk2", s.clone(), &[(70.0, 170.0), (350.0, 200.0)]).unwrap();
+        assert_eq!(fin, pegs(&sp, [1, 2, 0, 0]));
+        let (_, fin) = drag(&sp, "drag_disk3", s.clone(), &[(210.0, 180.0), (350.0, 200.0)]).unwrap();
+        assert_eq!(fin, s);
+    }
+
+    /// A board as three columns of cards, and its `[sa, sb, sc, sd]` slots (column * 4 + position).
+    fn board_slots(cols: &[Vec<char>; 3]) -> State {
+        "abcd"
+            .chars()
+            .map(|x| {
+                let (c, p) = cols.iter().enumerate().find_map(|(c, col)| col.iter().position(|&y| y == x).map(|p| (c, p))).unwrap();
+                Value::Int((c * 4 + p) as i64)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn kanban_futures_are_every_place_the_card_can_be_dropped() {
+        let sp = spec("kanban");
+        let boards = [
+            [vec!['a', 'b'], vec!['c'], vec!['d']],
+            [vec!['d', 'c', 'b', 'a'], vec![], vec![]],
+            [vec![], vec!['b', 'd'], vec!['a', 'c']],
+        ];
+        for cols in &boards {
+            let start = board_slots(cols);
+            for card in ['a', 'b', 'c', 'd'] {
+                let sess = DragSession::new(&sp, sp.future(&format!("drag_{card}")).unwrap(), start.clone(), None).unwrap();
+                let mut got: Vec<State> = sess.candidates().iter().map(|c| c.state.clone()).collect();
+                // Dragology: lift the card out, then insert it at any position of any column.
+                let mut lifted = cols.clone();
+                for col in lifted.iter_mut() {
+                    col.retain(|&y| y != card);
+                }
+                let mut want: Vec<State> = Vec::new();
+                for c in 0..3 {
+                    for p in 0..=lifted[c].len() {
+                        let mut b = lifted.clone();
+                        b[c].insert(p, card);
+                        want.push(board_slots(&b));
+                    }
+                }
+                got.sort_by_key(|s| sp.state_key(s));
+                want.sort_by_key(|s| sp.state_key(s));
+                want.dedup();
+                assert_eq!(got, want, "dragging {card} on {cols:?}");
+            }
+        }
+    }
+
     #[test]
     fn render_block_is_checked() {
         let toggle = include_str!("../../../specs/toggle.nerve");

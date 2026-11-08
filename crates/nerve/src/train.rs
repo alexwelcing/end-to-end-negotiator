@@ -7,7 +7,8 @@
 
 use crate::encode::Encoder;
 use crate::jepa::{shift_indices, FactInputs, Jepa, JepaConfig};
-use crate::oracle::{effective_holdout, holdout_mask, Oracle};
+use crate::expr::Expr;
+use crate::oracle::{effective_holdout, holdout_mask, Oracle, StateScope};
 use crate::serve::LearnedEnergy;
 use crate::spec::{ActionInst, Spec, State};
 use anyhow::{ensure, Context, Result};
@@ -21,7 +22,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
+/// Missing fields take their defaults, so the config of an older checkpoint still loads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TrainConfig {
     pub epochs: usize,
     pub batch: usize,
@@ -49,6 +52,9 @@ pub struct TrainConfig {
     pub eval_samples: usize,
     /// Finite specs: which states the model may answer with.
     pub candidates: Candidates,
+    /// Hold out every (state, action) cell where this expression over the state and the
+    /// action's params is true, instead of a hashed `holdout` fraction: a whole region unseen.
+    pub holdout_rule: Option<String>,
 }
 
 impl Default for TrainConfig {
@@ -74,6 +80,7 @@ impl Default for TrainConfig {
             cont_negatives: 16,
             eval_samples: 1000,
             candidates: Candidates::Valid,
+            holdout_rule: None,
         }
     }
 }
@@ -102,8 +109,12 @@ pub struct Model {
     cand_idx: Tensor,
     /// `(state, action) -> energies of every candidate`, so drag frames do not re-run the network.
     cache: Mutex<HashMap<String, Vec<f32>>>,
+    /// Target latents of the candidates, encoded once until the weights change (`invalidate`).
+    cand_z: Mutex<Option<Tensor>>,
     /// `model.json` of a loaded checkpoint (how it was trained and scored).
     meta: Option<J>,
+    /// The cells this checkpoint never trained on, rebuilt from its `model.json`.
+    holdout: Option<HoldOut>,
 }
 
 impl Model {
@@ -125,7 +136,13 @@ impl Model {
         }
         let cand = Tensor::from_vec(vecs, (rows.len(), enc.state_dim), dev)?;
         let cand_idx = Tensor::from_vec(idxs, (rows.len(), enc.slots.len()), dev)?;
-        Ok(Self { spec, enc, jepa, candidates, rows, row_of, cand, cand_idx, cache: Mutex::new(HashMap::new()), meta: None })
+        Ok(Self { spec, enc, jepa, candidates, rows, row_of, cand, cand_idx, cache: Mutex::new(HashMap::new()), cand_z: Mutex::new(None), meta: None, holdout: None })
+    }
+
+    /// Forget cached energies and candidate latents: call after the weights change.
+    pub fn invalidate(&self) {
+        self.cache.lock().expect("energy cache poisoned").clear();
+        *self.cand_z.lock().expect("candidate latents poisoned") = None;
     }
 
     pub fn candidate_count(&self) -> usize {
@@ -187,7 +204,14 @@ impl Model {
         };
         let (cur, shift) = self.fact_inputs(&[s])?;
         let fi = FactInputs { cur_idx: &cur, shift_idx: &shift };
-        let e: Vec<f32> = self.jepa.energy_all(&x, &ai, &self.cand, ac.as_ref(), Some((&fi, &self.cand_idx)))?.squeeze(0)?.to_vec1()?;
+        let zc = {
+            let mut z = self.cand_z.lock().expect("candidate latents poisoned");
+            match z.as_ref() {
+                Some(zc) => zc.clone(),
+                None => z.insert(self.jepa.target(&self.cand)?).clone(),
+            }
+        };
+        let e: Vec<f32> = self.jepa.energy_all_z(&x, &ai, &zc, ac.as_ref(), Some((&fi, &self.cand_idx)))?.squeeze(0)?.to_vec1()?;
         self.cache.lock().expect("energy cache poisoned").insert(key, e.clone());
         Ok(e)
     }
@@ -227,6 +251,8 @@ impl Model {
         };
         let mut m = Self::new(spec, cfg, candidates.unwrap_or(saved), dev)?;
         load_weights(&m.jepa, dir, dev)?;
+        let t: TrainConfig = serde_json::from_value(meta["train"].clone())?;
+        m.holdout = Some(HoldOut::new(&m.spec, &t)?);
         m.meta = Some(meta);
         Ok(m)
     }
@@ -296,6 +322,11 @@ impl LearnedEnergy for Model {
         Ok(f64::from(e[r] - min))
     }
 
+    /// Whether training held this case out, for a checkpoint that records its hold-out.
+    fn unseen(&self, start: &State, action: &ActionInst) -> Option<bool> {
+        self.holdout.as_ref().filter(|h| !h.is_empty()).and_then(|h| h.held(&self.spec, start, action).ok())
+    }
+
     fn step_energies(&self, start: &State, action: &ActionInst) -> Result<Option<Vec<(State, f64)>>> {
         let e = self.energies(start, action)?;
         Ok(Some(self.rows.iter().map(|&i| self.enc.states[i].clone()).zip(e.into_iter().map(f64::from)).collect()))
@@ -350,14 +381,45 @@ fn oracle_pairs(spec: &Spec) -> Result<Vec<(State, ActionInst)>> {
     Ok(out)
 }
 
+/// Which (state, action) cells training never sees: a hashed fraction (salted, so a different
+/// salt is a different split), or every cell a rule picks.
+pub struct HoldOut {
+    frac: f64,
+    salt: String,
+    rule: Option<Expr>,
+}
+
+impl HoldOut {
+    pub fn new(spec: &Spec, cfg: &TrainConfig) -> Result<Self> {
+        let rule = cfg
+            .holdout_rule
+            .as_deref()
+            .map(|r| Expr::compile(r).with_context(|| format!("hold-out rule {r:?}")))
+            .transpose()?;
+        Ok(Self { frac: effective_holdout(spec, cfg.holdout)?, salt: cfg.holdout_salt.clone(), rule })
+    }
+
+    /// Nothing is held out: the model trained on the whole spec.
+    pub fn is_empty(&self) -> bool {
+        self.rule.is_none() && self.frac <= 0.0
+    }
+
+    pub fn held(&self, spec: &Spec, s: &State, a: &ActionInst) -> Result<bool> {
+        match &self.rule {
+            Some(rule) => Ok(rule.eval(&StateScope { spec, cur: s, params: &a.params, old: None })?.truthy()),
+            None => Ok(holdout_mask(spec, s, a, self.frac, &self.salt)),
+        }
+    }
+}
+
 fn dataset<R: Rng>(spec: &Spec, cfg: &TrainConfig, rng: &mut R) -> Result<Dataset> {
     let oracle = Oracle::new(spec);
-    let frac = effective_holdout(spec, cfg.holdout)?;
+    let ho = HoldOut::new(spec, cfg)?;
     let space = spec.state_space()?;
     let mut pos = Vec::new();
     let mut neg = Vec::new();
     for (s, a) in oracle_pairs(spec)? {
-        if holdout_mask(spec, &s, &a, frac, &cfg.holdout_salt) {
+        if ho.held(spec, &s, &a)? {
             continue;
         }
         let next = oracle.step(&s, &a)?;
@@ -369,7 +431,7 @@ fn dataset<R: Rng>(spec: &Spec, cfg: &TrainConfig, rng: &mut R) -> Result<Datase
         pos.push(Pair { s, a, next });
     }
     for (s, a, next) in hole_examples(spec) {
-        if holdout_mask(spec, &s, &a, frac, &cfg.holdout_salt) {
+        if ho.held(spec, &s, &a)? {
             continue;
         }
         for _ in 0..cfg.hole_weight {
@@ -394,11 +456,14 @@ fn conformance(model: &Model, pairs: &[(State, ActionInst)]) -> Result<J> {
 
 /// Same report and score as `nerve/train/eval.py` (the Rust model has no compiled circuit,
 /// so `learned_only` is the network itself and equals `all`).
-pub fn evaluate(model: &Model, holdout: f64, salt: &str) -> Result<J> {
+pub fn evaluate(model: &Model, ho: &HoldOut) -> Result<J> {
     let spec = &model.spec;
-    let frac = effective_holdout(spec, holdout)?;
     let all = oracle_pairs(spec)?;
-    let (held, seen): (Vec<_>, Vec<_>) = all.iter().cloned().partition(|(s, a)| holdout_mask(spec, s, a, frac, salt));
+    let mut held = Vec::new();
+    let mut seen = Vec::new();
+    for (s, a) in &all {
+        if ho.held(spec, s, a)? { held.push((s.clone(), a.clone())) } else { seen.push((s.clone(), a.clone())) }
+    }
     let all_r = conformance(model, &all)?;
     let held_r = if held.is_empty() { all_r.clone() } else { conformance(model, &held)? };
     let mut out = json!({"all": all_r, "seen": conformance(model, &seen)?, "heldout": held_r, "learned_only": all_r});
@@ -406,12 +471,24 @@ pub fn evaluate(model: &Model, holdout: f64, salt: &str) -> Result<J> {
     let mut score = 0.4 * f("heldout", "exact") + 0.2 * f("all", "exact") + 0.2 * (1.0 - f("all", "violation_rate")) + 0.2 * f("learned_only", "exact");
     let ex = hole_examples(spec);
     if !ex.is_empty() {
-        let mut hit = 0;
+        // Examples the network trained on and ones it never saw are different claims: score both,
+        // and whether a wrong answer still keeps the rules that bound the hole.
+        let oracle = Oracle::new(spec);
+        let (mut hit, mut split) = (0usize, [(0usize, 0usize, 0usize); 2]);
         for (s, a, n) in &ex {
-            hit += usize::from(model.step(s, a)? == *n);
+            let pred = model.step(s, a)?;
+            let ok = pred == *n;
+            let bad = !oracle.violations(s, Some(a), &pred, 0.01).is_empty();
+            let k = usize::from(ho.held(spec, s, a)?);
+            hit += usize::from(ok);
+            split[k] = (split[k].0 + usize::from(ok), split[k].1 + usize::from(bad), split[k].2 + 1);
         }
         let rate = hit as f64 / ex.len() as f64;
-        out["hole_examples"] = json!({"n": ex.len(), "exact": rate});
+        let part = |(h, v, n): (usize, usize, usize)| {
+            let frac = |x: usize| if n == 0 { J::Null } else { json!(x as f64 / n as f64) };
+            json!({"n": n, "exact": frac(h), "violation_rate": frac(v)})
+        };
+        out["hole_examples"] = json!({"n": ex.len(), "exact": rate, "seen": part(split[0]), "heldout": part(split[1])});
         score = 0.8 * score + 0.2 * rate;
     }
     out["score"] = json!((score * 1e4).round() / 1e4);
@@ -491,6 +568,7 @@ pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Model, J)>
     }
     let model = Model::new(spec.clone(), Model::config_for(spec, cfg)?, cfg.candidates, dev)?;
     let data = dataset(spec, cfg, &mut rng)?;
+    let ho = HoldOut::new(spec, cfg)?;
     ensure!(data.pos.len() >= 2, "{}: fewer than two training pairs", spec.name);
     println!(
         "{}: {} pairs, {} negatives, {} candidates ({:?}), {} params on {:?}",
@@ -523,9 +601,9 @@ pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Model, J)>
             model.jepa.ema_update()?;
             tot += f64::from(v) * idx.len() as f64;
         }
-        model.cache.lock().expect("energy cache poisoned").clear();
+        model.invalidate();
         if ep % cfg.log_every.max(1) == 0 || ep + 1 == cfg.epochs {
-            let ev = evaluate(&model, cfg.holdout, &cfg.holdout_salt)?;
+            let ev = evaluate(&model, &ho)?;
             println!(
                 "  ep {ep:3} loss {:.4} | exact all {:.3} heldout {:.3} score {:.3}{}",
                 tot / data.pos.len() as f64,
@@ -536,7 +614,7 @@ pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Model, J)>
             );
         }
     }
-    let mut report = evaluate(&model, cfg.holdout, &cfg.holdout_salt)?;
+    let mut report = evaluate(&model, &ho)?;
     report["train_pairs"] = json!(data.pos.len());
     report["negatives"] = json!(data.neg.len());
     report["seconds"] = json!((t0.elapsed().as_secs_f64() * 10.0).round() / 10.0);
@@ -606,6 +684,55 @@ mod tests {
         std::fs::write(&path, meta.to_string())?;
         assert_eq!(Model::load(sp, &dir, &Device::Cpu)?.candidates, Candidates::All);
         std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn a_rule_holds_out_a_whole_region() -> Result<()> {
+        let sp = spec("counter");
+        let cfg = TrainConfig { holdout_rule: Some("count >= 7".into()), ..Default::default() };
+        let ho = HoldOut::new(&sp, &cfg)?;
+        let d = dataset(&sp, &cfg, &mut rand::rngs::StdRng::seed_from_u64(0))?;
+        assert!(d.pos.iter().all(|p| p.s[0].as_f64().unwrap() < 7.0), "no trained pair starts at count 7..9");
+        let seven = sp.state_from_json(&json!({"count": 7, "armed": true}))?;
+        assert!(ho.held(&sp, &seven, &ActionInst::new("inc"))?);
+        assert!(!ho.held(&sp, &sp.initial, &ActionInst::new("inc"))?);
+        // A rule that is not an expression over the state fails when the hold-out is built.
+        let bad = TrainConfig { holdout_rule: Some("count >=".into()), ..Default::default() };
+        assert!(HoldOut::new(&sp, &bad).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn a_loaded_model_knows_which_cases_it_never_saw() -> Result<()> {
+        let sp = spec("counter");
+        let cfg = TrainConfig { epochs: 1, d: 8, hidden: 16, log_every: 1000, holdout_rule: Some("count >= 7".into()), ..Default::default() };
+        let (m, report) = train(&sp, &cfg, &Device::Cpu)?;
+        let dir = std::env::temp_dir().join(format!("nerve-unseen-test-{}", std::process::id()));
+        m.save(&dir, &cfg, &report)?;
+        let back = Model::load(sp.clone(), &dir, &Device::Cpu)?;
+        let inc = ActionInst::new("inc");
+        let eight = sp.state_from_json(&json!({"count": 8, "armed": true}))?;
+        assert_eq!(back.unseen(&eight, &inc), Some(true));
+        assert_eq!(back.unseen(&sp.initial, &inc), Some(false));
+        std::fs::remove_dir_all(&dir).ok();
+        // Trained on the whole spec: nothing was held out, so "seen or not" says nothing.
+        let full = TrainConfig { epochs: 1, d: 8, hidden: 16, log_every: 1000, holdout: 0.0, ..Default::default() };
+        let (m, report) = train(&sp, &full, &Device::Cpu)?;
+        m.save(&dir, &full, &report)?;
+        assert_eq!(Model::load(sp.clone(), &dir, &Device::Cpu)?.unseen(&eight, &inc), None);
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn hole_examples_are_scored_separately_when_held_out() -> Result<()> {
+        let sp = spec("counter");
+        // Hold out the two `nudge` examples that start at count 0 or 9.
+        let cfg = TrainConfig { epochs: 1, d: 8, hidden: 16, log_every: 1000, holdout_rule: Some("count == 0 or count == 9".into()), ..Default::default() };
+        let (_, report) = train(&sp, &cfg, &Device::Cpu)?;
+        let he = &report["hole_examples"];
+        assert_eq!((he["n"].as_u64(), he["heldout"]["n"].as_u64(), he["seen"]["n"].as_u64()), (Some(5), Some(2), Some(3)));
         Ok(())
     }
 
