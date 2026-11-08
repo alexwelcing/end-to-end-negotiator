@@ -60,6 +60,21 @@ impl<'a> Oracle<'a> {
         Ok(next)
     }
 
+    /// The events `state -action-> new` emits: each `emits` predicate of the action's transition
+    /// that holds with `new` as the state and `state` as `old`. Derived from the spec, so a
+    /// network's successor and the oracle's emit the same events when they are equal.
+    pub fn events(&self, state: &State, action: &ActionInst, new: &State) -> Result<Vec<String>> {
+        let Some(t) = self.spec.transition(&action.name) else { return Ok(Vec::new()) };
+        let scope = StateScope { spec: self.spec, cur: new, params: &action.params, old: Some(state) };
+        let mut out = Vec::new();
+        for (event, pred) in &t.emits {
+            if pred.eval(&scope).with_context(|| format!("emits {event} of {}", action.name))?.truthy() {
+                out.push(event.clone());
+            }
+        }
+        Ok(out)
+    }
+
     /// Which spec properties does `state -action-> new` break?
     ///
     /// Continuous fields within `tol` of their range of the true value are
@@ -128,6 +143,7 @@ impl<'a> Oracle<'a> {
         let mut problems = Vec::new();
         let mut check = |s: &State, a: &ActionInst| -> Result<()> {
             let n = self.step(s, a)?;
+            self.events(s, a, &n)?; // a bad `emits` predicate fails here, before any training
             for v in self.violations(s, Some(a), &n, 0.01) {
                 problems.push(format!("{}{} from {}: {v}", a.name, params_repr(a), sp.state_json(s)));
             }
@@ -249,6 +265,22 @@ mod tests {
             let problems = Oracle::new(&s).self_check(&mut rng).unwrap();
             assert!(problems.is_empty(), "{name}: {problems:?}");
         }
+    }
+
+    #[test]
+    fn events_are_derived_from_the_step() {
+        let d = spec("digit");
+        let o = Oracle::new(&d);
+        let inc = ActionInst::new("inc");
+        let nine = vec![Value::Int(9)];
+        let zero = o.step(&nine, &inc).unwrap();
+        assert_eq!(zero, vec![Value::Int(0)]);
+        assert_eq!(o.events(&nine, &inc, &zero).unwrap(), vec!["wrap".to_string()]);
+        let one = o.step(&zero, &inc).unwrap();
+        assert!(o.events(&zero, &inc, &one).unwrap().is_empty());
+        assert!(o.events(&nine, &ActionInst::new("reset"), &zero).unwrap().is_empty());
+        // The self-check evaluates every `emits` predicate, so a bad one is caught before training.
+        assert!(o.self_check(&mut rand::rngs::StdRng::seed_from_u64(0)).unwrap().is_empty());
     }
 
     #[test]

@@ -1,0 +1,17 @@
+# One decimal digit: the block an odometer is made of (docs/machine-room.md, paper 2 §3.4).
+# `inc` counts and emits `wrap` when it rolls over from 9 to 0; the machine wires that event
+# to the next digit's `inc`. The digit knows nothing about its neighbours.
+nerve: 1
+name: digit
+state:
+  d: {type: int, range: [0, 9]}
+actions:
+  inc: {}
+  reset: {}
+transitions:
+  inc:   { d: "(d + 1) % 10", emits: { wrap: "old.d == 9" } }
+  reset: { d: "0" }
+ensures:
+  - { after: inc, holds: "d == (old.d + 1) % 10" }
+  - { after: reset, holds: "d == 0" }
+initial: {d: 0}

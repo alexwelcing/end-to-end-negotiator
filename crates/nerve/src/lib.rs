@@ -6,6 +6,7 @@ pub mod drag;
 pub mod encode;
 pub mod expr;
 pub mod jepa;
+pub mod machine;
 pub mod oracle;
 pub mod serve;
 pub mod spec;

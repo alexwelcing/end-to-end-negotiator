@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use nerve::oracle::{effective_holdout, holdout_mask, Oracle};
 use nerve::spec::Spec;
 use rand::SeedableRng;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(about = "Nerve: interfaces as spec-checked energy networks")]
@@ -174,6 +174,10 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Check { spec } => {
+            let text = std::fs::read_to_string(&spec).with_context(|| format!("reading {}", spec.display()))?;
+            if nerve::machine::is_machine_document(&text) {
+                return check_machine(&spec);
+            }
             let s = Spec::load(&spec)?;
             let problems = Oracle::new(&s).self_check(&mut rand::rngs::StdRng::seed_from_u64(0))?;
             println!(
@@ -209,6 +213,38 @@ fn main() -> Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+/// `nerve check` on a `machine:` document: parse the wiring, then run the composed oracle against
+/// the machine's `ensures` and every block's invariants.
+fn check_machine(path: &Path) -> Result<()> {
+    use nerve::machine::{MachineSpec, EXHAUSTIVE_LIMIT};
+    const WALKS: usize = 200;
+    const HORIZON: usize = 500;
+    let m = MachineSpec::load(path)?;
+    let blocks: Vec<String> = m.blocks.iter().map(|(inst, ty, _)| format!("{inst}:{ty}")).collect();
+    println!(
+        "machine {}: {} blocks [{}], {} inputs, {} wires, {} derived, {} ensures, {} states",
+        m.name,
+        m.blocks.len(),
+        blocks.join(" "),
+        m.inputs.len(),
+        m.wires.len(),
+        m.derived.len(),
+        m.ensures.len(),
+        m.state_space_size()?
+    );
+    let report = m.check(WALKS, HORIZON)?;
+    for p in &report.problems {
+        println!("  {p}");
+    }
+    anyhow::ensure!(report.problems.is_empty(), "{} problems", report.problems.len());
+    if report.exhaustive {
+        println!("ok: exhaustive over {} reachable states, {} ticks", report.states_visited, report.ticks);
+    } else {
+        println!("ok: more than {EXHAUSTIVE_LIMIT} reachable states; {WALKS} random walks of {HORIZON} steps, {} ticks", report.ticks);
     }
     Ok(())
 }

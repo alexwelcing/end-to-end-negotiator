@@ -179,6 +179,23 @@ every metric, invented four roles that did not exist at iteration 0 (`split_prob
 `margin_auditor`, `margin_checker`), and, once the score was saturated, restructured the team to cut its own cost
 per iteration. The full record (every TEAM_CONFIG, eval and role report) is in `docs/runs/negotiate-claude-2026-11-06/`.
 
+## Machines
+
+Blocks wire into machines without a line of code between them (paper 2, `docs/paper2/`; plan and status in
+`docs/machine-room.md`). A transition may `emits:` an event, a predicate over the old and new state that the
+runtime evaluates after the step; a `machine:` document names block instances, the external `inputs`, `wires`
+from one block's event to another's action, `derived` values and machine-level `ensures`. Instances of one block
+type share one network. `machines/odometer.nerve` is three copies of `specs/digit.nerve` and two carry wires:
+
+```bash
+./target/release/nerve check machines/odometer.nerve
+```
+
+runs the composed spec against its own `ensures` over all 1,000 reachable states; `machines/odometer6.nerve`
+has a million and is checked by random walks. The tests in `crates/nerve/src/machine.rs` train the digit
+network on its whole spec and run it as the three blocks (exact on every state and input, zero violations) and
+as six (exact on 10⁵ sampled increments), which is paper 2's Prediction 1.
+
 ## Paper
 
 `docs/paper/` holds the manuscript (NeurIPS format, 9 pages + appendix), its sources, the CPU sweep that re-derives
@@ -190,6 +207,7 @@ this branch and what to do next.
 
 ```
 specs/*.nerve            behavior specs (toggle, counter, slider, negotiate)
+machines/*.nerve         machines: block instances wired by events (odometer, odometer6)
 nerve/spec               schema, safe expression language, parser, oracle, self-check, exact circuit compiler,
                          drag.py: gestures as energy minimisation over spec-derived futures (docs/dragology.md)
 nerve/data               append-only episode log; coverage / random / adversarial rollouts; spec-derived negatives

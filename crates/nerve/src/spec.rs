@@ -173,6 +173,9 @@ pub struct Transition {
     pub when: Option<Expr>,
     /// `(field index, expression)` in the order the spec writes them.
     pub updates: Vec<(usize, Expr)>,
+    /// `(event, predicate)`: events this step emits when the predicate holds over the old and
+    /// new state. A machine wires them to other blocks' actions; the runtime evaluates them.
+    pub emits: Vec<(String, Expr)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,6 +276,19 @@ impl Spec {
 
     pub fn render_element(&self, name: &str) -> Option<&RenderElement> {
         self.render.iter().find(|r| r.name == name)
+    }
+
+    /// Every event name some transition can emit, in first-seen order.
+    pub fn events(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for t in &self.transitions {
+            for (e, _) in &t.emits {
+                if !out.contains(&e.as_str()) {
+                    out.push(e);
+                }
+            }
+        }
+        out
     }
 
     pub fn hole_actions(&self) -> Vec<&str> {
@@ -551,15 +567,24 @@ fn parse_doc(doc: &Yaml) -> Result<Spec> {
         ensure!(known_action(&aname), "transition for unknown action {aname:?}");
         let mut when = None;
         let mut updates = Vec::new();
+        let mut emits = Vec::new();
         for (k, v) in entries(Some(&td))? {
             if k == "when" {
                 when = Some(Expr::compile(&expr_src(&v)?)?);
                 continue;
             }
+            if k == "emits" {
+                let Yaml::Mapping(em) = &v else { bail!("transition {aname}: `emits` must be a mapping of event name to predicate") };
+                for (event, pred) in entries(Some(&Yaml::Mapping(em.clone())))? {
+                    ensure!(field_idx(&event).is_none(), "transition {aname}: event {event:?} has the name of a field");
+                    emits.push((event, Expr::compile(&expr_src(&pred)?)?));
+                }
+                continue;
+            }
             let idx = field_idx(&k).with_context(|| format!("transition {aname} updates unknown field {k:?}"))?;
             updates.push((idx, Expr::compile(&expr_src(&v)?)?));
         }
-        transitions.push(Transition { action: aname, when, updates });
+        transitions.push(Transition { action: aname, when, updates, emits });
     }
 
     let mut holes = Vec::new();
@@ -599,13 +624,13 @@ fn parse_doc(doc: &Yaml) -> Result<Spec> {
                 .iter()
                 .map(|(k, v)| Ok((field_idx(k).with_context(|| format!("fallback updates unknown field {k:?}"))?, Expr::compile(&expr_src(v)?)?)))
                 .collect::<Result<_>>()?;
-            transitions.push(Transition { action: haction.clone(), when: None, updates });
+            transitions.push(Transition { action: haction.clone(), when: None, updates, emits: Vec::new() });
         }
         holes.push(Hole { name: hname, action: haction, examples });
     }
     for a in &actions {
         if !transitions.iter().any(|t| t.action == a.name) {
-            transitions.push(Transition { action: a.name.clone(), when: None, updates: Vec::new() });
+            transitions.push(Transition { action: a.name.clone(), when: None, updates: Vec::new(), emits: Vec::new() });
         }
     }
 
@@ -692,6 +717,20 @@ mod tests {
         let c = Spec::parse(COUNTER).unwrap();
         let set3 = c.action_instances().unwrap().into_iter().find(|a| a.name == "set" && a.param("to") == Some(&Value::Int(3)));
         assert_eq!(c.action_key(&set3.unwrap()), "('set', (('to', 3),))");
+    }
+
+    #[test]
+    fn transitions_can_emit_events() {
+        let d = Spec::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../specs/digit.nerve")).unwrap();
+        let inc = d.transition("inc").unwrap();
+        assert_eq!(inc.emits.iter().map(|(e, _)| e.as_str()).collect::<Vec<_>>(), vec!["wrap"]);
+        assert_eq!(inc.emits[0].1.source(), "old.d == 9");
+        assert!(d.transition("reset").unwrap().emits.is_empty());
+        assert_eq!(d.events(), vec!["wrap"]);
+        // `emits` is not a field, so it must not be taken for one.
+        assert_eq!(inc.updates.len(), 1);
+        let bad = "nerve: 1\nname: x\nstate:\n  n: {type: int, range: [0, 1]}\nactions:\n  go: {}\ntransitions:\n  go: { n: \"1\", emits: \"notamap\" }\n";
+        assert!(Spec::parse(bad).unwrap_err().to_string().contains("emits"));
     }
 
     #[test]

@@ -1,0 +1,18 @@
+# A thousand-state odometer from three ten-state digits and two carry wires. The network is the
+# digit's, used three times; nothing ever enumerates the product. The machine's own `ensures` is
+# what `nerve check machines/odometer.nerve` runs, exhaustively at this size.
+nerve: 1
+machine: odometer
+blocks:
+  d0: digit     # specs/digit.nerve
+  d1: digit
+  d2: digit
+inputs: [d0.inc, d0.reset, d1.reset, d2.reset]   # what the outside world may do; wires do the rest
+wires:
+  - { on: d0.wrap, do: d1.inc }
+  - { on: d1.wrap, do: d2.inc }
+derived:
+  value: "d0.d + 10 * d1.d + 100 * d2.d"
+ensures:
+  - { after: d0.inc, holds: "value == (old.value + 1) % 1000" }
+  - { holds: "0 <= value <= 999" }

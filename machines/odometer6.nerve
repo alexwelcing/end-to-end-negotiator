@@ -1,0 +1,23 @@
+# Six digits: a million states, past what `nerve check` visits exhaustively, so the check samples
+# random walks. The network is still the digit's, now used six times (paper 2, Prediction 1).
+nerve: 1
+machine: odometer6
+blocks:
+  d0: digit
+  d1: digit
+  d2: digit
+  d3: digit
+  d4: digit
+  d5: digit
+inputs: [d0.inc, d0.reset, d1.reset, d2.reset, d3.reset, d4.reset, d5.reset]
+wires:
+  - { on: d0.wrap, do: d1.inc }
+  - { on: d1.wrap, do: d2.inc }
+  - { on: d2.wrap, do: d3.inc }
+  - { on: d3.wrap, do: d4.inc }
+  - { on: d4.wrap, do: d5.inc }
+derived:
+  value: "d0.d + 10 * d1.d + 100 * d2.d + 1000 * d3.d + 10000 * d4.d + 100000 * d5.d"
+ensures:
+  - { after: d0.inc, holds: "value == (old.value + 1) % 1000000" }
+  - { holds: "0 <= value <= 999999" }

@@ -17,9 +17,9 @@ jobs:
         run: cargo build --release --workspace
       - name: Tests
         run: cargo test --release --workspace
-      - name: Every spec passes its own self-check
+      - name: Every spec and machine passes its own check
         run: |
-          for s in specs/*.nerve; do
+          for s in specs/*.nerve machines/*.nerve; do
             echo "== $s"; ./target/release/nerve check "$s"
           done
       - name: The served models load and answer
