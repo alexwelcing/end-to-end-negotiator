@@ -18,6 +18,15 @@ struct Cli {
 enum Cmd {
     /// Type-check a spec and run it against its own invariants.
     Check { spec: PathBuf },
+    /// Rescore a trained finite model on the hold-out it was trained with.
+    Eval {
+        spec: PathBuf,
+        /// Directory holding `model.json` and `model.safetensors`.
+        model: PathBuf,
+        /// Answer only with states the invariants allow, whatever the model was trained with.
+        #[arg(long)]
+        valid_only: bool,
+    },
     /// Print every (state, action) transition as JSON lines (finite specs).
     Table {
         spec: PathBuf,
@@ -66,6 +75,12 @@ enum Cmd {
         /// Evaluate every N epochs (and at the last one).
         #[arg(long, default_value_t = 10)]
         log_every: usize,
+        /// Weight of the equivariant factored head (0 turns it off, for ablations).
+        #[arg(long, default_value_t = 10.0)]
+        fact_weight: f64,
+        /// Finite specs: score every enumerable state, including ones that break an invariant (for ablations).
+        #[arg(long)]
+        all_states: bool,
         /// Train on the GPU (needs a `--features cuda` build).
         #[arg(long)]
         cuda: bool,
@@ -83,9 +98,9 @@ fn device(cuda: bool) -> Result<candle_core::Device> {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Serve { specs, addr, lambda, models, cuda } => serve(&specs, &addr, lambda, models.as_deref(), &device(cuda)?)?,
-        Cmd::Train { spec, out, epochs, batch, lr, seed, holdout, weight_decay, pairs, log_every, cuda } => {
+        Cmd::Train { spec, out, epochs, batch, lr, seed, holdout, weight_decay, pairs, log_every, fact_weight, all_states, cuda } => {
             let s = Spec::load(&spec)?;
-            let cfg = nerve::train::TrainConfig { epochs, batch, lr, seed, holdout, weight_decay, cont_pairs: pairs, log_every, ..Default::default() };
+            let cfg = nerve::train::TrainConfig { epochs, batch, lr, seed, holdout, weight_decay, cont_pairs: pairs, log_every, fact_weight, candidates: if all_states { nerve::train::Candidates::All } else { nerve::train::Candidates::Valid }, ..Default::default() };
             let dir = out.join(&s.name);
             // Finite specs score every enumerable successor; continuous ones descend the energy.
             let report = if s.finite() {
@@ -99,6 +114,24 @@ fn main() -> Result<()> {
             };
             println!("{}", serde_json::to_string_pretty(&report)?);
             println!("saved {}", dir.display());
+        }
+        Cmd::Eval { spec, model, valid_only } => {
+            let s = Spec::load(&spec)?;
+            let m = nerve::train::Model::load_as(s, &model, &candle_core::Device::Cpu, valid_only.then_some(nerve::train::Candidates::Valid))?;
+            let t = &m.meta().context("checkpoint has no model.json")?["train"];
+            let (holdout, salt) = (t["holdout"].as_f64().unwrap_or(0.15), t["holdout_salt"].as_str().unwrap_or("nerve").to_string());
+            let r = nerve::train::evaluate(&m, holdout, &salt)?;
+            let h = &r["heldout"];
+            println!(
+                "{} ({:?} candidates, {}): held-out {}/{} ({:.3}), violations {:.4}",
+                model.display(),
+                m.candidates,
+                m.candidate_count(),
+                (h["exact"].as_f64().unwrap_or(0.0) * h["n"].as_f64().unwrap_or(0.0)).round(),
+                h["n"],
+                h["exact"].as_f64().unwrap_or(0.0),
+                r["all"]["violation_rate"].as_f64().unwrap_or(0.0)
+            );
         }
         Cmd::Check { spec } => {
             let s = Spec::load(&spec)?;

@@ -165,6 +165,8 @@ async fn list_specs(AxState(app): AxState<Arc<App>>) -> ApiResult {
             "actions": actions,
             "finite": sp.finite(),
             "states": sp.state_space_size().unwrap_or(0),
+            // States the invariants allow: 120 orders of five items, not all 3,125 position tuples.
+            "valid_states": valid_states(sp),
             "model": e.model.as_ref().map(|m| m.describe()),
             "source": e.source,
             "holes": sp.holes.iter().map(|h| json!({"name": h.name, "action": h.action, "examples": h.examples.len()})).collect::<Vec<_>>(),
@@ -219,6 +221,12 @@ async fn step(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, Json(re
         }
     }
     Ok(Json(out))
+}
+
+/// How many enumerable states satisfy the invariants (`None` for continuous specs).
+fn valid_states(sp: &Spec) -> Option<usize> {
+    let oracle = Oracle::new(sp);
+    sp.finite().then(|| sp.state_space().ok()).flatten().map(|all| all.iter().filter(|s| !oracle.breaks_invariant(s)).count())
 }
 
 /// How the network's answer relates to the spec, in the terms the lab shows:

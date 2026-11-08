@@ -207,6 +207,15 @@ const STORIES = {
       "Make three proposals, then try another drag: the spec allows no more.",
     ],
   },
+  reorder: {
+    title: "Reorder: Dragology's permutation demo",
+    what: "Five items in a row, 120 possible orders. Dragology's <code>perm</code> demo lists a drag's landing spots by hand, <code>moveItem(items, i, j)</code> for every <code>j</code>. Here they come from the spec's <code>move</code> rule, and a network trained from that rule runs the list. Moving one item shifts every item between its old and new place, a rule about order rather than about counting.",
+    tryit: [
+      "Drag <b>a</b> to the far right: it rides your pointer (<code>floating</code>) while the other four slide left to make room.",
+      "Click <b>move</b> with item=e, to=0: the network reorders the whole row, and the spec checks every position.",
+      "Drag an item back and forth across a neighbour: it keeps its slot for 6 px before switching (<code>stickiness</code>).",
+    ],
+  },
   tracks: {
     title: "Tracks: the drag asks the spec",
     what: "A block on three rails. The drag spec only says <i>pick the closest rail, then slide along it</i>. How long each rail is, and which rails you can reach, both come from the <code>move</code> rule, so the drag finds out by asking the spec.",
@@ -245,7 +254,7 @@ function renderStory() {
   $("storyTitle").textContent = st.title;
   const lines = cur.source.trimEnd().split("\n").length;
   const holes = cur.holes.map(h => `<code>${h.action}</code> learned from ${plural(h.examples, "example")}`);
-  $("storyMeta").innerHTML = [cur.finite ? plural(cur.states, "state") : "continuous state", plural(cur.actions.length, "action"), `a ${lines}-line spec`, ...holes].join(" · ");
+  $("storyMeta").innerHTML = [cur.finite ? plural(cur.valid_states ?? cur.states, "valid state") : "continuous state", plural(cur.actions.length, "action"), `a ${lines}-line spec`, ...holes].join(" · ");
   $("storyWhat").innerHTML = st.what;
   $("storyTry").innerHTML = st.tryit.map(t => `<li>${t}</li>`).join("");
 }
@@ -284,7 +293,7 @@ async function select(name) {
   $("log").innerHTML = ""; $("click").innerHTML = ""; $("status").innerHTML = "";
   $("bars").innerHTML = '<span class="sub">Start a drag to see every landing spot scored.</span>'; $("spark").innerHTML = "";
   const grabs = [...new Set(cur.futures.map(f => f.grab))];
-  $("hint").textContent = `Drag the ${grabs.join(" or ")} handle.`;
+  $("hint").textContent = grabs.length > 2 ? `Drag any of ${grabs.join(", ")}.` : `Drag the ${grabs.join(" or ")} handle.`;
   renderStory(); renderNetwork(); renderSpec();
   buildActions();
   await refresh();

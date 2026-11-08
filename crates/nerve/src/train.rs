@@ -47,6 +47,8 @@ pub struct TrainConfig {
     pub cont_negatives: usize,
     /// Continuous specs: sampled pairs in the final evaluation.
     pub eval_samples: usize,
+    /// Finite specs: which states the model may answer with.
+    pub candidates: Candidates,
 }
 
 impl Default for TrainConfig {
@@ -71,15 +73,31 @@ impl Default for TrainConfig {
             cont_pairs: 4000,
             cont_negatives: 16,
             eval_samples: 1000,
+            candidates: Candidates::Valid,
         }
     }
 }
 
-/// A trained network bound to its spec: the argmin over every enumerable state is its step.
+/// Which states a finite model may answer with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Candidates {
+    /// Every enumerable state, including ones that break an invariant (the Python reference).
+    All,
+    /// Only the states the spec's invariants allow, so no answer can break one.
+    Valid,
+}
+
+/// A trained network bound to its spec: the argmin over its candidate states is its step.
 pub struct Model {
     pub spec: Spec,
     pub enc: Encoder,
     pub jepa: Jepa,
+    pub candidates: Candidates,
+    /// Encoder state ids of the candidates, in row order of `cand`.
+    rows: Vec<usize>,
+    /// Encoder state id -> candidate row, `None` for a state that is not a candidate.
+    row_of: Vec<Option<usize>>,
     cand: Tensor,
     cand_idx: Tensor,
     /// `(state, action) -> energies of every candidate`, so drag frames do not re-run the network.
@@ -89,14 +107,39 @@ pub struct Model {
 }
 
 impl Model {
-    pub fn new(spec: Spec, cfg: JepaConfig, dev: &Device) -> Result<Self> {
+    pub fn new(spec: Spec, cfg: JepaConfig, candidates: Candidates, dev: &Device) -> Result<Self> {
         ensure!(spec.finite(), "{}: only finite specs train in Rust so far", spec.name);
         let enc = Encoder::new(&spec)?;
         let jepa = Jepa::new(cfg, &enc.field_masks(), dev)?;
-        let c = enc.states.len();
-        let cand = Tensor::from_vec(enc.all_state_vectors(&spec)?, (c, enc.state_dim), dev)?;
-        let cand_idx = Tensor::from_vec(enc.all_field_indices(&spec)?, (c, enc.slots.len()), dev)?;
-        Ok(Self { spec, enc, jepa, cand, cand_idx, cache: Mutex::new(HashMap::new()), meta: None })
+        let oracle = Oracle::new(&spec);
+        let rows: Vec<usize> = (0..enc.states.len())
+            .filter(|&i| candidates == Candidates::All || !oracle.breaks_invariant(&enc.states[i]))
+            .collect();
+        ensure!(!rows.is_empty(), "{}: no state satisfies the invariants", spec.name);
+        let mut row_of = vec![None; enc.states.len()];
+        let (mut vecs, mut idxs) = (Vec::new(), Vec::new());
+        for (r, &i) in rows.iter().enumerate() {
+            row_of[i] = Some(r);
+            vecs.extend(enc.state(&spec, &enc.states[i])?);
+            idxs.extend(enc.field_index(&spec, &enc.states[i])?);
+        }
+        let cand = Tensor::from_vec(vecs, (rows.len(), enc.state_dim), dev)?;
+        let cand_idx = Tensor::from_vec(idxs, (rows.len(), enc.slots.len()), dev)?;
+        Ok(Self { spec, enc, jepa, candidates, rows, row_of, cand, cand_idx, cache: Mutex::new(HashMap::new()), meta: None })
+    }
+
+    pub fn candidate_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// The candidate row of `s`, or `None` if it is not a state this model may answer with.
+    fn row(&self, s: &State) -> Result<Option<usize>> {
+        Ok(self.row_of[self.enc.state_id(&self.spec, s)?])
+    }
+
+    /// `model.json` of a loaded checkpoint.
+    pub fn meta(&self) -> Option<&J> {
+        self.meta.as_ref()
     }
 
     pub fn config_for(spec: &Spec, t: &TrainConfig) -> Result<JepaConfig> {
@@ -128,7 +171,7 @@ impl Model {
         Ok((Tensor::from_vec(cur, (states.len(), self.enc.slots.len()), self.device())?, shift))
     }
 
-    /// Energies of every enumerable state as the successor of `s -a->`.
+    /// Energies of every candidate state as the successor of `s -a->`, in candidate row order.
     pub fn energies(&self, s: &State, a: &ActionInst) -> Result<Vec<f32>> {
         let key = format!("{}|{}", self.spec.state_key(s), self.spec.action_key(a));
         if let Some(e) = self.cache.lock().expect("energy cache poisoned").get(&key) {
@@ -149,22 +192,40 @@ impl Model {
         Ok(e)
     }
 
-    /// The network's successor: argmin energy over the whole finite space.
+    /// The network's successor: argmin energy over its candidate states.
     pub fn step(&self, s: &State, a: &ActionInst) -> Result<State> {
         let e = self.energies(s, a)?;
         let best = (0..e.len()).min_by(|&i, &j| e[i].total_cmp(&e[j])).context("empty state space")?;
-        Ok(self.enc.states[best].clone())
+        Ok(self.enc.states[self.rows[best]].clone())
     }
 
     pub fn save(&self, dir: &Path, t: &TrainConfig, report: &J) -> Result<()> {
-        save_checkpoint(dir, &self.jepa, json!({"spec": self.spec.name, "kind": "finite", "jepa": self.jepa.cfg, "train": t, "eval": report}))
+        let meta = json!({
+            "spec": self.spec.name,
+            "kind": "finite",
+            "candidates": self.candidates,
+            "jepa": self.jepa.cfg,
+            "train": t,
+            "eval": report,
+        });
+        save_checkpoint(dir, &self.jepa, meta)
     }
 
-    /// Loads `dir/model.{json,safetensors}` for `spec` onto `dev`.
+    /// Loads `dir/model.{json,safetensors}` for `spec` onto `dev`, with the candidates it was trained with.
     pub fn load(spec: Spec, dir: &Path, dev: &Device) -> Result<Self> {
+        Self::load_as(spec, dir, dev, None)
+    }
+
+    /// Like `load`, optionally answering from a different candidate set (to rescore a checkpoint).
+    /// A checkpoint from before the choice existed scored every state.
+    pub fn load_as(spec: Spec, dir: &Path, dev: &Device, candidates: Option<Candidates>) -> Result<Self> {
         let meta = read_meta(dir, &spec.name)?;
         let cfg: JepaConfig = serde_json::from_value(meta["jepa"].clone())?;
-        let mut m = Self::new(spec, cfg, dev)?;
+        let saved = match meta.get("candidates") {
+            Some(c) => serde_json::from_value(c.clone())?,
+            None => Candidates::All,
+        };
+        let mut m = Self::new(spec, cfg, candidates.unwrap_or(saved), dev)?;
         load_weights(&m.jepa, dir, dev)?;
         m.meta = Some(meta);
         Ok(m)
@@ -228,15 +289,16 @@ impl LearnedEnergy for Model {
     /// How far a candidate is from the network's own best guess for this action; staying put costs nothing.
     fn energy(&self, start: &State, action: Option<&ActionInst>, cand: &State) -> Result<f64> {
         let Some(a) = action else { return Ok(0.0) };
+        // A state this model may not answer with costs infinite energy.
+        let Some(r) = self.row(cand)? else { return Ok(f64::INFINITY) };
         let e = self.energies(start, a)?;
-        let i = self.enc.state_id(&self.spec, cand)?;
         let min = e.iter().copied().fold(f32::INFINITY, f32::min);
-        Ok(f64::from(e[i] - min))
+        Ok(f64::from(e[r] - min))
     }
 
     fn step_energies(&self, start: &State, action: &ActionInst) -> Result<Option<Vec<(State, f64)>>> {
         let e = self.energies(start, action)?;
-        Ok(Some(self.enc.states.iter().cloned().zip(e.into_iter().map(f64::from)).collect()))
+        Ok(Some(self.rows.iter().map(|&i| self.enc.states[i].clone()).zip(e.into_iter().map(f64::from)).collect()))
     }
 
     fn describe(&self) -> J {
@@ -247,6 +309,8 @@ impl LearnedEnergy for Model {
             "params": params,
             "device": device,
             "summary": format!("{} JEPA, {params} params on {device}", self.spec.name),
+            "candidates": self.candidates,
+            "candidate_count": self.rows.len(),
             "trained": self.meta.as_ref().map(trained_facts),
         })
     }
@@ -372,7 +436,14 @@ fn batch_tensors(m: &Model, pairs: &[Pair], idx: &[usize]) -> Result<(Tensor, Te
 fn train_batch(m: &Model, data: &Dataset, idx: &[usize], rng: &mut impl Rng) -> Result<Tensor> {
     let dev = m.device().clone();
     let (s, a, _) = batch_tensors(m, &data.pos, idx)?;
-    let pos: Vec<u32> = idx.iter().map(|&i| m.enc.state_id(&m.spec, &data.pos[i].next).map(|x| x as u32)).collect::<Result<_>>()?;
+    let pos: Vec<u32> = idx
+        .iter()
+        .map(|&i| {
+            let next = &data.pos[i].next;
+            let r = m.row(next)?.with_context(|| format!("successor {} breaks an invariant, so it is not a candidate", m.spec.state_key(next)))?;
+            Ok(r as u32)
+        })
+        .collect::<Result<_>>()?;
     let pos = Tensor::from_vec(pos, idx.len(), &dev)?;
     let neg = if data.neg.is_empty() {
         None
@@ -418,15 +489,16 @@ pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Model, J)>
     if dev.is_cuda() {
         dev.set_seed(cfg.seed)?;
     }
-    let model = Model::new(spec.clone(), Model::config_for(spec, cfg)?, dev)?;
+    let model = Model::new(spec.clone(), Model::config_for(spec, cfg)?, cfg.candidates, dev)?;
     let data = dataset(spec, cfg, &mut rng)?;
     ensure!(data.pos.len() >= 2, "{}: fewer than two training pairs", spec.name);
     println!(
-        "{}: {} pairs, {} negatives, {} candidates, {} params on {:?}",
+        "{}: {} pairs, {} negatives, {} candidates ({:?}), {} params on {:?}",
         spec.name,
         data.pos.len(),
         data.neg.len(),
-        model.enc.states.len(),
+        model.candidate_count(),
+        model.candidates,
         model.jepa.store.count_trainable(),
         dev
     );
@@ -493,6 +565,46 @@ mod tests {
         let a = ActionInst::new("flip");
         assert_eq!(back.step(&sp.initial, &a)?, m.step(&sp.initial, &a)?);
         assert_eq!(back.energies(&sp.initial, &a)?, m.energies(&sp.initial, &a)?);
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
+
+    #[test]
+    fn valid_candidates_never_answer_with_a_broken_invariant() -> Result<()> {
+        let sp = spec("reorder");
+        let cfg = Model::config_for(&sp, &TrainConfig { d: 8, hidden: 16, ..Default::default() })?;
+        let valid = Model::new(sp.clone(), cfg.clone(), Candidates::Valid, &Device::Cpu)?;
+        let all = Model::new(sp.clone(), cfg, Candidates::All, &Device::Cpu)?;
+        assert_eq!((valid.candidate_count(), all.candidate_count()), (120, 3125));
+        // Untrained, so its answers are arbitrary, but every one of them is an order.
+        let oracle = Oracle::new(&sp);
+        let actions = sp.action_instances()?;
+        for a in &actions {
+            assert!(!oracle.breaks_invariant(&valid.step(&sp.initial, a)?), "{}", sp.action_key(a));
+        }
+        // In a drag, a state the invariants rule out costs infinite energy.
+        let broken = sp.state_from_json(&json!({"pa": 0, "pb": 0, "pc": 2, "pd": 3, "pe": 4}))?;
+        assert!(valid.energy(&sp.initial, Some(&actions[0]), &broken)?.is_infinite());
+        assert!(all.energy(&sp.initial, Some(&actions[0]), &broken)?.is_finite());
+        Ok(())
+    }
+
+    #[test]
+    fn checkpoints_remember_their_candidates_and_old_ones_mean_all() -> Result<()> {
+        let sp = spec("counter");
+        let cfg = TrainConfig { epochs: 1, d: 8, hidden: 16, log_every: 1000, ..Default::default() };
+        let (m, report) = train(&sp, &cfg, &Device::Cpu)?;
+        assert_eq!(m.candidates, Candidates::Valid, "valid is the default");
+        let dir = std::env::temp_dir().join(format!("nerve-cands-test-{}", std::process::id()));
+        m.save(&dir, &cfg, &report)?;
+        assert_eq!(Model::load(sp.clone(), &dir, &Device::Cpu)?.candidates, Candidates::Valid);
+        assert_eq!(Model::load_as(sp.clone(), &dir, &Device::Cpu, Some(Candidates::All))?.candidates, Candidates::All);
+        // A checkpoint from before the choice existed scored every state.
+        let path = dir.join("model.json");
+        let mut meta: J = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
+        meta.as_object_mut().unwrap().remove("candidates");
+        std::fs::write(&path, meta.to_string())?;
+        assert_eq!(Model::load(sp, &dir, &Device::Cpu)?.candidates, Candidates::All);
         std::fs::remove_dir_all(&dir).ok();
         Ok(())
     }

@@ -718,6 +718,45 @@ mod tests {
         assert_eq!(sess.release().unwrap(), start);
     }
 
+    /// Dragology's `perm` demo writes its futures by hand: `items.map(j => moveItem(items, i, j))`.
+    fn move_item(order: &[char], i: usize, j: usize) -> Vec<char> {
+        let mut out = order.to_vec();
+        let x = out.remove(i);
+        out.insert(j, x);
+        out
+    }
+
+    /// Positions `[pa..pe]` of an order like `['b', 'a', 'c', 'd', 'e']`.
+    fn positions(order: &[char]) -> State {
+        "abcde".chars().map(|x| Value::Int(order.iter().position(|&y| y == x).unwrap() as i64)).collect()
+    }
+
+    #[test]
+    fn reorder_futures_are_exactly_dragologys_all_orders() {
+        let sp = spec("reorder");
+        let order = ['c', 'a', 'e', 'b', 'd'];
+        let start = positions(&order);
+        for (i, item) in order.iter().enumerate() {
+            let f = sp.future(&format!("drag_{item}")).unwrap();
+            assert!(f.floating);
+            let sess = DragSession::new(&sp, f, start.clone(), None).unwrap();
+            let mut got: Vec<State> = sess.candidates().iter().map(|c| c.state.clone()).collect();
+            let mut want: Vec<State> = (0..order.len()).map(|j| positions(&move_item(&order, i, j))).collect();
+            got.sort_by_key(|s| sp.state_key(s));
+            want.sort_by_key(|s| sp.state_key(s));
+            assert_eq!(got, want, "dragging {item}");
+        }
+    }
+
+    #[test]
+    fn reorder_drag_follows_the_pointer_and_shifts_the_rest() {
+        let sp = spec("reorder");
+        // Items sit at x = 40 + 64 * position on y = 40. Grab `a` and drop it in slot 3.
+        let (_, fin) = drag(&sp, "drag_a", sp.initial.clone(), &[(60.0, 40.0), (150.0, 42.0), (232.0, 38.0)]).unwrap();
+        assert_eq!(fin, positions(&move_item(&['a', 'b', 'c', 'd', 'e'], 0, 3)));
+        assert!(Oracle::new(&sp).violations(&sp.initial, None, &fin, 0.01).is_empty());
+    }
+
     #[test]
     fn render_block_is_checked() {
         let toggle = include_str!("../../../specs/toggle.nerve");
