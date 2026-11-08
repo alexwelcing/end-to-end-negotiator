@@ -8,6 +8,7 @@ use anyhow::Result;
 use candle_core::Tensor;
 use rand::seq::SliceRandom;
 use rand::Rng;
+use std::path::PathBuf;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,8 @@ pub struct Engine<'m> {
     word_weights: Tensor,
     sel_weights: Tensor,
     verbose: bool,
+    /// Where `train` keeps the model it would return if stopped now.
+    checkpoint: Option<PathBuf>,
 }
 
 impl<'m> Engine<'m> {
@@ -49,7 +52,24 @@ impl<'m> Engine<'m> {
             .map(|i| if matches!(item.word(i), "<disconnect>" | "<disagree>") { 0.0 } else { 1.0 })
             .collect();
         let sel_weights = Tensor::from_vec(sel, item.len(), &model.device)?;
-        Ok(Self { model, cfg, opt, word_weights, sel_weights, verbose })
+        Ok(Self { model, cfg, opt, word_weights, sel_weights, verbose, checkpoint: None })
+    }
+
+    /// Saves the model `train` would return at every improvement (best validation
+    /// selection loss, then every annealing epoch), so a killed run keeps its progress.
+    pub fn with_checkpoint(mut self, path: impl Into<PathBuf>) -> Self {
+        self.checkpoint = Some(path.into());
+        self
+    }
+
+    fn save_checkpoint(&self, epoch: usize) -> Result<()> {
+        if let Some(path) = &self.checkpoint {
+            self.model.save(path)?;
+            if self.verbose {
+                println!("| epoch {epoch:03} | checkpoint {}", path.display());
+            }
+        }
+        Ok(())
     }
 
     /// Returns `(lm_loss, selection_loss)` for one batch.
@@ -129,6 +149,7 @@ impl<'m> Engine<'m> {
             let losses = self.epoch(corpus, epoch, &valid, rng)?;
             if losses.valid_select < best.0 {
                 best = (losses.valid_select, self.model.params.snapshot()?);
+                self.save_checkpoint(epoch)?;
             }
             last = Some(losses);
         }
@@ -149,6 +170,7 @@ impl<'m> Engine<'m> {
                 self.opt = Sgd::new(self.model.params.vars(), lr, 0.0, false);
             }
             last = Some(self.epoch(corpus, epoch, &valid, rng)?);
+            self.save_checkpoint(epoch)?;
         }
         last.ok_or_else(|| anyhow::anyhow!("no epochs were run"))
     }

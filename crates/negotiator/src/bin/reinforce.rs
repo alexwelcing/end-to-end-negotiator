@@ -70,6 +70,9 @@ struct Args {
     runtime: RuntimeArgs,
 }
 
+/// Dialogues between saves of the RL model during a run.
+const CHECKPOINT_EVERY: usize = 500;
+
 fn main() -> Result<()> {
     negotiator::cli::run_with_big_stack(run)
 }
@@ -127,6 +130,10 @@ fn run() -> Result<()> {
         logger.dump("", false)?;
         if n % 100 == 0 {
             logger.dump(&format!("{n}: {}", dialog.show_metrics()), true)?;
+        }
+        // A long RL run keeps its progress if it is stopped: the latest Alice every 500 dialogues.
+        if n % CHECKPOINT_EVERY == 0 {
+            alice_model.save(&args.output_model_file)?;
         }
     }
 

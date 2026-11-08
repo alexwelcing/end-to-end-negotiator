@@ -102,7 +102,9 @@ fn run() -> Result<()> {
         max_epoch: args.max_epoch,
         sel_weight: args.sel_weight,
     };
-    let losses = Engine::new(&model, train_cfg, true)?.train(&corpus, &mut rng)?;
+    // `<model_file>_ckpt` holds the best model so far; a run killed mid-way keeps it.
+    let ckpt = PathBuf::from(format!("{}_ckpt", args.model_file.display()));
+    let losses = Engine::new(&model, train_cfg, true)?.with_checkpoint(ckpt).train(&corpus, &mut rng)?;
     println!("final selectppl {:.3}", losses.valid_select.exp());
     model.save(&args.model_file)?;
     println!("saved {}", args.model_file.with_extension("safetensors").display());
