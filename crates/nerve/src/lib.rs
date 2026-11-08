@@ -13,3 +13,5 @@ pub mod serve;
 pub mod spec;
 pub mod train;
 pub mod value;
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+pub mod wasm;

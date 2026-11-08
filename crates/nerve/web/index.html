@@ -153,6 +153,8 @@ const PAL = Array.from({length:10}, (_, i) => `var(--f${i})`);
 let specs = [], cur = null, state = null, view = null, drag = null, fieldCache = null, lastFrame = null;
 
 async function api(path, body) {
+  // The static site answers from the WebAssembly build in this page instead of a server.
+  if (window.nerveApi) return window.nerveApi(path, body);
   const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)});
   const j = await r.json();
   if (j && j.error) throw new Error(j.error);
@@ -690,7 +692,7 @@ function buildActions() {
 }
 
 window.addEventListener("resize", () => view && render());
-init().catch(err => { $("who").textContent = "error"; $("hint").innerHTML = `<span class="err">${err.message}</span>`; });
+(window.nerveReady || Promise.resolve()).then(init).catch(err => { $("who").textContent = "error"; $("hint").innerHTML = `<span class="err">${err.message}</span>`; });
 </script>
 </body>
 </html>

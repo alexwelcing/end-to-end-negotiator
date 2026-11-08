@@ -108,6 +108,8 @@ let machines = [], M = null, state = null, pending = [], detached = [], position
 let layout = null, running = false, timer = null, busy = false, tick = 0, stats = null, last = null, drag = null, lastFired = new Set();
 
 async function api(path, body) {
+  // The static site answers from the WebAssembly build in this page instead of a server.
+  if (window.nerveApi) return window.nerveApi(path, body);
   const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)});
   const j = await r.json();
   if (j && j.error) throw new Error(j.error);
@@ -325,7 +327,7 @@ async function release(q) {
   } catch (err) { detached = detached.filter(x => x !== d.block); $("hint").innerHTML = `<span class="err">${err.message}</span>`; await view(); }
 }
 
-init();
+(window.nerveReady || Promise.resolve()).then(init);
 </script>
 </body>
 </html>

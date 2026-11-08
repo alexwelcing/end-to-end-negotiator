@@ -19,3 +19,4 @@ docs/paper2/fig_cost.tex
 # the lab's served networks are committed: a fresh clone runs without training
 !models/served/**/*.safetensors
 /target-cuda/
+/site/dist/

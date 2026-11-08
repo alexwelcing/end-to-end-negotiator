@@ -244,13 +244,25 @@ impl Model {
     /// A checkpoint from before the choice existed scored every state.
     pub fn load_as(spec: Spec, dir: &Path, dev: &Device, candidates: Option<Candidates>) -> Result<Self> {
         let meta = read_meta(dir, &spec.name)?;
+        let weights = candle_core::safetensors::load(dir.join("model.safetensors"), dev)?;
+        Self::from_parts(spec, meta, weights, dev, candidates)
+    }
+
+    /// A model from a checkpoint already in memory: the `model.json` text and the `model.safetensors` bytes.
+    pub fn from_bytes(spec: Spec, meta_json: &str, weights: &[u8], dev: &Device) -> Result<Self> {
+        let meta = meta_for(meta_json, &spec.name)?;
+        let weights = candle_core::safetensors::load_buffer(weights, dev)?;
+        Self::from_parts(spec, meta, weights, dev, None)
+    }
+
+    fn from_parts(spec: Spec, meta: J, weights: HashMap<String, Tensor>, dev: &Device, candidates: Option<Candidates>) -> Result<Self> {
         let cfg: JepaConfig = serde_json::from_value(meta["jepa"].clone())?;
         let saved = match meta.get("candidates") {
             Some(c) => serde_json::from_value(c.clone())?,
             None => Candidates::All,
         };
         let mut m = Self::new(spec, cfg, candidates.unwrap_or(saved), dev)?;
-        load_weights(&m.jepa, dir, dev)?;
+        set_weights(&m.jepa, &weights)?;
         let t: TrainConfig = serde_json::from_value(meta["train"].clone())?;
         m.holdout = Some(HoldOut::new(&m.spec, &t)?);
         m.meta = Some(meta);
@@ -287,13 +299,23 @@ pub(crate) fn save_checkpoint(dir: &Path, jepa: &Jepa, meta: J) -> Result<()> {
 /// Reads `dir/model.json`, refusing a checkpoint trained for another spec.
 pub(crate) fn read_meta(dir: &Path, spec: &str) -> Result<J> {
     let path = dir.join("model.json");
-    let meta: J = serde_json::from_str(&std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?)?;
-    ensure!(meta["spec"] == spec, "{} holds a model for {}, not {spec}", dir.display(), meta["spec"]);
+    let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    meta_for(&text, spec).with_context(|| path.display().to_string())
+}
+
+/// Parses a `model.json`, refusing a checkpoint trained for another spec.
+pub(crate) fn meta_for(text: &str, spec: &str) -> Result<J> {
+    let meta: J = serde_json::from_str(text)?;
+    ensure!(meta["spec"] == spec, "checkpoint holds a model for {}, not {spec}", meta["spec"]);
     Ok(meta)
 }
 
 pub(crate) fn load_weights(jepa: &Jepa, dir: &Path, dev: &Device) -> Result<()> {
-    let weights = candle_core::safetensors::load(dir.join("model.safetensors"), dev)?;
+    set_weights(jepa, &candle_core::safetensors::load(dir.join("model.safetensors"), dev)?)
+}
+
+/// Sets every named parameter from a loaded safetensors map.
+pub(crate) fn set_weights(jepa: &Jepa, weights: &HashMap<String, Tensor>) -> Result<()> {
     for (name, var, _) in &jepa.store.vars {
         let w = weights.get(name).with_context(|| format!("checkpoint is missing {name}"))?;
         var.set(w)?;
@@ -308,6 +330,16 @@ pub fn load_learned(spec: Spec, dir: &Path, dev: &Device) -> Result<std::sync::A
         std::sync::Arc::new(crate::continuous::ContinuousModel::load(spec, dir, dev)?)
     } else {
         std::sync::Arc::new(Model::load(spec, dir, dev)?)
+    })
+}
+
+/// Loads whichever kind of model a checkpoint in memory holds for `spec` (the browser build).
+pub fn load_learned_from_bytes(spec: Spec, meta_json: &str, weights: &[u8], dev: &Device) -> Result<std::sync::Arc<dyn LearnedEnergy>> {
+    let meta = meta_for(meta_json, &spec.name)?;
+    Ok(if meta["kind"] == "continuous" {
+        std::sync::Arc::new(crate::continuous::ContinuousModel::from_bytes(spec, meta_json, weights, dev)?)
+    } else {
+        std::sync::Arc::new(Model::from_bytes(spec, meta_json, weights, dev)?)
     })
 }
 

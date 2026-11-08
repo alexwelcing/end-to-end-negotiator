@@ -35,7 +35,11 @@ Seventeen interfaces, each a small neural network trained to be the program, eac
 
 * **Hosted:** [huggingface.co/spaces/AlexWelcing/nerve-lab](https://huggingface.co/spaces/AlexWelcing/nerve-lab),
   a Docker Space built from this repository's `Dockerfile` on a free CPU; `.github/workflows/space.yml` redeploys it
-  on every push to `nerve`.
+  on every push to `nerve`. The machine room is at [`/machine`](https://alexwelcing-nerve-lab.hf.space/machine).
+* **In your browser, no server:** the same two pages run on a WebAssembly build of the engine, every click,
+  drag frame and machine tick a function call in the visitor's browser. `python scripts/build_site.py` writes
+  `site/dist` (the wasm module, the pages, the specs, the machines and the served networks) for any static host;
+  `.github/workflows/pages.yml` deploys it to Cloudflare Pages.
 * **Locally, one command** (needs a Rust toolchain, no GPU, no Python):
   ```
   cargo run --release -p nerve -- serve

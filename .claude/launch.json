@@ -6,6 +6,12 @@
       "runtimeExecutable": "cargo",
       "runtimeArgs": ["run", "-q", "--release", "-p", "nerve", "--bin", "nerve", "--", "serve", "--specs", "specs", "--addr", "127.0.0.1:8787", "--models", "models/served"],
       "port": 8787
+    },
+    {
+      "name": "nerve-site",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8791", "--directory", "site/dist"],
+      "port": 8791
     }
   ]
 }

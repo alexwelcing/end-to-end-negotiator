@@ -1,0 +1,4 @@
+# The WebAssembly build of the lab (`wasm-pack build crates/nerve --target web --no-default-features --features wasm`):
+# getrandom 0.3 refuses wasm32-unknown-unknown unless told to use the browser's crypto.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

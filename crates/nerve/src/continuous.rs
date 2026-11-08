@@ -216,6 +216,17 @@ impl ContinuousModel {
         m.meta = Some(meta);
         Ok(m)
     }
+
+    /// A model from a checkpoint already in memory: the `model.json` text and the `model.safetensors` bytes.
+    pub fn from_bytes(spec: Spec, meta_json: &str, weights: &[u8], dev: &Device) -> Result<Self> {
+        let meta = crate::train::meta_for(meta_json, &spec.name)?;
+        ensure!(meta["kind"] == "continuous", "the checkpoint does not hold a continuous model");
+        let cfg: JepaConfig = serde_json::from_value(meta["jepa"].clone())?;
+        let mut m = Self::new(spec, cfg, dev)?;
+        crate::train::set_weights(&m.jepa, &candle_core::safetensors::load_buffer(weights, dev)?)?;
+        m.meta = Some(meta);
+        Ok(m)
+    }
 }
 
 impl LearnedEnergy for ContinuousModel {

@@ -5,19 +5,35 @@ edition.workspace = true
 license.workspace = true
 description = "Nerve in Rust: spec-compiled, JEPA-trained interface networks with Dragology-style drags on the local GPU"
 
+[[bin]]
+name = "nerve"
+required-features = ["server"]
+
 [features]
-default = []
+default = ["server"]
+# The `nerve` CLI and the HTTP lab.
+server = ["dep:axum", "dep:tokio", "dep:clap"]
 cuda = ["candle-core/cuda", "candle-nn/cuda"]
+# The lab in the browser: the same App behind a wasm-bindgen `Room`, no server. Built as a cdylib on the
+# command line (scripts/build_site.py) so the native build keeps one output name.
+wasm = ["dep:wasm-bindgen"]
 
 [dependencies]
 anyhow = "1"
-axum = "0.8"
+axum = { version = "0.8", optional = true }
 blake2 = "0.10"
 candle-core = "=0.10.2"
 candle-nn = "=0.10.2"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive"], optional = true }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"], optional = true }
+wasm-bindgen = { version = "=0.2.114", optional = true }   # pinned to the installed wasm-bindgen CLI
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# rand 0.8 (ours) and rand 0.9 (candle's) draw entropy through two getrandom generations; both need
+# the browser's crypto in a wasm32-unknown-unknown build (the 0.3 line also needs the cfg in .cargo/config.toml).
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }

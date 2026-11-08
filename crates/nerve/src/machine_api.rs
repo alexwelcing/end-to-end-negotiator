@@ -1,37 +1,23 @@
-//! The machine room's HTTP API: machines of blocks, each block stepped by its trained network,
-//! every step checked by its oracle, the whole tick compared with the composed oracle.
+//! The machine room's API: machines of blocks, each block stepped by its trained network, every
+//! step checked by its oracle, the whole tick compared with the composed oracle.
 //!
 //! A tick is a pure function of the machine state and the frame's inputs (paper 2 §5.1), so the
 //! page holds the state and the server holds nothing between requests, as for single interfaces.
+//! The HTTP routes live in `serve::http`; these methods answer them and the WebAssembly build alike.
 
 use crate::machine::{BlockStep, Delivery, Machine, MachineSpec, MachineState, TickInput};
 use crate::oracle::Oracle;
-use crate::serve::{spec_summary, ApiResult, App, LearnedEnergy};
+use crate::serve::{spec_summary, App, Entry, LearnedEnergy};
 use crate::spec::{ActionInst, Spec, State};
 use anyhow::{Context, Result};
-use axum::extract::{Path, State as AxState};
-use axum::response::Html;
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value as J};
 use std::sync::Arc;
-use std::time::Instant;
-
-const MACHINE_PAGE: &str = include_str!("../web/machine.html");
 
 /// A machine the lab serves, with its document for display.
 pub struct MachineEntry {
     pub spec: MachineSpec,
     pub source: String,
-}
-
-pub fn routes() -> Router<Arc<App>> {
-    Router::new()
-        .route("/machine", get(|| async { Html(MACHINE_PAGE) }))
-        .route("/api/machines", get(list_machines))
-        .route("/api/machine/{name}/view", post(view))
-        .route("/api/machine/{name}/tick", post(tick))
 }
 
 /// A block stepped by its trained network: the argmin of the network's energies over the
@@ -124,158 +110,176 @@ fn block_action(m: &MachineSpec, block: &str, action: &str, params: &J) -> Resul
     Ok((b, a))
 }
 
-async fn list_machines(AxState(app): AxState<Arc<App>>) -> ApiResult {
-    let mut out = Vec::new();
-    for e in app.machines() {
-        let m = &e.spec;
-        let (_, learned) = steppers(&app, m);
-        let blocks: Vec<J> = m
-            .blocks
-            .iter()
-            .zip(&learned)
-            .map(|((inst, ty, spec), net)| {
-                // The block's type as the lab lists it (with its network's record) when it serves it.
-                let mut summary = match app.entry(ty) {
-                    Ok(entry) => spec_summary(entry),
-                    Err(_) => spec_summary(&crate::serve::Entry { spec: spec.clone(), model: None, source: String::new() }),
-                };
-                summary["instance"] = json!(inst);
-                summary["type"] = json!(ty);
-                summary["network"] = json!(net);
-                summary["extent"] = extent(spec).unwrap_or(J::Null);
-                summary
-            })
-            .collect();
-        out.push(json!({
-            "name": m.name,
-            "source": e.source,
-            "blocks": blocks,
-            "inputs": m.inputs.iter().map(|(b, a)| json!({"block": m.blocks[*b].0, "action": a.name, "params": a.params_json()})).collect::<Vec<_>>(),
-            "wires": m.wires.iter().map(|w| json!({
-                "from": m.blocks[w.from_block].0, "event": w.event,
-                "to": m.blocks[w.to_block].0, "action": w.action,
-                "with": J::Object(w.params.iter().map(|(k, x)| (k.clone(), json!(x.source()))).collect()),
-            })).collect::<Vec<_>>(),
-            "derived": m.derived.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
-            "ensures": m.ensures.iter().map(|e| json!({
-                "after": e.after.as_ref().map(|(b, a)| format!("{}.{a}", m.blocks[*b].0)),
-                "holds": e.holds.source(),
-            })).collect::<Vec<_>>(),
-            "max_events": m.max_events,
-            "states": m.state_space_size().unwrap_or(0),
-            "initial": state_json(m, &m.initial()),
-        }));
-    }
-    Ok(Json(J::Array(out)))
-}
-
 #[derive(Deserialize)]
-struct ViewReq {
-    state: J,
-}
-
-async fn view(AxState(app): AxState<Arc<App>>, Path(name): Path<String>, Json(req): Json<ViewReq>) -> ApiResult {
-    let e = app.machine(&name)?;
-    let s = state_from_json(&e.spec, &req.state)?;
-    let machine = Machine::oracle(&e.spec);
-    Ok(Json(json!({"positions": positions_json(&e.spec, &s)?, "derived": derived_json(&machine, &s)?})))
-}
-
-#[derive(Deserialize)]
-struct ExternalReq {
-    block: String,
-    action: String,
+pub struct ExternalReq {
+    pub block: String,
+    pub action: String,
     #[serde(default)]
-    params: J,
+    pub params: J,
 }
 
 #[derive(Deserialize)]
-struct ViaReq {
-    block: String,
-    event: String,
+pub struct ViaReq {
+    pub block: String,
+    pub event: String,
 }
 
 #[derive(Deserialize)]
-struct DeliveryReq {
-    block: String,
-    action: String,
+pub struct DeliveryReq {
+    pub block: String,
+    pub action: String,
     #[serde(default)]
-    params: J,
-    via: Option<ViaReq>,
+    pub params: J,
+    pub via: Option<ViaReq>,
 }
 
 #[derive(Deserialize)]
-struct TickReq {
-    state: J,
+pub struct TickReq {
+    pub state: J,
     #[serde(default)]
-    external: Vec<ExternalReq>,
+    pub external: Vec<ExternalReq>,
     /// Deliveries an earlier tick held for detached blocks, delivered first.
     #[serde(default)]
-    pending: Vec<DeliveryReq>,
+    pub pending: Vec<DeliveryReq>,
     /// Blocks a pointer holds: deliveries to them are held and returned.
     #[serde(default)]
-    detached: Vec<String>,
+    pub detached: Vec<String>,
 }
 
-/// One tick of the machine by its networks, and the same tick by the composed oracle for comparison.
-async fn tick(AxState(app): AxState<Arc<App>>, Path(name): Path<String>, Json(req): Json<TickReq>) -> ApiResult {
-    let e = app.machine(&name)?;
-    let m = &e.spec;
-    let state = state_from_json(m, &req.state)?;
-    let external: Vec<(usize, ActionInst)> = req.external.iter().map(|x| block_action(m, &x.block, &x.action, &x.params)).collect::<Result<_>>()?;
-    let pending: Vec<Delivery> = req
-        .pending
-        .iter()
-        .map(|d| {
-            let (block, action) = block_action(m, &d.block, &d.action, &d.params)?;
-            let via = d.via.as_ref().map(|v| Ok::<_, anyhow::Error>((m.block_index(&v.block).with_context(|| format!("unknown block {:?}", v.block))?, v.event.clone()))).transpose()?;
-            Ok(Delivery { block, action, via })
-        })
-        .collect::<Result<_>>()?;
-    let detached: Vec<usize> = req.detached.iter().map(|b| m.block_index(b).with_context(|| format!("unknown block {b:?}"))).collect::<Result<_>>()?;
+impl App {
+    /// Every machine as the machine room lists it: its blocks (as the lab lists their types, plus
+    /// instance, type, whether a network drives it and the box its elements can occupy), inputs,
+    /// wires, derived names, ensures and initial state.
+    pub fn machines_json(&self) -> J {
+        let mut out = Vec::new();
+        for e in self.machines() {
+            let m = &e.spec;
+            let (_, learned) = steppers(self, m);
+            let blocks: Vec<J> = m
+                .blocks
+                .iter()
+                .zip(&learned)
+                .map(|((inst, ty, spec), net)| {
+                    let mut summary = match self.entry(ty) {
+                        Ok(entry) => spec_summary(entry),
+                        Err(_) => spec_summary(&Entry { spec: spec.clone(), model: None, source: String::new() }),
+                    };
+                    summary["instance"] = json!(inst);
+                    summary["type"] = json!(ty);
+                    summary["network"] = json!(net);
+                    summary["extent"] = extent(spec).unwrap_or(J::Null);
+                    summary
+                })
+                .collect();
+            out.push(json!({
+                "name": m.name,
+                "source": e.source,
+                "blocks": blocks,
+                "inputs": m.inputs.iter().map(|(b, a)| json!({"block": m.blocks[*b].0, "action": a.name, "params": a.params_json()})).collect::<Vec<_>>(),
+                "wires": m.wires.iter().map(|w| json!({
+                    "from": m.blocks[w.from_block].0, "event": w.event,
+                    "to": m.blocks[w.to_block].0, "action": w.action,
+                    "with": J::Object(w.params.iter().map(|(k, x)| (k.clone(), json!(x.source()))).collect()),
+                })).collect::<Vec<_>>(),
+                "derived": m.derived.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
+                "ensures": m.ensures.iter().map(|e| json!({
+                    "after": e.after.as_ref().map(|(b, a)| format!("{}.{a}", m.blocks[*b].0)),
+                    "holds": e.holds.source(),
+                })).collect::<Vec<_>>(),
+                "max_events": m.max_events,
+                "states": m.state_space_size().unwrap_or(0),
+                "initial": state_json(m, &m.initial()),
+            }));
+        }
+        J::Array(out)
+    }
 
-    let (steps, learned) = steppers(&app, m);
-    let networks = Machine::with_steppers(m, steps);
-    let oracle = Machine::oracle(m);
-    let input = || TickInput { external: &external, pending: pending.clone(), detached: &detached };
-    let t0 = Instant::now();
-    let out = networks.tick_with(&state, input())?;
-    let ms = t0.elapsed().as_secs_f64() * 1000.0;
-    let truth = oracle.tick_with(&state, input())?;
+    /// Element positions and derived values of a machine state.
+    pub fn machine_view(&self, name: &str, state: &J) -> Result<J> {
+        let e = self.machine(name)?;
+        let s = state_from_json(&e.spec, state)?;
+        let machine = Machine::oracle(&e.spec);
+        Ok(json!({"positions": positions_json(&e.spec, &s)?, "derived": derived_json(&machine, &s)?}))
+    }
 
-    let steps_json: Vec<J> = out
-        .trace
-        .steps
-        .iter()
-        .map(|r| {
-            let spec: &Spec = &m.blocks[r.block].2;
-            // Per step, the oracle's answer from the same state the network saw.
-            let truth_step = Oracle::new(spec).step(&r.before, &r.action)?;
-            Ok(json!({
-                "block": m.blocks[r.block].0,
-                "action": r.action.name,
-                "params": r.action.params_json(),
-                "via": r.via.as_ref().map(|(b, e)| json!({"block": m.blocks[*b].0, "event": e})),
-                "before": spec.state_json(&r.before),
-                "after": spec.state_json(&r.after),
-                "oracle": spec.state_json(&truth_step),
-                "agrees": r.after == truth_step,
-                "events": r.events,
-                "violations": r.violations,
-                "network": learned[r.block],
-            }))
-        })
-        .collect::<Result<_>>()?;
-    Ok(Json(json!({
-        "state": state_json(m, &out.state),
-        "positions": positions_json(m, &out.state)?,
-        "derived": derived_json(&networks, &out.state)?,
-        "pending": out.pending.iter().map(|d| delivery_json(m, d)).collect::<Vec<_>>(),
-        "steps": steps_json,
-        "violations": out.trace.violations,
-        "oracle": state_json(m, &truth.state),
-        "agrees": out.state == truth.state,
-        "ms": ms,
-        "networks": J::Object(m.blocks.iter().zip(&learned).map(|((inst, _, _), l)| (inst.clone(), json!(l))).collect()),
-    })))
+    /// One tick of the machine by its networks, and the same tick by the composed oracle for comparison.
+    pub fn machine_tick(&self, name: &str, req: &TickReq) -> Result<J> {
+        let e = self.machine(name)?;
+        let m = &e.spec;
+        let state = state_from_json(m, &req.state)?;
+        let external: Vec<(usize, ActionInst)> = req.external.iter().map(|x| block_action(m, &x.block, &x.action, &x.params)).collect::<Result<_>>()?;
+        let pending: Vec<Delivery> = req
+            .pending
+            .iter()
+            .map(|d| {
+                let (block, action) = block_action(m, &d.block, &d.action, &d.params)?;
+                let via = d
+                    .via
+                    .as_ref()
+                    .map(|v| Ok::<_, anyhow::Error>((m.block_index(&v.block).with_context(|| format!("unknown block {:?}", v.block))?, v.event.clone())))
+                    .transpose()?;
+                Ok(Delivery { block, action, via })
+            })
+            .collect::<Result<_>>()?;
+        let detached: Vec<usize> = req.detached.iter().map(|b| m.block_index(b).with_context(|| format!("unknown block {b:?}"))).collect::<Result<_>>()?;
+
+        let (steps, learned) = steppers(self, m);
+        let networks = Machine::with_steppers(m, steps);
+        let oracle = Machine::oracle(m);
+        let input = || TickInput { external: &external, pending: pending.clone(), detached: &detached };
+        let t0 = now_ms();
+        let out = networks.tick_with(&state, input())?;
+        let ms = now_ms() - t0;
+        let truth = oracle.tick_with(&state, input())?;
+
+        let steps_json: Vec<J> = out
+            .trace
+            .steps
+            .iter()
+            .map(|r| {
+                let spec: &Spec = &m.blocks[r.block].2;
+                // Per step, the oracle's answer from the same state the network saw.
+                let truth_step = Oracle::new(spec).step(&r.before, &r.action)?;
+                Ok(json!({
+                    "block": m.blocks[r.block].0,
+                    "action": r.action.name,
+                    "params": r.action.params_json(),
+                    "via": r.via.as_ref().map(|(b, e)| json!({"block": m.blocks[*b].0, "event": e})),
+                    "before": spec.state_json(&r.before),
+                    "after": spec.state_json(&r.after),
+                    "oracle": spec.state_json(&truth_step),
+                    "agrees": r.after == truth_step,
+                    "events": r.events,
+                    "violations": r.violations,
+                    "network": learned[r.block],
+                }))
+            })
+            .collect::<Result<_>>()?;
+        Ok(json!({
+            "state": state_json(m, &out.state),
+            "positions": positions_json(m, &out.state)?,
+            "derived": derived_json(&networks, &out.state)?,
+            "pending": out.pending.iter().map(|d| delivery_json(m, d)).collect::<Vec<_>>(),
+            "steps": steps_json,
+            "violations": out.trace.violations,
+            "oracle": state_json(m, &truth.state),
+            "agrees": out.state == truth.state,
+            "ms": ms,
+            "networks": J::Object(m.blocks.iter().zip(&learned).map(|((inst, _, _), l)| (inst.clone(), json!(l))).collect()),
+        }))
+    }
+}
+
+/// Milliseconds on a monotonic clock where there is one; the browser build measures nothing.
+#[cfg(not(target_arch = "wasm32"))]
+fn now_ms() -> f64 {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
+}
+
+#[cfg(target_arch = "wasm32")]
+fn now_ms() -> f64 {
+    0.0
 }

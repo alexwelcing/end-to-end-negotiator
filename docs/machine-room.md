@@ -73,6 +73,23 @@ the machine re-plans. Each milestone is a demo on the day it passes.
   internals on/off) and recorded traces played back as demos. Deployed from GitHub with Wrangler.
 - **Acceptance:** parity on every interface's exhaustive step table and on 1,000 recorded drag frames; the
   site passes the lab's smoke test in CI.
+- **Status (2026-11-08): the core and the site are built; the deploy is wired.** The crate's HTTP layer
+  moved behind a `server` feature (on by default; the `nerve` binary needs it) and every API route became a
+  method on `serve::App`, with `App::dispatch(path, body)` routing by the same paths the server uses. The
+  `wasm` feature adds `crates/nerve/src/wasm.rs`: a wasm-bindgen `Room` that takes spec texts, machine
+  documents and checkpoints as bytes (`Model::from_bytes`, `ContinuousModel::from_bytes`) and answers
+  `call(path, body)`. candle's CPU backend compiles for wasm32-unknown-unknown as is; the build is
+  `cargo rustc --crate-type cdylib --target wasm32-unknown-unknown --no-default-features --features wasm`
+  plus `wasm-bindgen --target web` (4.8 MB of wasm before compression; `.cargo/config.toml` sets the
+  getrandom backend). `scripts/build_site.py` assembles `site/dist`: the two lab pages unchanged except that
+  `api()` goes through `window.nerveApi` when `site/nerve-local.js` has loaded the module, the 19 specs, the
+  3 machines and the 19 served networks (15 MB in all). Verified in a browser: the machine room ticks the
+  chain at about 1.6 ms per tick with full agreement and the lab's clicks and drags answer as the server's do.
+  `.github/workflows/pages.yml` builds and deploys the site to Cloudflare Pages when the repository variable
+  `CF_PAGES_PROJECT` and the Cloudflare secrets are set; CI checks the wasm build on every push. Not yet:
+  the parity test that runs the native binary and the wasm build on the same step table and recorded
+  frames (the code paths are shared, but a browser-side check is not in CI); deep links, presenter mode and
+  recorded traces; a smaller wasm (opt-level s, wasm-opt) and lazy loading of networks per tab.
 
 ## M4. The shared machine room (Durable Objects)
 

@@ -28,6 +28,18 @@ jobs:
           sleep 2
           python3 scripts/ci_smoke.py http://127.0.0.1:8787
 
+  wasm:
+    name: the core builds for the browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Check the wasm build (no server, the `wasm` feature)
+        run: cargo check -p nerve --lib --release --target wasm32-unknown-unknown --no-default-features --features wasm
+
   docker:
     name: lab image builds
     runs-on: ubuntu-latest
