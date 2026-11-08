@@ -114,7 +114,9 @@ impl SiteBuild {
         });
         std::fs::write(dist.join("manifest.json"), format!("{}\n", serde_json::to_string_pretty(&manifest)?))?;
         // Caching for the big assets; the pages and the manifest stay fresh.
-        std::fs::write(dist.join("_headers"), "/pkg/*\n  Cache-Control: public, max-age=3600\n/models/*\n  Cache-Control: public, max-age=86400\n")?;
+        // The pages fetch the module and the networks under URLs that carry the build (site/nerve-local.js),
+        // so those can be cached for good; the manifest, pages, specs and machines are revalidated each visit.
+        std::fs::write(dist.join("_headers"), "/pkg/*\n  Cache-Control: public, max-age=31536000, immutable\n/models/*\n  Cache-Control: public, max-age=31536000, immutable\n")?;
         let total: u64 = walk(dist)?.iter().map(|p| p.metadata().map(|m| m.len()).unwrap_or(0)).sum();
         let wasm_size = dist.join("pkg/nerve_bg.wasm").metadata().map(|m| m.len()).unwrap_or(0);
         println!(

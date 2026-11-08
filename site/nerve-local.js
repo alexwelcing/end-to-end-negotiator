@@ -1,15 +1,21 @@
 // The lab without a server: every API path the pages call is answered by the WebAssembly build of
 // crates/nerve (`Room`), with the specs, machine documents and served networks fetched as static files.
 // The pages wait on `window.nerveReady` and route `api()` through `window.nerveApi` when it exists.
-import init, { Room } from "./pkg/nerve.js";
+//
+// The manifest is always revalidated; everything else is fetched under a URL that carries the build it
+// came from, so the module and the networks can be cached for good and a new deploy is seen at once.
 
 const status = msg => { const el = document.getElementById("who"); if (el) el.textContent = msg; };
-const text = async url => { const r = await fetch(url); if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.text(); };
-const bytes = async url => { const r = await fetch(url); if (!r.ok) throw new Error(`${url}: ${r.status}`); return new Uint8Array(await r.arrayBuffer()); };
 
 try {
   status("loading the networks…");
-  const [manifest] = await Promise.all([fetch("./manifest.json").then(r => r.json()), init()]);
+  const manifest = await fetch("./manifest.json", { cache: "no-cache" }).then(r => r.json());
+  const build = encodeURIComponent((manifest.built && manifest.built.commit) || manifest.built || "dev");
+  const versioned = url => `${url}${url.includes("?") ? "&" : "?"}v=${build}`;
+  const text = async url => { const r = await fetch(versioned(url)); if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.text(); };
+  const bytes = async url => { const r = await fetch(versioned(url)); if (!r.ok) throw new Error(`${url}: ${r.status}`); return new Uint8Array(await r.arrayBuffer()); };
+  const { default: init, Room } = await import(versioned("./pkg/nerve.js"));
+  await init({ module_or_path: versioned("./pkg/nerve_bg.wasm") });
   const room = new Room(1.0);
   for (const name of manifest.specs) room.add_spec(await text(`./specs/${name}.nerve`));
   for (const name of manifest.machines) room.add_machine(await text(`./machines/${name}.nerve`));
