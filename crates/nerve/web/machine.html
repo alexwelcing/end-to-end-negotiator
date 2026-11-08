@@ -112,6 +112,7 @@ const skinOf = name => (window.NERVE_SKINS ? window.NERVE_SKINS.get(name) : null
 const PAD = 18, TITLE_H = 46, PANEL_GAP = 46, ROW_GAP = 70, LIGHT_R = 5, MAX_ROW = 900, Z = 1.5;
 let machines = [], M = null, state = null, pending = [], detached = [], positions = {}, derived = {};
 let layout = null, running = false, timer = null, busy = false, tick = 0, stats = null, last = null, drag = null, lastFired = new Set();
+let lastPos = {};   // where each block's elements were last drawn, so a tick is seen as motion
 // A shared room (docs/machine-room.md, M4): the machine lives in a Durable Object on the server, which ticks it
 // and sends every tick here; this page only draws, drives the clock and runs its own drags locally.
 const PARAMS = new URLSearchParams(location.search);
@@ -154,7 +155,7 @@ function select(name) {
   pause();
   M = machines.find(m => m.name === name);
   for (const t of $("tabs").children) t.setAttribute("aria-selected", t.textContent === name);
-  state = structuredClone(M.initial); pending = []; detached = []; drag = null; tick = 0; last = null; lastFired = new Set();
+  state = structuredClone(M.initial); pending = []; detached = []; drag = null; tick = 0; last = null; lastFired = new Set(); lastPos = {};
   stats = {ticks: 0, agree: 0, viol: 0, ms: []};
   const nets = M.blocks.filter(b => b.network).length;
   $("who").textContent = `${M.blocks.length} blocks · ${nets} networks · ${M.wires.length} wires · ${M.states.toLocaleString()} states`;
@@ -355,9 +356,21 @@ function draw() {
         el("circle", {cx: q.x, cy: q.y, r: 9, class: "el" + (g ? " grab" : "") + (active ? " preview" : "")}, grp);
         text(q.x, q.y + 3, name.length > 4 ? name.slice(0, 3) : name, "ellabel", grp);
       }
+      const id = `${inst}.${name}`, prev = lastPos[id];
+      if (prev && !active && (prev.x !== q.x || prev.y !== q.y)) slideFrom(grp, prev.x - q.x, prev.y - q.y, 260);
+      lastPos[id] = {x: q.x, y: q.y};
       if (g && !isHeld) grp.onpointerdown = e => startDrag(e, b, g, p);
     }
   }
+}
+
+/** Motion: a freshly drawn node starts offset by (dx, dy) and slides to where it belongs. */
+function slideFrom(node, dx, dy, ms) {
+  node.style.transition = "none";
+  node.style.transform = `translate(${dx}px, ${dy}px)`;
+  node.getBoundingClientRect();
+  node.style.transition = `transform ${ms}ms cubic-bezier(.2,.7,.2,1)`;
+  node.style.transform = "translate(0px, 0px)";
 }
 
 function toLocal(e, p) { const svg = $("stage"); const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return {x: (q.x - p.ox) / Z, y: (q.y - p.oy) / Z}; }

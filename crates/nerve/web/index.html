@@ -153,6 +153,8 @@ const NS = "http://www.w3.org/2000/svg";
 const PAL = Array.from({length:10}, (_, i) => `var(--f${i})`);
 const skinOf = name => (window.NERVE_SKINS ? window.NERVE_SKINS.get(name) : null);
 let specs = [], cur = null, state = null, view = null, drag = null, fieldCache = null, lastFrame = null;
+// Where each element was last drawn, so a change of state is seen as a move, not a jump.
+let lastPos = {};
 
 async function api(path, body) {
   // The static site answers from the WebAssembly build in this page instead of a server.
@@ -382,6 +384,7 @@ function renderNetwork() {
 
 async function select(name) {
   cur = specs.find(s => s.name === name);
+  lastPos = {};
   for (const t of $("tabs").children) t.setAttribute("aria-selected", t.textContent === name);
   state = structuredClone(cur.initial); drag = null; lastFrame = null; fieldCache = null;
   $("log").innerHTML = ""; $("click").innerHTML = ""; $("status").innerHTML = "";
@@ -511,6 +514,9 @@ function render() {
         t.textContent = name;
       }
     }
+    const prev = lastPos[name];
+    if (prev && !floating && (Math.abs(prev.x - p.x) > 0.01 || Math.abs(prev.y - p.y) > 0.01)) slideFrom(grp, prev.x - p.x, prev.y - p.y, drag ? 120 : 280);
+    lastPos[name] = {x: p.x, y: p.y};
     if (g) grp.addEventListener("pointerdown", e => startDrag(e, g));
   }
   const g0 = drag && view.gestures.find(x => x.name === drag.gesture);
@@ -520,6 +526,15 @@ function render() {
     el("circle", {cx: p.x, cy: p.y, r: R * 0.75, fill: "var(--acc)", "fill-opacity": 0.25, stroke: "var(--acc)", "stroke-width": 1 / k}, layer);
   }
   drawField(true);
+}
+
+/** Motion: a freshly drawn node starts offset by (dx, dy) and slides to where it belongs. */
+function slideFrom(node, dx, dy, ms) {
+  node.style.transition = "none";
+  node.style.transform = `translate(${dx}px, ${dy}px)`;
+  node.getBoundingClientRect();
+  node.style.transition = `transform ${ms}ms cubic-bezier(.2,.7,.2,1)`;
+  node.style.transform = "translate(0px, 0px)";
 }
 
 function softmin(xs) { const m = Math.min(...xs), T = 12; const e = xs.map(x => Math.exp(-(x - m) / T)); const z = e.reduce((a, b) => a + b, 0); return e.map(x => x / z); }
