@@ -6,7 +6,7 @@ reference implementation and the experiment scripts); a GPU is optional (trainin
 ## 1. Run the lab (about three minutes the first time, for the build)
 
 ```
-git clone https://github.com/alexwelcing/end-to-end-negotiator.git nerve
+git clone https://github.com/alexwelcing/nerve.git nerve
 cd nerve
 cargo run --release -p nerve -- serve
 ```

@@ -48,6 +48,13 @@
     "violation_rate": 0.0,
     "cells": 2376
   },
+  "slider": {
+    "model": "runs\\round2\\slider\\full-s0\\slider",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 1450
+  },
   "slider_continuous": {
     "model": "runs\\round2\\slider_continuous\\full-s0\\slider_continuous",
     "seed": 0,

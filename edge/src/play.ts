@@ -24,7 +24,7 @@ button:hover{border-color:var(--acc)}select{background:#1d2333;color:var(--fg);b
 <div class="card"><h2>Actions</h2><div id="actions" class="actions"></div></div>
 </div>
 <div class="card" style="margin-top:16px"><h2>Trace</h2><div id="log" class="log"></div></div>
-<p class="sub" style="margin-top:14px">Weights: <a href="/${spec}/weights">edge.json</a> · health: <a href="/${spec}/health">digest + patches</a> · <a href="https://github.com/alexwelcing/end-to-end-negotiator/tree/nerve">source</a></p>
+<p class="sub" style="margin-top:14px">Weights: <a href="/${spec}/weights">edge.json</a> · health: <a href="/${spec}/health">digest + patches</a> · <a href="https://github.com/alexwelcing/nerve/tree/nerve">source</a></p>
 </main>
 <script>
 const spec=${JSON.stringify(spec)};
