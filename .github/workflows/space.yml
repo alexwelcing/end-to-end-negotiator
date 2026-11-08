@@ -1,6 +1,8 @@
-# Mirrors the branch to a Hugging Face Docker Space, which builds the Dockerfile and serves the lab.
-# Set up once: create a Space with the Docker SDK at https://huggingface.co/new-space, then in this repository
-# add the variable HF_SPACE (e.g. AlexWelcing/nerve-lab) and the secret HF_TOKEN (a write-scope token).
+# Deploys the lab to a Hugging Face Docker Space on every push to `nerve`.
+# Uploads through the Hub API (huggingface_hub), not `git push`: the Space's pre-receive hook rejects binaries
+# that are not in LFS, and the API stores the .safetensors weights correctly on its own.
+# Set up once: a Docker Space at https://huggingface.co/new-space, the repository variable HF_SPACE
+# (e.g. AlexWelcing/nerve-lab) and the secret HF_TOKEN (a write-scope token).
 name: deploy lab to hugging face
 
 on:
@@ -9,17 +11,32 @@ on:
   workflow_dispatch:
 
 jobs:
-  push-to-space:
+  upload-to-space:
     runs-on: ubuntu-latest
     if: ${{ vars.HF_SPACE != '' }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
-      - name: Push to the Space
+          python-version: "3.12"
+      - run: pip install -q "huggingface_hub>=0.26"
+      - name: Upload what the Dockerfile needs
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_SPACE: ${{ vars.HF_SPACE }}
         run: |
-          test -n "$HF_TOKEN" || { echo "HF_TOKEN secret is not set"; exit 1; }
-          git push --force "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" HEAD:main
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["HF_SPACE"]
+          roots = ["crates/**", "specs/**", "models/served/**"]
+          r = api.upload_folder(
+              folder_path=".", repo_id=space, repo_type="space",
+              allow_patterns=["README.md", "Dockerfile", "Cargo.toml", "Cargo.lock", "docs/QUICKSTART.md", *roots],
+              ignore_patterns=["**/target/**", "**/__pycache__/**"],
+              delete_patterns=roots,          # drop files under these roots that the branch no longer has
+              commit_message=f"deploy {os.environ.get('GITHUB_SHA', '')[:7]} from {os.environ.get('GITHUB_REF_NAME', '')}",
+          )
+          print("uploaded:", r.commit_url)
+          EOF
