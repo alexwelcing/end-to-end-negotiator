@@ -39,7 +39,9 @@ Seventeen interfaces, each a small neural network trained to be the program, eac
 * **In your browser, no server:** [nerve-machine-room.aw-ab5.workers.dev](https://nerve-machine-room.aw-ab5.workers.dev) (the lab) and
   [/machine](https://nerve-machine-room.aw-ab5.workers.dev/machine) (the machine room) are the same two pages on a WebAssembly build of the engine,
   served as static files from Cloudflare's edge: every click, drag frame and machine tick is a function call in
-  your browser. `python scripts/build_site.py` writes `site/dist` for any static host;
+  your browser. **Share this machine** on the machine room page opens a shared room: a Durable Object runs the
+  same networks on the server and every browser with the link sees the same machine, and can grab it.
+  `python scripts/build_site.py` writes `site/dist` for any static host;
   `wrangler deploy --config site/wrangler.toml` publishes it, and `.github/workflows/pages.yml` does so on push
   once the Cloudflare secrets are set.
 * **Locally, one command** (needs a Rust toolchain, no GPU, no Python):

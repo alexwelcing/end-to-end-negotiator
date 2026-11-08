@@ -269,6 +269,8 @@ impl App {
                     "x": x, "y": y,
                     "action": c.action.as_ref().map(|a| json!({"name": a.name, "params": a.params_json()})),
                     "positions": App::positions(sp, &c.state)?,
+                    // The whole landing state, so a page can tell which candidate a release committed to.
+                    "state": sp.state_json(&c.state),
                 }))
             })
             .collect::<Result<_>>()?;

@@ -87,6 +87,8 @@ pre { white-space: pre-wrap; margin: 8px 0 0; }
     <span class="pill" id="violpill">0 violations</span>
     <span class="pill" id="mspill">— ms/tick</span>
     <span class="pill hold" id="holdpill" hidden></span>
+    <button class="ctl" id="share" hidden title="Open this machine in a shared room: everyone with the link sees and drives the same machine">Share this machine</button>
+    <span class="pill" id="roompill" hidden></span>
   </div>
   <div class="layout">
     <div class="stack">
@@ -106,6 +108,11 @@ const NS = "http://www.w3.org/2000/svg";
 const PAD = 18, TITLE_H = 46, PANEL_GAP = 46, ROW_GAP = 70, LIGHT_R = 5, MAX_ROW = 900, Z = 1.5;
 let machines = [], M = null, state = null, pending = [], detached = [], positions = {}, derived = {};
 let layout = null, running = false, timer = null, busy = false, tick = 0, stats = null, last = null, drag = null, lastFired = new Set();
+// A shared room (docs/machine-room.md, M4): the machine lives in a Durable Object on the server, which ticks it
+// and sends every tick here; this page only draws, drives the clock and runs its own drags locally.
+const PARAMS = new URLSearchParams(location.search);
+const ROOM = PARAMS.get("room");
+let shared = null, canShare = false;
 
 async function api(path, body) {
   // The static site answers from the WebAssembly build in this page instead of a server.
@@ -125,11 +132,18 @@ async function init() {
   if (!machines.length) { $("who").textContent = "no machines"; $("hint").textContent = "No machine documents were loaded (pass --machines)."; return; }
   const tabs = $("tabs");
   for (const m of machines) { const b = document.createElement("button"); b.className = "tab"; b.role = "tab"; b.textContent = m.name; b.onclick = () => select(m.name); tabs.append(b); }
-  $("run").onclick = () => running ? pause() : start();
+  $("run").onclick = () => shared ? send({type: running ? "pause" : "run"}) : running ? pause() : start();
   $("step").onclick = () => doTick();
-  $("reset").onclick = () => select(M.name);
-  $("rate").oninput = () => { $("rateval").textContent = `${$("rate").value}/s`; if (running) { pause(); start(); } };
-  select(machines[0].name);
+  $("reset").onclick = () => shared ? send({type: "reset"}) : select(M.name);
+  $("rate").oninput = () => { $("rateval").textContent = `${$("rate").value}/s`; if (shared) send({type: "rate", rate: Number($("rate").value)}); else if (running) { pause(); start(); } };
+  canShare = await fetch("/room/_health").then(r => r.ok).catch(() => false);
+  if (canShare) {
+    const b = $("share"); b.hidden = false;
+    if (ROOM) { b.textContent = "Leave the room"; b.onclick = () => { location.search = ""; }; }
+    else b.onclick = () => { location.search = `?room=${Math.random().toString(36).slice(2, 8)}&machine=${M.name}`; };
+  }
+  const wanted = PARAMS.get("machine");
+  select(machines.some(m => m.name === wanted) ? wanted : machines[0].name);
 }
 
 function select(name) {
@@ -144,7 +158,8 @@ function select(name) {
   $("trace").innerHTML = ""; $("last").innerHTML = ""; $("stop").innerHTML = "";
   layout = computeLayout();
   updatePills();
-  view();
+  if (shared) { const ws = shared.ws; shared = null; ws.onclose = null; ws.close(); }
+  if (ROOM && canShare) connect(); else view();
 }
 
 /** One panel per block, in rows wrapped at MAX_ROW; each panel fits the box its elements can occupy over
@@ -170,7 +185,7 @@ async function view() {
   positions = v.positions; derived = v.derived; draw();
 }
 
-function start() { running = true; $("run").textContent = "Pause"; $("stop").innerHTML = ""; timer = setInterval(() => doTick(), 1000 / Number($("rate").value)); }
+function start() { running = true; $("run").textContent = "Pause"; $("stop").innerHTML = ""; if (!shared) timer = setInterval(() => doTick(), 1000 / Number($("rate").value)); }
 function pause() { running = false; $("run").textContent = "Run"; if (timer) clearInterval(timer); timer = null; }
 
 /** The clock's input drives the run: the first parameterless input of a `clock` block, else the first parameterless input. */
@@ -182,6 +197,7 @@ function driveInputs() {
 }
 
 async function doTick(external = driveInputs()) {
+  if (shared) { send({type: "step"}); return; }
   if (busy) return; busy = true;
   try {
     const r = await api(`/api/machine/${M.name}/tick`, {state, external, pending, detached});
@@ -200,10 +216,55 @@ function updatePills() {
   a.textContent = stats.ticks ? `agreement ${stats.agree}/${stats.ticks} ticks` : "agreement —";
   a.className = "pill" + (stats.ticks ? (stats.agree === stats.ticks ? " ok" : " bad") : "");
   const v = $("violpill"); v.textContent = `${stats.viol} violation${stats.viol === 1 ? "" : "s"}`; v.className = "pill" + (stats.viol ? " bad" : stats.ticks ? " ok" : "");
-  const ms = stats.ms.length ? stats.ms.reduce((x, y) => x + y, 0) / stats.ms.length : null;
-  $("mspill").textContent = ms === null ? "— ms/tick" : `${ms.toFixed(2)} ms/tick (networks)`;
+  const ms = Array.isArray(stats.ms) ? (stats.ms.length ? stats.ms.reduce((x, y) => x + y, 0) / stats.ms.length : null) : (stats.ms || null);
+  // Workers freeze the clock within a request, so a room's tick time reads as zero there: say where it runs instead.
+  $("mspill").textContent = ms ? `${ms.toFixed(2)} ms/tick (networks${shared ? ", on the server" : ""})` : shared ? "ticked on the server" : "— ms/tick";
   const h = $("holdpill"); h.hidden = !detached.length && !pending.length;
   h.textContent = detached.length ? `${detached.join(", ")} held · ${pending.length} queued` : `${pending.length} queued`;
+  const rp = $("roompill"); rp.hidden = !shared;
+  if (shared) rp.textContent = `room ${shared.id} · ${shared.viewers} viewer${shared.viewers === 1 ? "" : "s"}`;
+}
+
+function send(msg) { if (shared && shared.ws.readyState === 1) shared.ws.send(JSON.stringify(msg)); }
+
+/** Join the room for this machine: from here on the server's ticks drive the page. */
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/room/${M.name}/${ROOM}`);
+  shared = {id: ROOM, ws, me: null, viewers: 0, holds: {}};
+  ws.onmessage = e => handleRoom(JSON.parse(e.data));
+  ws.onclose = () => { if (shared && shared.ws === ws) $("hint").innerHTML = '<span class="err">Disconnected from the room. Reload to rejoin.</span>'; };
+  $("hint").textContent = `Joining room ${ROOM}…`;
+}
+function applyStatus(m) {
+  if (m.holds) { shared.holds = m.holds; detached = [...new Set(Object.values(m.holds))]; }
+  if (m.viewers !== undefined) shared.viewers = m.viewers;
+  if (m.stats) stats = m.stats;
+  if (m.tick !== undefined) tick = m.tick;
+  if (m.rate !== undefined && Number($("rate").value) !== m.rate) { $("rate").value = m.rate; $("rateval").textContent = `${m.rate}/s`; }
+  if (m.running !== undefined) { running = m.running; $("run").textContent = running ? "Pause" : "Run"; if (running) $("stop").innerHTML = ""; }
+}
+async function handleRoom(m) {
+  if (!shared) return;
+  switch (m.type) {
+    case "welcome":
+      shared.me = m.id; state = m.state; pending = m.pending; applyStatus(m);
+      $("hint").textContent = `In room ${m.room} with ${m.viewers} viewer${m.viewers === 1 ? "" : "s"}. Anyone with the link can run, step, grab and drop; everyone sees the same machine.`;
+      if (m.stopped) showStop(m.stopped);
+      await view(); updatePills(); break;
+    case "tick":
+      state = m.state; pending = m.pending; positions = m.positions; derived = m.derived; last = m; applyStatus(m);
+      lastFired = new Set(m.steps.filter(s => s.via).map(s => `${s.via.block}.${s.via.event}>${s.block}.${s.action}`));
+      logTick(m); updatePills(); draw();
+      if (!m.agrees || m.violations.length) showStop(m);
+      break;
+    case "status": applyStatus(m); updatePills(); draw(); break;
+    case "reset":
+      state = m.state; pending = []; last = null; lastFired = new Set(); $("trace").innerHTML = ""; $("last").innerHTML = ""; $("stop").innerHTML = "";
+      applyStatus(m); await view(); updatePills(); break;
+    case "viewers": shared.viewers = m.count; updatePills(); break;
+    case "error": $("hint").innerHTML = `<span class="err">${m.message}</span>`; break;
+  }
 }
 
 function stepLine(s) {
@@ -292,6 +353,12 @@ async function startDrag(e, b, g, p) {
   e.preventDefault();
   const svg = $("stage"); svg.setPointerCapture(e.pointerId);
   const inst = b.instance;
+  if (shared) {
+    if (!window.nerveApi) { $("hint").textContent = "Drags in a shared room need the browser build of the engine."; return; }
+    const holder = Object.entries(shared.holds).find(([, blk]) => blk === inst);
+    if (holder && holder[0] !== shared.me) { $("hint").textContent = `${inst} is held by someone else.`; return; }
+    send({type: "grab", block: inst});
+  }
   try {
     const s = await api(`/api/${b.type}/drag`, {gesture: g.name, state: state[inst]});
     drag = {block: inst, type: b.type, gesture: g.name, sid: s.session, candidates: s.candidates, preview: null, panel: p, busy: false, queued: null};
@@ -318,13 +385,21 @@ async function release(q) {
   const svg = $("stage"); svg.onpointermove = svg.onpointerup = svg.onpointercancel = null;
   try {
     const r = await api(`/api/drag/${d.sid}/release`, q);
+    if (shared) {
+      // The drop goes to the room as the external action the drag committed to; the room's tick brings the state.
+      const cand = d.candidates.find(c => c.state && key(c.state) === key(r.state));
+      const act = cand && cand.action ? {action: cand.action.name, params: cand.action.params} : {};
+      send({type: "drop", block: d.block, ...act});
+      $("hint").textContent = act.action ? `Dropped: ${d.block}.${act.action} goes to the room as an external action.` : `Dropped: ${d.block} unchanged.`;
+      return;
+    }
     state = {...state, [d.block]: r.state};
     detached = detached.filter(x => x !== d.block);
     const held = pending.filter(p => p.block === d.block).length;
     $("hint").textContent = `Dropped: ${d.block} ${r.changed.length ? r.changed.join(", ") + " changed" : "unchanged"}${held ? `; ${held} queued delivery${held === 1 ? "" : "ies"} will land on the next tick` : ""}.`;
     if (!running && pending.length) await doTick([]); else await view();
     updatePills();
-  } catch (err) { detached = detached.filter(x => x !== d.block); $("hint").innerHTML = `<span class="err">${err.message}</span>`; await view(); }
+  } catch (err) { detached = detached.filter(x => x !== d.block); if (shared) send({type: "drop", block: d.block}); $("hint").innerHTML = `<span class="err">${err.message}</span>`; await view(); }
 }
 
 (window.nerveReady || Promise.resolve()).then(init);

@@ -1,10 +1,21 @@
-# The static lab on Cloudflare: a Worker that serves `dist/` as static assets (Pages is now part of Workers).
-# Build `dist/` with `python scripts/build_site.py`, then `wrangler deploy --config site/wrangler.toml`.
-# `/machine` resolves to `machine.html` through the assets' html handling; `dist/_headers` sets caching.
+# The lab on Cloudflare: a Worker that serves `dist/` as static assets (the drag lab and the machine room on
+# the WebAssembly core) and hosts the shared machine room, one Durable Object per room, which runs the same
+# core on the server. Build `dist/` with `python scripts/build_site.py`, then `wrangler deploy --config
+# site/wrangler.toml`; `wrangler dev --config site/wrangler.toml` runs it locally.
 name = "nerve-machine-room"
+main = "./worker.js"
 compatibility_date = "2026-11-01"
 
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 html_handling = "auto-trailing-slash"
 not_found_handling = "404-page"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "MachineRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MachineRoom"]

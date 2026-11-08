@@ -12,6 +12,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8791", "--directory", "site/dist"],
       "port": 8791
+    },
+    {
+      "name": "nerve-site-worker",
+      "runtimeExecutable": "wrangler",
+      "runtimeArgs": ["dev", "--config", "site/wrangler.toml", "--port", "8792"],
+      "port": 8792
     }
   ]
 }

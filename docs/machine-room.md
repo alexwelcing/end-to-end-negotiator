@@ -107,6 +107,24 @@ the machine re-plans. Each milestone is a demo on the day it passes.
   ("break it") and reset.
 - **Acceptance:** two browsers see the same machine; a grab in one re-plans the chain in both within one tick;
   a corrupted block lights red and the machine stops there, in both.
+- **Status (2026-11-08): the shared room is live.** `site/worker.js` is the Worker behind
+  [https://nerve-machine-room.aw-ab5.workers.dev](https://nerve-machine-room.aw-ab5.workers.dev): static assets for everything but `/room/<machine>/<id>`, which is one Durable Object per
+  room (`MachineRoom`, SQLite-backed). The object loads the same WebAssembly core as the pages (the module
+  imported into the Worker, the specs, the machine documents and the networks of that machine's blocks
+  fetched from the assets binding), holds the authoritative state, ticks it on an alarm at the room's rate,
+  and sends every tick, with its per-step checks and the composed oracle's agreement, to every viewer over
+  WebSockets (hibernation API; the snapshot and each socket's attachment let a woken object continue). A
+  viewer's grab detaches the block for everyone: the room holds its deliveries, the viewer runs the drag
+  locally on its own core, and the drop reaches the room as the external action the drag committed to
+  (the drag API now returns each landing candidate's state so the page can name it). Anyone with the link
+  runs, pauses, steps, resets or sets the rate; the clock stops when nobody is watching, and the machine
+  stops at the first failed check for everyone. On the machine room page, **Share this machine** opens a
+  room (`/machine?room=<id>&machine=chain`). Verified with two browser tabs on `wrangler dev` and on the
+  deployed Worker: both see the same ticks (about 1.7 ms per tick on the server); a grab in one shows as
+  held in the other with its queued deliveries; the drop applies in both in the same tick with identical
+  state and the composed oracle still agreeing. Not yet: spectator and presenter roles, "break it" (a
+  corrupted weight set) and the local prediction between server ticks, which a machine at 6 ticks a second
+  does not need.
 
 ## Later, on the same foundation
 
