@@ -7,12 +7,17 @@ on:
 
 jobs:
   rust:
-    name: build, test, check every spec
+    name: build, test, check every spec, browser build parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-bindgen-action@v0.2.0
+        with:
+          version: "0.2.114"
       - name: Build (CPU)
         run: cargo build --release --workspace
       - name: Tests
@@ -27,18 +32,10 @@ jobs:
           ./target/release/nerve serve --models models/served --addr 127.0.0.1:8787 &
           sleep 2
           python3 scripts/ci_smoke.py http://127.0.0.1:8787
-
-  wasm:
-    name: the core builds for the browser
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-      - name: Check the wasm build (no server, the `wasm` feature)
-        run: cargo check -p nerve --lib --release --target wasm32-unknown-unknown --no-default-features --features wasm
+      - name: The browser build answers the same (site/dist, wasm, parity with the server)
+        run: |
+          python3 scripts/build_site.py
+          node scripts/wasm_smoke.mjs --dist site/dist --native http://127.0.0.1:8787
 
   docker:
     name: lab image builds
