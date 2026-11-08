@@ -31,7 +31,7 @@ impl Room {
     pub fn add_spec(&mut self, text: &str) -> Result<String, JsError> {
         let spec = Spec::parse(text).map_err(js)?;
         let name = spec.name.clone();
-        self.app.add_entry(Entry { spec, model: None, source: text.to_string() });
+        self.app.add_entry(Entry { spec, model: None, picture: None, source: text.to_string() });
         Ok(name)
     }
 
@@ -57,6 +57,18 @@ impl Room {
     /// Whether an interface has a network loaded.
     pub fn has_model(&self, spec: &str) -> bool {
         self.app.entry(spec).ok().is_some_and(|e| e.model.is_some())
+    }
+
+    /// Loads the render network of an interface already added: `picture.json` text and
+    /// `picture.safetensors` bytes, as `nerve train-picture` writes them.
+    pub fn add_picture(&mut self, spec: &str, meta_json: &str, weights: &[u8]) -> Result<(), JsError> {
+        let s = self.app.entry(spec).map_err(js)?.spec.clone();
+        let p = crate::picture::Picture::from_bytes(s, meta_json, weights, &Device::Cpu).map_err(js)?;
+        self.app.set_picture(spec, std::sync::Arc::new(p)).map_err(js)
+    }
+
+    pub fn has_picture(&self, spec: &str) -> bool {
+        self.app.entry(spec).ok().is_some_and(|e| e.picture.is_some())
     }
 
     /// Answers an API path (`/api/specs`, `/api/<spec>/step`, `/api/machine/<name>/tick`, ...) with

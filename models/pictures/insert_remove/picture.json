@@ -1,0 +1,39 @@
+{
+  "spec": "insert_remove",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 128,
+    "state_dim": 56,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 500,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 65,
+    "mae": 0.026058185759645244,
+    "worst_mae": 0.034349337220191956,
+    "worst_state": "(4, 4, 4, 4)",
+    "w": 192,
+    "h": 128,
+    "loss": 0.014204304665327072,
+    "seconds": 214.658096,
+    "trained_on": "cuda",
+    "params": 464059
+  }
+}

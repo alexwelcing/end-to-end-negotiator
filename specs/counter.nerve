@@ -21,8 +21,33 @@ ensures:
   - { after: inc, holds: "count >= old.count" }
   - { after: dec, holds: "count <= old.count" }
   - { after: set, holds: "count == to" }
+scene:
+  box: [0, 5, 220, 75]
+  shapes:
+    - {line: [20, 40, 200, 40], color: track, width: 4}
+    - {line: [20, 34, 20, 46], color: mut, width: 1.5}
+    - {line: [40, 34, 40, 46], color: mut, width: 1.5}
+    - {line: [60, 34, 60, 46], color: mut, width: 1.5}
+    - {line: [80, 34, 80, 46], color: mut, width: 1.5}
+    - {line: [100, 34, 100, 46], color: mut, width: 1.5}
+    - {line: [120, 34, 120, 46], color: mut, width: 1.5}
+    - {line: [140, 34, 140, 46], color: mut, width: 1.5}
+    - {line: [160, 34, 160, 46], color: mut, width: 1.5}
+    - {line: [180, 34, 180, 46], color: mut, width: 1.5}
+    - {line: [200, 34, 200, 46], color: mut, width: 1.5}
+    - {label: '0', at: [20, 60], color: mut, size: 1.8}
+    - {label: '1', at: [40, 60], color: mut, size: 1.8}
+    - {label: '2', at: [60, 60], color: mut, size: 1.8}
+    - {label: '3', at: [80, 60], color: mut, size: 1.8}
+    - {label: '4', at: [100, 60], color: mut, size: 1.8}
+    - {label: '5', at: [120, 60], color: mut, size: 1.8}
+    - {label: '6', at: [140, 60], color: mut, size: 1.8}
+    - {label: '7', at: [160, 60], color: mut, size: 1.8}
+    - {label: '8', at: [180, 60], color: mut, size: 1.8}
+    - {label: '9', at: [200, 60], color: mut, size: 1.8}
+    - {label: not armed, at: [110, 16], color: mut, size: 1.8, when: not armed}
 render:
-  dial: { x: "20 + 20 * count", y: 40 }
+  dial: { x: "20 + 20 * count", y: 40, shapes: [{rect: [0, -14, 8, 8], r: 1, color: ink}, {circle: [0, 0, 9], color: panel, stroke: acc, width: 2.5}] }
 futures:
   drag_dial: { kind: closest, over: count, values: [0,1,2,3,4,5,6,7,8,9], grab: dial, action: set, stickiness: 4 }
 learn:

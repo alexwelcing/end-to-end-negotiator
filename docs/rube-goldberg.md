@@ -179,12 +179,15 @@ Each ships in the lab and on the site the day it passes, with its numbers in thi
 
 ### M5. Time at frame rate (R1, R2)
 
-- `machines/ball.nerve`: three `tracks` blocks in a row (paper 2's ball demo), the clock at 30 Hz,
-  hand-offs with the canonical payload; the amortised step head; the tolerance pill; the CSS slide gone.
+- `machines/ball.nerve`: three `rail` blocks in a loop (`specs/rail.nerve`, paper 2's ball demo), the clock
+  advancing all three, hand-offs with the canonical payload (`exit -> enter`); `machines/ball_drift.nerve`
+  the same with the sender's overshoot carried (`enter_at`); the amortised step head; the tolerance pill;
+  the CSS slide gone; parameterless inputs as buttons (drop the ball).
 - **Acceptance (Prediction 4):** over 200 runs, position error against the composed oracle after 1, 10
   and 100 hand-offs is bounded by one block's within-episode error (≤ 1%) with the rule, and grows past
   1% within ten hand-offs without it. **Prediction 5 (new):** the step head agrees with descent within
   tolerance on ≥ 99% of ticks, and a tick of three continuous blocks takes under 4 ms in WebAssembly.
+- **Status (2026-11-08): done; `docs/machine-room.md` has the engineering.** Prediction 4 (200 runs each, the ball dropped at a random offset): with the snapping hand-off the error against the composed oracle is mean 1.8%, worst 3.7% of the rail after 1, 10 and 100 hand-offs alike; without it, 2.4% after one hand-off, 17% after ten and off the rail entirely (164%) after a hundred. The flat 1.8% is one rail's own drift: within an episode (590,100 ticks with both balls on the same rail) the networks' ball is mean 2.3%, worst 4.4% from the oracle's, and one tick of travel is 3.2%, so about half the runs cross the end of a rail one tick before the oracle does and stay one tick ahead for ever; the plan's "within 1%" was a guess at that drift and it is a tick, not a percent. The bound holds (the hand-off error never exceeds the within-episode worst), the level is a tick. Prediction 5: on the machine's own ticks (1,213 rail steps over 400 ticks) the head agrees with descent on 1,213 of 1,213, all within tolerance of the oracle, with no answer the spec rejected, at 0.036 ms per step on the CPU; on 500 uniformly random steps (states and parameters the machine never visits) it agrees with descent on 489, 97.8%. A tick of the ball machine in WebAssembly (the clock and three rails, each rail stepped by its head) takes 0.24 ms in Node against the plan's 4 ms budget, and scripts/wasm_smoke.mjs now checks every render network's picture and the ball machine's ticks against the native lab within tolerance.
 
 ### M6. One scene (R3)
 

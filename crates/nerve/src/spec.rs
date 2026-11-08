@@ -231,6 +231,9 @@ pub struct RenderElement {
     pub name: String,
     pub x: Expr,
     pub y: Expr,
+    /// What the element looks like, drawn at (x, y) by the render oracle (`render.rs`); empty means
+    /// the pages draw a plain marker.
+    pub shapes: Vec<crate::render::Shape>,
 }
 
 #[derive(Debug, Clone)]
@@ -245,6 +248,8 @@ pub struct Spec {
     pub holes: Vec<Hole>,
     pub initial: State,
     pub render: Vec<RenderElement>,
+    /// The picture's box, background and static shapes, when the spec says what it looks like.
+    pub scene: Option<crate::render::Scene>,
 }
 
 impl Spec {
@@ -496,7 +501,9 @@ fn parse_field(name: &str, y: &Yaml) -> Result<FieldType> {
     };
     let kind = key(&m, "type").map(as_str).transpose()?.unwrap_or_default();
     let mut f = FieldType { name: name.into(), kind: Kind::Bool, lo: None, hi: None, values: Vec::new(), step: None, int_grid: false };
-    let range = || -> Result<(Option<(f64, bool)>, Option<(f64, bool)>)> {
+    /// One end of a range: the number and whether it was written as an integer.
+    type Bound = Option<(f64, bool)>;
+    let range = || -> Result<(Bound, Bound)> {
         match key(&m, "range") {
             Some(Yaml::Sequence(r)) if r.len() == 2 => Ok((num(&r[0]), num(&r[1]))),
             None | Some(Yaml::Null) => Ok((None, None)),
@@ -658,8 +665,16 @@ fn parse_doc(doc: &Yaml) -> Result<Spec> {
     for (ename, ed) in entries(key(doc, "render"))? {
         let Yaml::Mapping(em) = &ed else { bail!("render.{ename} needs x and y expressions") };
         let (Some(x), Some(y)) = (key(em, "x"), key(em, "y")) else { bail!("render.{ename} needs x and y expressions") };
-        render.push(RenderElement { name: ename, x: Expr::compile(&expr_src(x)?)?, y: Expr::compile(&expr_src(y)?)? });
+        let mut shapes = Vec::new();
+        if let Some(sh) = key(em, "shape") {
+            shapes.push(crate::render::Shape::parse(sh).with_context(|| format!("render.{ename}.shape"))?);
+        }
+        for (i, sh) in key(em, "shapes").and_then(Yaml::as_sequence).into_iter().flatten().enumerate() {
+            shapes.push(crate::render::Shape::parse(sh).with_context(|| format!("render.{ename}.shapes[{i}]"))?);
+        }
+        render.push(RenderElement { name: ename, x: Expr::compile(&expr_src(x)?)?, y: Expr::compile(&expr_src(y)?)?, shapes });
     }
+    let scene = key(doc, "scene").map(crate::render::Scene::parse).transpose().context("scene")?;
 
     let init_map = key(doc, "initial").and_then(Yaml::as_mapping).cloned().unwrap_or_default();
     let initial = fields
@@ -683,7 +698,7 @@ fn parse_doc(doc: &Yaml) -> Result<Spec> {
         .map(|i| Expr::compile(&expr_src(i)?))
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(Spec { name, fields, actions, transitions, invariants, ensures, futures, holes, initial, render })
+    Ok(Spec { name, fields, actions, transitions, invariants, ensures, futures, holes, initial, render, scene })
 }
 
 #[cfg(test)]

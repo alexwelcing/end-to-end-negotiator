@@ -1,0 +1,39 @@
+{
+  "spec": "kanban",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 96,
+    "state_dim": 84,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 150,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 360,
+    "mae": 0.015389822868423329,
+    "worst_mae": 0.01701267622411251,
+    "worst_state": "(7, 5, 4, 6)",
+    "w": 192,
+    "h": 96,
+    "loss": 0.010133031755685806,
+    "seconds": 269.5254054,
+    "trained_on": "cuda",
+    "params": 372539
+  }
+}

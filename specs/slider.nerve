@@ -21,8 +21,27 @@ invariants:
 ensures:
   - { after: move, holds: "value == to or not old.grabbed" }
   - { after: release, holds: "not grabbed" }
+scene:
+  box: [-14, -34, 254, 30]
+  shapes:
+    - {line: [0, 0, 240, 0], color: track, width: 6}
+    - {rect: ["value / 2", 0, value, 6], color: acc}
+    - {line: [0, -6, 0, 6], color: mut, width: 1.5}
+    - {line: [40, -6, 40, 6], color: mut, width: 1.5}
+    - {line: [80, -6, 80, 6], color: mut, width: 1.5}
+    - {line: [120, -6, 120, 6], color: mut, width: 1.5}
+    - {line: [160, -6, 160, 6], color: mut, width: 1.5}
+    - {line: [200, -6, 200, 6], color: mut, width: 1.5}
+    - {line: [240, -6, 240, 6], color: mut, width: 1.5}
+    - {label: '0', at: [0, 20], color: mut, size: 1.8}
+    - {label: '40', at: [40, 20], color: mut, size: 1.8}
+    - {label: '80', at: [80, 20], color: mut, size: 1.8}
+    - {label: '120', at: [120, 20], color: mut, size: 1.8}
+    - {label: '160', at: [160, 20], color: mut, size: 1.8}
+    - {label: '200', at: [200, 20], color: mut, size: 1.8}
+    - {label: '240', at: [240, 20], color: mut, size: 1.8}
 render:
-  handle: { x: "value", y: 0 }
+  handle: { x: "value", y: 0, shapes: [{circle: [0, 0, 12], color: panel, stroke: acc, width: 2.5}, {circle: [0, 0, 12], color: acc, when: grabbed}, {text: value, at: [0, -22], color: mut, size: 1.8}] }
 futures:
   drag_handle: { kind: vary, over: value, grab: handle, action: move, param: to }
 initial: {value: 0, grabbed: false}

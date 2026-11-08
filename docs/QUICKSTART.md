@@ -66,11 +66,12 @@ rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.114
 ```
 
-then `python scripts/build_site.py` builds the module and assembles `site/dist`: the lab, the machine room,
-the specs, the machines and the served networks (about 15 MB). Serve it with any static server, for example
-`python -m http.server 8791 --directory site/dist`, and open `index.html` or `machine.html`.
-`node scripts/wasm_smoke.mjs --dist site/dist --native http://127.0.0.1:8787` asks the browser build what
-`scripts/ci_smoke.py` asks a running server and compares the answers; CI does both on every push.
+then `cargo run --release -p nerve -- site` builds the module and assembles `site/dist`: the lab, the machine
+room, the specs, the machines, the served networks and the render networks. Serve it with any static server,
+for example `python -m http.server 8791 --directory site/dist`, and open `index.html` or `machine.html`.
+`nerve smoke http://127.0.0.1:8787` asks a running server what CI needs to know (networks answer, the chain ticks
+in agreement, pictures draw); `node scripts/wasm_smoke.mjs --dist site/dist --native http://127.0.0.1:8787` asks
+the browser build the same and compares the answers. CI does all of it on every push.
 The site is live at [https://nerve-machine-room.aw-ab5.workers.dev](https://nerve-machine-room.aw-ab5.workers.dev) (the machine room at `/machine`), served by a Cloudflare Worker that
 holds `site/dist` as static assets (`site/wrangler.toml`). By hand, after `wrangler login`:
 `wrangler deploy --config site/wrangler.toml`. `.github/workflows/pages.yml` does the same on every push to
@@ -81,9 +82,10 @@ holds `site/dist` as static assets (`site/wrangler.toml`). By hand, after `wrang
 
 | path | what |
 |---|---|
-| `specs/*.nerve` | the 19 interfaces, as specs (17 draggable ones, plus the digit and clock blocks machines are built from); `scripts/gen_*_spec.py` generate the larger ones |
-| `machines/*.nerve` | machines: blocks wired by events (odometer, odometer6, chain); the lab serves them at `/machine` |
-| `models/served/` | the trained network for each, chosen from the results log by `experiments/round2/serve_set.py` |
+| `specs/*.nerve` | the 20 interfaces, as specs (18 draggable ones, plus the digit and clock blocks machines are built from); `nerve gen` writes the ten generated ones from `crates/nerve/src/gen/` |
+| `machines/*.nerve` | machines: blocks wired by events (odometer, odometer6, chain, ball, ball_drift); the lab serves them at `/machine` |
+| `models/served/` | the trained network for each, chosen from the results log by `nerve serve-set` |
+| `models/pictures/` | the render network for each (`nerve train-picture`): what the interface looks like, as weights |
 | `crates/nerve/` | the Rust implementation: spec, oracle, encoder, energy model, drags, trainer, lab |
 | `crates/nerve/web/index.html`, `machine.html` | the lab page and the machine room |
 | `site/`, `scripts/build_site.py` | the static build of both pages on the WebAssembly core |

@@ -1,0 +1,39 @@
+{
+  "spec": "rail",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 32,
+    "state_dim": 11,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 200,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 512,
+    "mae": 0.00605295136483619,
+    "worst_mae": 0.009287015534937382,
+    "worst_state": "(239.38038560664472, True)",
+    "w": 192,
+    "h": 32,
+    "loss": 0.0020435743499547243,
+    "seconds": 597.9945736,
+    "trained_on": "cuda",
+    "params": 156475
+  }
+}

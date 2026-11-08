@@ -124,6 +124,8 @@ input.num{width:86px;background:var(--bg);color:var(--ink);border:1px solid var(
           <div class="toggles">
             <label title="Shade each pointer position by where a drag would land"><input type="checkbox" id="showField" checked> regions</label>
             <label title="Mark every state the spec lets this drag reach"><input type="checkbox" id="showGhosts" checked> landing spots</label>
+            <label title="Show the render oracle's exact picture instead of the render network's"><input type="checkbox" id="showOracle"> spec picture</label>
+            <span class="pill" id="picpill" hidden></span>
           </div>
         </div>
         <svg id="stage" role="img" aria-label="Draggable interface"></svg>
@@ -146,15 +148,16 @@ input.num{width:86px;background:var(--bg);color:var(--ink);border:1px solid var(
   </div>
   <footer id="foot"></footer>
 </main>
-<script src="/skins.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
 const PAL = Array.from({length:10}, (_, i) => `var(--f${i})`);
-const skinOf = name => (window.NERVE_SKINS ? window.NERVE_SKINS.get(name) : null);
 let specs = [], cur = null, state = null, view = null, drag = null, fieldCache = null, lastFrame = null;
 // Where each element was last drawn, so a change of state is seen as a move, not a jump.
 let lastPos = {};
+// The picture of the state on show: what the render network drew, what the render oracle drew, and
+// the pixel error between them. Fetched per state, at most one request in flight.
+let picture = {key: null, net: null, oracle: null, mae: null, view: null, busy: false, pending: null};
 
 async function api(path, body) {
   // The static site answers from the WebAssembly build in this page instead of a server.
@@ -341,6 +344,7 @@ async function init() {
   }
   $("showField").onchange = () => drawField();
   $("showGhosts").onchange = () => render();
+  $("showOracle").onchange = () => { render(); picPill(); };
   select(specs[0].name);
 }
 
@@ -378,13 +382,18 @@ function renderNetwork() {
   const he = t.hole_examples;
   const holes = he && he.n ? ` ${Math.round(he.exact * he.n)}/${he.n} learn-hole examples right.` : "";
   const where = t.trained_on === "cuda" ? "the local GPU" : t.trained_on ? "the CPU" : "this machine";
+  const pic = cur.picture;
+  const pe = pic && pic.trained && pic.trained.eval ? pic.trained.eval : null;
+  const picFacts = pic ? `<br>The picture too: a render network of ${pic.params.toLocaleString()} parameters draws the ${pic.w}×${pic.h} pixels you see${pe ? `, ${(100 * pe.mae).toFixed(1)}% mean pixel error against the spec's own drawing over ${pe.n} states` : ""}.` : cur.scene ? "<br>The picture is the spec's own drawing (no render network loaded)." : "";
   box.innerHTML = `${big ? `<div class="big">${big}</div><div>${caption}</div>` : ""}
-    <div class="netfacts">${viol}${holes}<br>${m.params.toLocaleString()} parameters · trained on ${where}${t.epochs ? `, ${t.epochs} epochs` : ""} · running on the ${m.device === "cuda" ? "GPU" : "CPU"}</div>`;
+    <div class="netfacts">${viol}${holes}<br>${m.params.toLocaleString()} parameters · trained on ${where}${t.epochs ? `, ${t.epochs} epochs` : ""} · running on the ${m.device === "cuda" ? "GPU" : "CPU"}${picFacts}</div>`;
 }
 
 async function select(name) {
   cur = specs.find(s => s.name === name);
   lastPos = {};
+  picture = {key: null, net: null, oracle: null, mae: null, view: null, busy: false, pending: null};
+  picPill();
   for (const t of $("tabs").children) t.setAttribute("aria-selected", t.textContent === name);
   state = structuredClone(cur.initial); drag = null; lastFrame = null; fieldCache = null;
   $("log").innerHTML = ""; $("click").innerHTML = ""; $("status").innerHTML = "";
@@ -411,21 +420,69 @@ async function refresh(changed = []) {
     if (g.track) pts.push([g.track.from.x, g.track.from.y], [g.track.to.x, g.track.to.y]);
     for (const t of g.tracks || []) pts.push([t.from.x, t.from.y], [t.to.x, t.to.y]);
   }
-  // The interface's scenery (pegs, a board, a track) is part of the picture too.
-  const sb = skinOf(cur.name)?.bounds;
-  if (sb) pts.push([sb.x0, sb.y0], [sb.x1, sb.y1]);
+  // The interface's picture (its scene box) is part of the view too.
+  if (cur.scene) pts.push([cur.scene.box[0], cur.scene.box[1]], [cur.scene.box[2], cur.scene.box[3]]);
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
   let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   const w = Math.max(x1 - x0, 60), h = Math.max(y1 - y0, 0);
-  const padX = w * 0.18 + 30, padY = Math.max(h * 0.25, 45);
+  // With a scene the picture is the interface: tight padding, and the stage takes the scene's shape.
+  const padX = cur.scene ? w * 0.04 + 6 : w * 0.18 + 30, padY = cur.scene ? h * 0.1 + 8 : Math.max(h * 0.25, 45);
+  fitHeight(w + 2 * padX, h + 2 * padY);
   const prev = view && view.spec === cur.name ? view.fixed : null;
   view = {spec: cur.name, positions: v.positions, gestures, box: fitStage([x0 - padX, y0 - padY, w + 2 * padX, h + 2 * padY])};
   view.fixed = prev && inside(prev, view.box) ? prev : view.box;
   renderState(changed);
   render();
   drawField();
+  fetchPicture(state);
 }
+
+/** The picture of `s`, from the render network and the render oracle; redraws when it arrives. */
+async function fetchPicture(s) {
+  if (!cur.scene) return;
+  const key = JSON.stringify(s);
+  if (key === picture.key) return;
+  if (picture.busy) { picture.pending = s; return; }
+  picture.busy = true;
+  const spec = cur;
+  try {
+    const r = await api(`/api/${spec.name}/picture`, {state: s});
+    if (cur === spec) {
+      picture = {key, net: r.network ? rgbToUrl(r.network, r.w, r.h) : null, oracle: rgbToUrl(r.oracle, r.w, r.h), mae: r.mae ?? null, view: r.view, busy: false, pending: null};
+      render(); picPill();
+    }
+  } catch (err) { picture.busy = false; $("hint").innerHTML = `<span class="err">${err.message}</span>`; }
+  picture.busy = false;
+  if (cur === spec && picture.pending) { const n = picture.pending; picture.pending = null; fetchPicture(n); }
+}
+
+function picPill() {
+  const p = $("picpill");
+  if (!cur || !cur.scene) { p.hidden = true; return; }
+  p.hidden = false;
+  if (!cur.picture) { p.textContent = "picture: spec (no render network)"; p.className = "pill"; return; }
+  if ($("showOracle").checked) { p.textContent = "picture: the spec's"; p.className = "pill"; return; }
+  if (!picture.key) { p.textContent = "picture: loading the render network…"; p.className = "pill"; return; }
+  const e = picture.mae === null ? "" : ` · pixel error ${(100 * picture.mae).toFixed(1)}%`;
+  p.textContent = `picture: drawn by the render network${e}`;
+  p.className = "pill" + (picture.mae !== null && picture.mae < 0.05 ? " ok" : "");
+}
+/** A raster from the API (RGB bytes, base64) as a data URL the stage can show. */
+function rgbToUrl(b64, w, h) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d"), img = ctx.createImageData(w, h);
+  for (let i = 0, j = 0; i < bytes.length; i += 3, j += 4) { img.data[j] = bytes[i]; img.data[j + 1] = bytes[i + 1]; img.data[j + 2] = bytes[i + 2]; img.data[j + 3] = 255; }
+  ctx.putImageData(img, 0, 0);
+  return canvas.toDataURL();
+}
+
 const inside = (a, b) => b[0] >= a[0] && b[1] >= a[1] && b[0] + b[2] <= a[0] + a[2] && b[1] + b[3] <= a[1] + a[3];
+/** The stage's height follows the view's shape (160 to 420 px), so a wide scene is a wide picture, not a strip in a tall box. */
+function fitHeight(w, h) {
+  const stage = $("stage"), sw = stage.getBoundingClientRect().width || 600;
+  stage.style.height = `${Math.round(Math.max(160, Math.min(420, sw * h / Math.max(w, 1))))}px`;
+}
 /** Grow a box around its centre so it has the stage's aspect ratio (the field then fills the stage). */
 function fitStage([x, y, w, h]) {
   const r = $("stage").getBoundingClientRect(), aspect = r.height / Math.max(r.width, 1);
@@ -454,10 +511,11 @@ function render() {
   el("g", {id: "field"}, svg);
   const k = scale(), R = 14 / k, small = 6 / k, fs = 11 / k;
   const layer = el("g", {}, svg);
-  // The skin: scenery under everything, then each element as the thing it is (a disc, a tile, a car).
-  const skin = skinOf(cur.name);
-  const shown = drag && lastFrame ? lastFrame.preview : state;
-  if (skin && skin.scenery) skin.scenery(el("g", {class: "scenery"}, layer), {state: shown, positions: drag && lastFrame ? lastFrame.positions : view.positions, k, active: false});
+  // The interface as its render network draws it, under the landing spots and regions.
+  // The picture: the render network's pixels (or the oracle's, on request) under everything else.
+  const pic = cur.scene && picture.key ? (($("showOracle").checked || !picture.net) ? picture.oracle : picture.net) : null;
+  const baked = !!pic;
+  if (baked) el("image", {href: pic, x: picture.view[0], y: picture.view[1], width: picture.view[2], height: picture.view[3], preserveAspectRatio: "none"}, layer);
   const showGhosts = $("showGhosts").checked;
   for (const g of view.gestures) {
     if (drag && drag.gesture !== g.name) continue;
@@ -506,8 +564,11 @@ function render() {
       const far = cur.futures.find(f => f.name === g.name).far, c = positions[name];
       el("circle", {cx: c.x, cy: c.y, r: far, fill: "none", stroke: lastFrame.far ? "var(--bad)" : "var(--track)", "stroke-width": 1.5 / k, "stroke-dasharray": `${6 / k} ${5 / k}`}, grp);
     }
-    const skinned = skin && skin.element && skin.element(grp, name, p, {state: shown, positions, k, active: !!active});
-    if (!skinned) {
+    // With a picture on show the element is in the pixels; the group is only a hit target. Without
+    // one (a spec with no scene) the element is a plain marker.
+    if (baked) {
+      el("circle", {cx: p.x, cy: p.y, r: R * 1.2, fill: "transparent", stroke: active ? "var(--acc)" : "none", "stroke-width": 1.5 / k}, grp);
+    } else {
       el("circle", {cx: p.x, cy: p.y, r: R, fill: active ? "var(--acc)" : "var(--panel)", stroke: "var(--acc)", "stroke-width": 2.5 / k, style: "transition:cx .12s ease-out, cy .12s ease-out"}, grp);
       if (!floating) {
         const t = el("text", {x: p.x, y: p.y + R + 14 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--ink)"}, grp);
@@ -592,7 +653,7 @@ async function sendFrame(p) {
   d.busy = true;
   try {
     const fr = await api(`/api/drag/${d.sid}/frame`, p);
-    if (drag === d) { lastFrame = fr; showFrame(); render(); }
+    if (drag === d) { lastFrame = fr; showFrame(); render(); fetchPicture(fr.preview); }
   } catch (err) { if (drag === d) $("hint").innerHTML = `<span class="err">${err.message}</span>`; }
   d.busy = false;
   if (drag === d && d.pending) { const q = d.pending; d.pending = null; sendFrame(q); }

@@ -31,10 +31,10 @@ jobs:
         run: |
           ./target/release/nerve serve --models models/served --addr 127.0.0.1:8787 &
           sleep 2
-          python3 scripts/ci_smoke.py http://127.0.0.1:8787
+          ./target/release/nerve smoke http://127.0.0.1:8787
       - name: The browser build answers the same (site/dist, wasm, parity with the server)
         run: |
-          python3 scripts/build_site.py
+          ./target/release/nerve site
           node scripts/wasm_smoke.mjs --dist site/dist --native http://127.0.0.1:8787
 
   docker:

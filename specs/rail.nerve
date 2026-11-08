@@ -1,0 +1,42 @@
+# A ball on a rail: the continuous block of the ball machine (docs/rube-goldberg.md, M5). `enter` puts
+# the ball at the start, `advance` rolls it 8 px per tick (240 px per second at 30 ticks), and `exit`
+# fires as it passes the end of the rail, where the next rail's `enter` takes over. `enter_at` carries
+# a float in instead, for the no-snapping variant of the hand-off that paper 2's Prediction 4 measures
+# against this one. `set` is the grab: a hand can put the ball anywhere on the rail while it runs.
+nerve: 1
+name: rail
+state:
+  pos: {type: float, range: [0, 248]}
+  rolling: {type: bool}
+actions:
+  enter: {}
+  enter_at: {params: {to: {type: float, range: [0, 248]}}}
+  advance: {}
+  set: {params: {to: {type: float, range: [0, 248]}}}
+transitions:
+  enter: { pos: "0", rolling: "True" }
+  enter_at: { pos: "clamp(to, 0, 239)", rolling: "True" }
+  advance:
+    when: rolling
+    pos: "pos + 8"
+    rolling: "pos + 8 < 240"
+    emits: { exit: "pos >= 240 and old.pos < 240" }
+  set: { when: rolling, pos: "clamp(to, 0, 239)" }   # a hand can move the ball, never off the rail
+invariants:
+  - "0 <= pos <= 248"
+  - "not rolling or pos < 240"   # a rolling ball is still on the rail
+ensures:
+  - { after: advance, holds: "not old.rolling or abs(pos - old.pos - 8) < 0.5" }   # the ball rolls one step
+  - { after: advance, holds: "old.rolling or (pos == old.pos and not rolling)" }    # a ball that left stays left
+  - { after: enter, holds: "pos < 0.5 and rolling" }
+scene:
+  box: [-20, -24, 270, 36]
+  shapes:
+    - {line: [0, 12, 240, 12], color: track, width: 8}
+    - {rect: [246, 10, 6, 28], r: 2, color: line}
+render:
+  ball: { x: "pos", y: 0, shape: {circle: [0, 0, 11], color: f2, stroke: ink, width: 1.5, when: rolling} }
+futures:
+  # the grab: slide the ball anywhere along the rail
+  drag_ball: { kind: vary, over: pos, grab: ball, action: set, param: to }
+initial: {pos: 0, rolling: false}

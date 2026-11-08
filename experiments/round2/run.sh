@@ -15,4 +15,4 @@ BIN="${NERVE_BIN:-runs/bin-cuda/nerve-cont.exe}"
 out="runs/round2/$spec/$tag-s$seed"
 mkdir -p "$out"
 "$BIN" train "specs/$spec.nerve" --cuda --epochs "${EPOCHS:-300}" --weight-decay 0.05 --log-every 100 --out "$out" "$@" > "$out/train.log" 2>&1
-python -I experiments/round2/record.py "$spec" "$out/$spec" "$tag"
+"$BIN" record "specs/$spec.nerve" "$out/$spec" "$tag"

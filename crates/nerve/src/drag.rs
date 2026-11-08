@@ -837,7 +837,7 @@ mod tests {
     fn render_block_is_checked() {
         let toggle = include_str!("../../../specs/toggle.nerve");
         assert!(Spec::parse(&toggle.replace("x: \"90 if status == 'on' else 30\"", "x: \"__import__('os')\"")).is_err());
-        assert!(Spec::parse(&toggle.replace("knob: { x: \"90 if status == 'on' else 30\", y: 30 }", "knob: { x: \"1\" }")).is_err());
+        assert!(Spec::parse(&toggle.replace("y: 30, shape:", "shape:")).is_err(), "a render entry needs y");
         let sp = spec("toggle");
         assert_eq!(element_position(&sp, "knob", &vec![Value::str("on")]).unwrap(), (90.0, 30.0));
     }

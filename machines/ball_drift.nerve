@@ -1,0 +1,23 @@
+# The ball machine without the snapping rule, for the comparison in paper 2's Prediction 4: the hand-off
+# carries the sender's float (how far past the end the ball went) into the next rail with `enter_at`, so
+# whatever error a network made on one rail is the next rail's starting point.
+nerve: 1
+machine: ball_drift
+blocks:
+  clock: clock
+  r1: rail
+  r2: rail
+  r3: rail
+# What the outside world may do: advance the clock, drop the ball on the first rail. Grabs (`set`) reach the
+# rails through the drag API, as external actions with the value the drag committed to.
+inputs: [clock.advance, r1.enter]
+wires:
+  - { on: clock.tick, do: r1.advance }
+  - { on: clock.tick, do: r2.advance }
+  - { on: clock.tick, do: r3.advance }
+  - { on: r1.exit, do: r2.enter_at, with: { to: "max(0, r1.pos - 240)" } }
+  - { on: r2.exit, do: r3.enter_at, with: { to: "max(0, r2.pos - 240)" } }
+  - { on: r3.exit, do: r1.enter_at, with: { to: "max(0, r3.pos - 240)" } }
+derived:
+  rail: "1 if r1.rolling else 2 if r2.rolling else 3 if r3.rolling else 0"
+  balls: "int(r1.rolling) + int(r2.rolling) + int(r3.rolling)"   # a second press of `enter` adds a second ball

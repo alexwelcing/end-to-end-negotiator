@@ -310,10 +310,6 @@ pub(crate) fn meta_for(text: &str, spec: &str) -> Result<J> {
     Ok(meta)
 }
 
-pub(crate) fn load_weights(jepa: &Jepa, dir: &Path, dev: &Device) -> Result<()> {
-    set_weights(jepa, &candle_core::safetensors::load(dir.join("model.safetensors"), dev)?)
-}
-
 /// Sets every named parameter from a loaded safetensors map.
 pub(crate) fn set_weights(jepa: &Jepa, weights: &HashMap<String, Tensor>) -> Result<()> {
     for (name, var, _) in &jepa.store.vars {
@@ -362,6 +358,10 @@ impl LearnedEnergy for Model {
     fn step_energies(&self, start: &State, action: &ActionInst) -> Result<Option<Vec<(State, f64)>>> {
         let e = self.energies(start, action)?;
         Ok(Some(self.rows.iter().map(|&i| self.enc.states[i].clone()).zip(e.into_iter().map(f64::from)).collect()))
+    }
+
+    fn step(&self, start: &State, action: &ActionInst) -> Result<Option<State>> {
+        Model::step(self, start, action).map(Some)
     }
 
     fn describe(&self) -> J {

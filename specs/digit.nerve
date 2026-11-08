@@ -14,4 +14,10 @@ transitions:
 ensures:
   - { after: inc, holds: "d == (old.d + 1) % 10" }
   - { after: reset, holds: "d == 0" }
+scene:
+  box: [0, 0, 60, 80]
+  shapes:
+    - {rect: [30, 40, 48, 64], r: 8, color: ink}
+render:
+  face: { x: 30, y: 40, shape: {text: d, at: [0, 0], color: ok, size: 6} }
 initial: {d: 0}

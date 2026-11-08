@@ -1,0 +1,39 @@
+{
+  "spec": "toggle",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 96,
+    "state_dim": 2,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 1000,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 2,
+    "mae": 0.015039623249322176,
+    "worst_mae": 0.015895524993538857,
+    "worst_state": "('off',)",
+    "w": 192,
+    "h": 96,
+    "loss": 0.007060049567371607,
+    "seconds": 24.7171871,
+    "trained_on": "cuda",
+    "params": 351547
+  }
+}

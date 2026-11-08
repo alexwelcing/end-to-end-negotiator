@@ -33,9 +33,25 @@ ensures:
   - { after: accept,  holds: "status != 'open' or old.rounds == 0" }
   - { holds: "status == old.status or old.status == 'open'" }   # terminal states are absorbing
 initial: {turn: a, books: 0, hats: 0, status: open, rounds: 0}
+scene:
+  box: [0, 0, 270, 165]
+  shapes:
+    - {line: [40, 40, 200, 40], color: track, width: 4}
+    - {line: [40, 120, 200, 120], color: track, width: 4}
+    - {label: keep 0, at: [40, 66], color: mut, size: 1.6}
+    - {label: keep 1, at: [120, 66], color: mut, size: 1.6}
+    - {label: keep 2, at: [200, 66], color: mut, size: 1.6}
+    - {label: keep 0, at: [40, 146], color: mut, size: 1.6}
+    - {label: keep 1, at: [120, 146], color: mut, size: 1.6}
+    - {label: keep 2, at: [200, 146], color: mut, size: 1.6}
+    - {label: books, at: [240, 40], color: mut, size: 1.8}
+    - {label: hats, at: [240, 120], color: mut, size: 1.8}
+    - {label: 'turn ', text: turn, at: [70, 155], color: mut, size: 1.6}
+    - {text: status, at: [150, 155], color: mut, size: 1.6}
+    - {label: 'round ', text: rounds, at: [225, 155], color: mut, size: 1.6}
 render:                    # proposal markers on two 0..2 tracks: drag what you want to keep
-  books: { x: "40 + 80 * books", y: 40 }
-  hats:  { x: "40 + 80 * hats", y: 120 }
+  books: { x: "40 + 80 * books", y: 40, shapes: [{rect: [0, 0, 44, 34], r: 8, color: panel, stroke: ink, width: 1.5}, {rect: [-8, 2, 10, 20], r: 1, color: f0}, {rect: [3, 4, 10, 16], r: 1, color: f4}, {rect: [13, 0, 8, 24], r: 1, color: f1}] }
+  hats:  { x: "40 + 80 * hats", y: 120, shapes: [{rect: [0, 0, 44, 34], r: 8, color: panel, stroke: ink, width: 1.5}, {rect: [0, 8, 32, 5], r: 2, color: ink}, {rect: [0, -3, 18, 18], r: 2, color: ink}] }
 futures:
   # each drag is a `propose`; the oracle decides which counts are still legal (open, rounds < 3)
   drag_books: { kind: closest, over: books, grab: books, action: propose, stickiness: 6, far: 70 }

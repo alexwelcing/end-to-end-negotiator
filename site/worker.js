@@ -202,6 +202,17 @@ export class MachineRoom {
       case "step":
         await this.tick();
         break;
+      case "external": {
+        // One of the machine's declared inputs, applied by hand (dropping the ball); parameters are not taken.
+        const block = String(msg.block), action = String(msg.action);
+        const allowed = this.core.listing.inputs.some((i) => i.block === block && i.action === action && !Object.keys(i.params).length);
+        if (!allowed) {
+          ws.send(JSON.stringify({ type: "error", message: `${block}.${action} is not an input of this machine` }));
+          break;
+        }
+        await this.tick([{ block, action, params: {} }]);
+        break;
+      }
       case "rate":
         s.rate = Math.min(MAX_RATE, Math.max(1, Number(msg.rate) || 6));
         await this.save();

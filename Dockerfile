@@ -19,6 +19,7 @@ COPY --from=build /src/target/release/nerve /usr/local/bin/nerve
 COPY specs ./specs
 COPY machines ./machines
 COPY models/served ./models/served
+COPY models/pictures ./models/pictures
 USER nerve
 EXPOSE 7860
 CMD ["nerve", "serve", "--specs", "specs", "--models", "models/served", "--addr", "0.0.0.0:7860"]

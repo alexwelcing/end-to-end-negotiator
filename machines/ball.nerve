@@ -1,0 +1,24 @@
+# The ball machine (paper 2 §6.4, docs/rube-goldberg.md M5): a ball rolls along three rails in a loop,
+# handed from one to the next by an event. Every tick the clock advances all three rails, and only the
+# rail with the ball moves. The hand-off is `enter`, which puts the ball at the spec's canonical start
+# of the next rail: the snapping rule, so error inside one rail never reaches the next.
+nerve: 1
+machine: ball
+blocks:
+  clock: clock
+  r1: rail
+  r2: rail
+  r3: rail
+# What the outside world may do: advance the clock, drop the ball on the first rail. Grabs (`set`) reach the
+# rails through the drag API, as external actions with the value the drag committed to.
+inputs: [clock.advance, r1.enter]
+wires:
+  - { on: clock.tick, do: r1.advance }
+  - { on: clock.tick, do: r2.advance }
+  - { on: clock.tick, do: r3.advance }
+  - { on: r1.exit, do: r2.enter }
+  - { on: r2.exit, do: r3.enter }
+  - { on: r3.exit, do: r1.enter }
+derived:
+  rail: "1 if r1.rolling else 2 if r2.rolling else 3 if r3.rolling else 0"
+  balls: "int(r1.rolling) + int(r2.rolling) + int(r3.rolling)"   # a second press of `enter` adds a second ball

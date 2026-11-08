@@ -11,6 +11,20 @@ transitions:
   advance: { phase: "(phase + 1) % 10", emits: { tick: "True" } }
 ensures:
   - { after: advance, holds: "phase == (old.phase + 1) % 10" }
+scene:
+  box: [0, 5, 185, 55]
+  shapes:
+    - {line: [24, 30, 168, 30], color: track, width: 4}
+    - {line: [24, 25, 24, 35], color: mut, width: 1.5}
+    - {line: [40, 25, 40, 35], color: mut, width: 1.5}
+    - {line: [56, 25, 56, 35], color: mut, width: 1.5}
+    - {line: [72, 25, 72, 35], color: mut, width: 1.5}
+    - {line: [88, 25, 88, 35], color: mut, width: 1.5}
+    - {line: [104, 25, 104, 35], color: mut, width: 1.5}
+    - {line: [120, 25, 120, 35], color: mut, width: 1.5}
+    - {line: [136, 25, 136, 35], color: mut, width: 1.5}
+    - {line: [152, 25, 152, 35], color: mut, width: 1.5}
+    - {line: [168, 25, 168, 35], color: mut, width: 1.5}
 render:
-  hand: { x: "24 + 16 * phase", y: 30 }
+  hand: { x: "24 + 16 * phase", y: 30, shape: {rect: [0, -9, 6, 18], r: 2, color: acc} }
 initial: {phase: 0}

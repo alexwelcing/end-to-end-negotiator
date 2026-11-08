@@ -25,6 +25,7 @@ const room = new Room(1.0);
 for (const name of manifest.specs) room.add_spec(text(`specs/${name}.nerve`));
 for (const name of manifest.machines) room.add_machine(text(`machines/${name}.nerve`));
 for (const name of manifest.models) room.add_model(name, text(`models/${name}/model.json`), new Uint8Array(read(`models/${name}/model.safetensors`)));
+for (const name of manifest.pictures || []) room.add_picture(name, text(`models/${name}/picture.json`), new Uint8Array(read(`models/${name}/picture.safetensors`)));
 const wasm = (p, body) => JSON.parse(room.call(p, body === undefined ? "" : JSON.stringify(body)));
 
 async function native(p, body) {
@@ -71,6 +72,17 @@ for (const s of specs.filter(s => s.finite)) {
 }
 console.log(`${steps} steps answered${NATIVE ? " and compared" : ""}`);
 
+// Every render network draws its interface's initial state close to the oracle's drawing.
+const PIXEL_ERROR = 0.05;
+let drawn = 0;
+for (const s of specs.filter(s => s.picture)) {
+  const p = wasm(`/api/${s.name}/picture`, { state: s.initial });
+  if (!p.network || !(p.mae < PIXEL_ERROR)) throw new Error(`${s.name}: picture ${p.network ? `error ${p.mae}` : "not drawn by the network"}`);
+  drawn += 1;
+}
+if (drawn !== (manifest.pictures || []).length) throw new Error("not every render network loaded");
+console.log(`${drawn} pictures drawn by their networks within ${PIXEL_ERROR} of the oracle`);
+
 // Every gesture of the reorder list: open, one frame at a landing spot, release.
 const reorder = specs.find(s => s.name === "reorder");
 for (const g of reorder.futures) {
@@ -101,6 +113,37 @@ for (let i = 0; i < TICKS; i++) {
   state = t.state;
 }
 console.log(`${TICKS} chain ticks agree with the composed oracle${NATIVE ? " and with the native server" : ""}`);
+
+// The ball machine, when its rail network is served: drop the ball, then tick at frame rate, timing the
+// continuous blocks' step heads. Continuous states are compared within the machine's tolerance (1% of the
+// rail's range), since the wasm and native builds round their float arithmetic differently.
+const ball = machines.find(m => m.name === "ball");
+if (ball && ball.blocks.every(b => b.network)) {
+  const TOL = 2.48;
+  const near = (a, b) => typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= TOL
+    : Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((x, i) => near(x, b[i]))
+    : a && b && typeof a === "object" && typeof b === "object" ? Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(k => near(a[k], b[k]))
+    : same(a, b);
+  let bs = wasm("/api/machine/ball/tick", { state: ball.initial, external: [{ block: "r1", action: "enter" }] }).state;
+  let ns = NATIVE ? (await native("/api/machine/ball/tick", { state: ball.initial, external: [{ block: "r1", action: "enter" }] })).state : null;
+  let ms = 0, agreed = 0;
+  for (let i = 0; i < TICKS; i++) {
+    const t0 = performance.now();
+    const t = wasm("/api/machine/ball/tick", { state: bs, external: advance });
+    ms += performance.now() - t0;
+    if (t.violations.length) throw new Error(`ball tick ${i + 1}: ${JSON.stringify(t.violations)}`);
+    agreed += t.agrees ? 1 : 0;
+    bs = t.state;
+    if (NATIVE) {
+      const n = await native("/api/machine/ball/tick", { state: ns, external: advance });
+      ns = n.state;
+      compared += 1;
+      if (!near(bs, ns)) { failures += 1; console.log(`DIFF ball tick ${i + 1}\n  wasm:   ${JSON.stringify(bs)}\n  native: ${JSON.stringify(ns)}`); }
+    }
+  }
+  if (agreed < TICKS) throw new Error(`ball: only ${agreed}/${TICKS} ticks within tolerance of the composed oracle`);
+  console.log(`${TICKS} ball ticks within tolerance of the composed oracle, ${(ms / TICKS).toFixed(2)} ms per tick in wasm (three rails stepped by their head)`);
+}
 
 if (NATIVE) console.log(`parity: ${compared} answers compared, ${failures} differ`);
 if (failures) process.exit(1);

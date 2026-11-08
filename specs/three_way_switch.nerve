@@ -29,9 +29,25 @@ ensures:
   - { after: set, holds: "not old.clockwise_only or name == old.name or name == ('b' if old.name == 'r' else 'g' if old.name == 'b' else 'r')" }
   - { after: set, holds: "clockwise_only == old.clockwise_only" }
   - { after: toggle_clockwise_only, holds: "clockwise_only != old.clockwise_only and name == old.name" }
+scene:
+  box: [40, 20, 180, 140]
+  shapes:
+    - {line: [110, 50, 76, 108], color: line, width: 1.5}
+    - {line: [76, 108, 144, 108], color: line, width: 1.5}
+    - {line: [144, 108, 110, 50], color: line, width: 1.5}
+    - {circle: [110, 50, 17], color: f4, opacity: 0.18}
+    - {circle: [110, 50, 17], color: none, stroke: f4, width: 1.5}
+    - {circle: [76, 108, 17], color: f1, opacity: 0.18}
+    - {circle: [76, 108, 17], color: none, stroke: f1, width: 1.5}
+    - {circle: [144, 108, 17], color: f0, opacity: 0.18}
+    - {circle: [144, 108, 17], color: none, stroke: f0, width: 1.5}
+    - {label: r, at: [110, 28], color: mut, size: 2}
+    - {label: g, at: [56, 108], color: mut, size: 2}
+    - {label: b, at: [164, 108], color: mut, size: 2}
+    - {label: clockwise only, at: [110, 134], color: mut, size: 1.6, when: clockwise_only}
 render:
   # Dragology: translate(60, 30) plus POS = {r: (50, 20), g: (16, 78), b: (84, 78)}
-  knob: { x: "110 if name == 'r' else 76 if name == 'g' else 144", y: "50 if name == 'r' else 108" }
+  knob: { x: "110 if name == 'r' else 76 if name == 'g' else 144", y: "50 if name == 'r' else 108", shape: {circle: [0, 0, 12], color: ink} }
 futures:
   # dragology: the knob may land on any of these the spec lets it reach; the release commits to the nearest
   drag_knob: { kind: between, over: name, values: [r, g, b], grab: knob }

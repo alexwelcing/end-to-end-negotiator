@@ -5,13 +5,18 @@
 //! true successor with the batch's other successors and `K` near-miss perturbations,
 //! and a step is an argmin over (assignments of the discrete fields) x (continuous
 //! values found by gradient descent on the energy from several seeds).
+//!
+//! The descent is milliseconds, which a machine ticking thirty times a second cannot afford
+//! in the browser, so a model also carries an *amortised step head*: a small network trained on
+//! the same pairs to answer the step directly. The head is the fast path; the energy's descent
+//! stays the reference, and `evaluate` reports how often the two agree (paper 2, Prediction 5).
 
 use crate::encode::{Encoder, CONT_WIDTH, N_FOURIER};
-use crate::jepa::{Jepa, JepaConfig};
+use crate::jepa::{Jepa, JepaConfig, Lin};
 use crate::oracle::{sample_action, sample_state, Oracle};
 use crate::serve::LearnedEnergy;
 use crate::spec::{ActionInst, Spec, State};
-use crate::train::{load_weights, read_meta, save_checkpoint, TrainConfig};
+use crate::train::{read_meta, save_checkpoint, TrainConfig};
 use crate::value::Value;
 use anyhow::{bail, ensure, Context, Result};
 use candle_core::{DType, Device, Tensor, Var};
@@ -27,8 +32,9 @@ const DESCENT_STEPS: usize = 60;
 const DESCENT_LR: f64 = 0.05;
 /// Random descent seeds on top of current / 0 / 1 / 0.5 / the action's own params.
 const RANDOM_SEEDS: usize = 6;
-/// Continuous fields within this fraction of their range of the truth count as exact.
-const TOLERANCE: f64 = 0.01;
+/// Continuous fields within this fraction of their range of the truth count as exact: in the
+/// evaluations here, the lab's checks, the machine's agreement and the step head's own check.
+pub const TOLERANCE: f64 = 0.01;
 /// Pairs scored at the periodic evaluations during training.
 const PROGRESS_SAMPLES: usize = 200;
 /// Fixed evaluation seed, so every model is scored on the same pairs.
@@ -45,6 +51,42 @@ pub struct ContinuousModel {
     ord: Option<Tensor>,
     /// `model.json` of a loaded checkpoint (how it was trained and scored).
     meta: Option<J>,
+    /// The amortised step head: (state, action) -> continuous values and a discrete assignment.
+    head: Head,
+    /// Whether the head's weights were trained (a checkpoint from before the head leaves it untrained).
+    pub head_trained: bool,
+}
+
+/// `Linear -> GELU -> Linear -> GELU -> Linear` from the state and action features to the normalised
+/// continuous fields (a sigmoid each) and logits over the discrete assignments.
+struct Head {
+    l0: Lin,
+    l1: Lin,
+    l2: Lin,
+    n_cont: usize,
+}
+
+const HEAD_HIDDEN: usize = 128;
+
+impl Head {
+    fn new(st: &mut crate::jepa::Store, nin: usize, n_cont: usize, n_combos: usize, dev: &Device) -> Result<Self> {
+        Ok(Self {
+            l0: Lin::new(st, "head.0", nin, HEAD_HIDDEN, true, dev, true)?,
+            l1: Lin::new(st, "head.1", HEAD_HIDDEN, HEAD_HIDDEN, true, dev, true)?,
+            l2: Lin::new(st, "head.2", HEAD_HIDDEN, n_cont + n_combos, true, dev, true)?,
+            n_cont,
+        })
+    }
+
+    /// `(continuous values in 0..1 [B, n_cont], combo logits [B, D])`.
+    fn fwd(&self, x: &Tensor) -> Result<(Tensor, Tensor)> {
+        let h = self.l0.fwd(x, false)?.gelu_erf()?;
+        let h = self.l1.fwd(&h, false)?.gelu_erf()?;
+        let out = self.l2.fwd(&h, false)?;
+        let cont = candle_nn::ops::sigmoid(&out.narrow(1, 0, self.n_cont)?)?;
+        let logits = out.narrow(1, self.n_cont, out.dim(1)? - self.n_cont)?;
+        Ok((cont, logits))
+    }
 }
 
 /// `u`, then `sin` and `cos` of `2 pi k u` for each Fourier frequency, per column, as the encoder lays them out.
@@ -90,7 +132,45 @@ impl ContinuousModel {
         let d = combos.len();
         let disc = Tensor::from_vec(disc, (d, enc.disc_dim), dev)?;
         let ord = if ord_w > 0 { Some(Tensor::from_vec(ord, (d, ord_w), dev)?) } else { None };
-        Ok(Self { spec, enc, jepa, combos, disc, ord, meta: None })
+        let mut jepa = jepa;
+        let head = Head::new(&mut jepa.store, enc.state_dim + enc.action_dim() + enc.cont_params.len(), enc.cont_fields.len(), d, dev)?;
+        Ok(Self { spec, enc, jepa, combos, disc, ord, meta: None, head, head_trained: false })
+    }
+
+    /// The head's input for a batch: state features, the action as a one-hot, its continuous parameters.
+    fn head_input(&self, s: &Tensor, a: &Tensor, ac: Option<&Tensor>) -> Result<Tensor> {
+        let b = s.dim(0)?;
+        let na = self.enc.action_dim();
+        let ids: Vec<u32> = a.to_vec1()?;
+        let mut onehot = vec![0f32; b * na];
+        for (i, &id) in ids.iter().enumerate() {
+            onehot[i * na + id as usize] = 1.0;
+        }
+        let onehot = Tensor::from_vec(onehot, (b, na), s.device())?;
+        let parts: Vec<&Tensor> = [Some(s), Some(&onehot), ac].into_iter().flatten().collect();
+        Ok(Tensor::cat(&parts, 1)?)
+    }
+
+    /// The head's answer for `s -a->`: the fast path of `step`.
+    pub fn step_head(&self, s: &State, a: &ActionInst) -> Result<State> {
+        ensure!(self.head_trained, "{}: the checkpoint has no trained step head", self.spec.name);
+        let x = Tensor::from_vec(self.enc.state(&self.spec, s)?, (1, self.enc.state_dim), self.device())?;
+        let (ai, ac) = self.action_inputs(a)?;
+        let (cont, logits) = self.head.fwd(&self.head_input(&x, &ai, ac.as_ref())?)?;
+        let combo = logits.squeeze(0)?.argmax(0)?.to_scalar::<u32>()? as usize;
+        let u: Vec<f32> = cont.squeeze(0)?.to_vec1()?;
+        let mut st = self.combos[combo].clone();
+        for (j, &fi) in self.enc.cont_fields.iter().enumerate() {
+            let f = &self.spec.fields[fi];
+            let (lo, hi) = f.range();
+            st[fi] = f.canon(&Value::Float(lo + f64::from(u[j]) * (hi - lo)));
+        }
+        Ok(st)
+    }
+
+    /// The step by descent on the energy: the reference `step_head` is checked against.
+    pub fn step_descent(&self, s: &State, a: &ActionInst) -> Result<State> {
+        Ok(self.step_all(s, a)?.0)
     }
 
     pub fn config_for(spec: &Spec, t: &TrainConfig) -> Result<JepaConfig> {
@@ -191,39 +271,71 @@ impl ContinuousModel {
     /// The same network on another device. The descent in `step_all` is a few hundred tiny
     /// kernels, which the CPU runs about 3x faster than the GPU for these sizes.
     pub fn on_device(&self, dev: &Device) -> Result<Self> {
-        let m = Self::new(self.spec.clone(), self.jepa.cfg.clone(), dev)?;
+        let mut m = Self::new(self.spec.clone(), self.jepa.cfg.clone(), dev)?;
         for ((name, src, _), (dst_name, dst, _)) in self.jepa.store.vars.iter().zip(&m.jepa.store.vars) {
             ensure!(name == dst_name, "parameter order changed: {name} vs {dst_name}");
             dst.set(&src.as_tensor().to_device(dev)?)?;
         }
+        m.head_trained = self.head_trained;
+        m.meta = self.meta.clone();
         Ok(m)
     }
 
+    /// The step: the amortised head when the checkpoint has one, else descent on the energy.
+    /// The step: the head's answer when the checkpoint has one and the spec accepts it; otherwise
+    /// descent's answers in energy order, the first the spec accepts (its best regardless when it
+    /// accepts none, and the machine then reports the violation). The check is the spec's own
+    /// (invariants and `ensures`, continuous fields within `TOLERANCE`): the head is fast and almost
+    /// always right, but at a rule's threshold (the last step of a rail, where `rolling` flips) a
+    /// discrete guess can be wrong, and a wrong guess must not leave the block. Networks saved
+    /// without a head step by descent alone.
     pub fn step(&self, s: &State, a: &ActionInst) -> Result<State> {
-        Ok(self.step_all(s, a)?.0)
+        if !self.head_trained {
+            return self.step_descent(s, a);
+        }
+        let oracle = Oracle::new(&self.spec);
+        let fast = self.step_head(s, a)?;
+        if oracle.violations(s, Some(a), &fast, TOLERANCE).is_empty() {
+            return Ok(fast);
+        }
+        let (best, mut all) = self.step_all(s, a)?;
+        all.sort_by(|x, y| x.1.total_cmp(&y.1));
+        Ok(all.into_iter().map(|(st, _)| st).find(|st| oracle.violations(s, Some(a), st, TOLERANCE).is_empty()).unwrap_or(best))
     }
 
     pub fn save(&self, dir: &Path, t: &TrainConfig, report: &J) -> Result<()> {
-        save_checkpoint(dir, &self.jepa, json!({"spec": self.spec.name, "kind": "continuous", "jepa": self.jepa.cfg, "train": t, "eval": report}))
+        save_checkpoint(dir, &self.jepa, json!({"spec": self.spec.name, "kind": "continuous", "jepa": self.jepa.cfg, "train": t, "eval": report, "head": self.head_trained}))
     }
 
     pub fn load(spec: Spec, dir: &Path, dev: &Device) -> Result<Self> {
         let meta = read_meta(dir, &spec.name)?;
-        ensure!(meta["kind"] == "continuous", "{} does not hold a continuous model", dir.display());
-        let cfg: JepaConfig = serde_json::from_value(meta["jepa"].clone())?;
-        let mut m = Self::new(spec, cfg, dev)?;
-        load_weights(&m.jepa, dir, dev)?;
-        m.meta = Some(meta);
-        Ok(m)
+        let weights = candle_core::safetensors::load(dir.join("model.safetensors"), dev)?;
+        Self::from_parts(spec, meta, weights, dev)
     }
 
     /// A model from a checkpoint already in memory: the `model.json` text and the `model.safetensors` bytes.
     pub fn from_bytes(spec: Spec, meta_json: &str, weights: &[u8], dev: &Device) -> Result<Self> {
         let meta = crate::train::meta_for(meta_json, &spec.name)?;
+        Self::from_parts(spec, meta, candle_core::safetensors::load_buffer(weights, dev)?, dev)
+    }
+
+    /// A checkpoint from before the head has no `head.*` tensors: it loads, and steps by descent.
+    fn from_parts(spec: Spec, meta: J, weights: std::collections::HashMap<String, Tensor>, dev: &Device) -> Result<Self> {
         ensure!(meta["kind"] == "continuous", "the checkpoint does not hold a continuous model");
         let cfg: JepaConfig = serde_json::from_value(meta["jepa"].clone())?;
         let mut m = Self::new(spec, cfg, dev)?;
-        crate::train::set_weights(&m.jepa, &candle_core::safetensors::load_buffer(weights, dev)?)?;
+        let mut head_found = 0;
+        for (name, var, _) in &m.jepa.store.vars {
+            match weights.get(name) {
+                Some(w) => {
+                    var.set(w)?;
+                    head_found += usize::from(name.starts_with("head."));
+                }
+                None if name.starts_with("head.") => {}
+                None => bail!("checkpoint is missing {name}"),
+            }
+        }
+        m.head_trained = head_found > 0 && meta.get("head").and_then(J::as_bool).unwrap_or(true);
         m.meta = Some(meta);
         Ok(m)
     }
@@ -248,6 +360,10 @@ impl LearnedEnergy for ContinuousModel {
         false
     }
 
+    fn step(&self, start: &State, action: &ActionInst) -> Result<Option<State>> {
+        ContinuousModel::step(self, start, action).map(Some)
+    }
+
     fn describe(&self) -> J {
         let params = self.jepa.store.count_trainable();
         let device = if self.device().is_cuda() { "cuda" } else { "cpu" };
@@ -255,7 +371,8 @@ impl LearnedEnergy for ContinuousModel {
             "kind": "jepa-continuous",
             "params": params,
             "device": device,
-            "summary": format!("{} continuous JEPA, {params} params on {device}", self.spec.name),
+            "head": self.head_trained,
+            "summary": format!("{} continuous JEPA, {params} params on {device}{}", self.spec.name, if self.head_trained { ", stepped by its head" } else { "" }),
             "trained": self.meta.as_ref().map(crate::train::trained_facts),
         })
     }
@@ -349,7 +466,35 @@ pub fn evaluate(model: &ContinuousModel, n: usize) -> Result<J> {
         "tol": TOLERANCE,
     });
     let score = 0.8 * (ok as f64 / nf) + 0.2 * (1.0 - bad as f64 / nf);
-    Ok(json!({"all": c, "seen": c, "heldout": c, "learned_only": c, "continuous": true, "score": (score * 1e4).round() / 1e4}))
+    let mut out = json!({"all": c, "seen": c, "heldout": c, "learned_only": c, "continuous": true, "score": (score * 1e4).round() / 1e4});
+    if model.head_trained {
+        out["head"] = evaluate_head(model, n)?;
+    }
+    Ok(out)
+}
+
+/// The amortised head against the oracle and against the energy's descent, on the same kind of
+/// pairs as `evaluate`: within tolerance of the truth, agreeing with descent, and its time per step.
+pub fn evaluate_head(model: &ContinuousModel, n: usize) -> Result<J> {
+    let spec = &model.spec;
+    let oracle = Oracle::new(spec);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(EVAL_SEED + 1);
+    let (mut ok, mut agree, mut bad) = (0usize, 0usize, 0usize);
+    let mut head_time = 0.0;
+    for _ in 0..n {
+        let s = valid_state(spec, &oracle, &mut rng)?;
+        let a = sample_action(spec, &mut rng)?;
+        let truth = oracle.step(&s, &a)?;
+        let t0 = std::time::Instant::now();
+        let fast = model.step_head(&s, &a)?;
+        head_time += t0.elapsed().as_secs_f64();
+        let slow = model.step_descent(&s, &a)?;
+        ok += usize::from(close(spec, &fast, &truth, TOLERANCE));
+        agree += usize::from(close(spec, &fast, &slow, TOLERANCE));
+        bad += usize::from(!oracle.violations(&s, Some(&a), &fast, TOLERANCE).is_empty());
+    }
+    let nf = n.max(1) as f64;
+    Ok(json!({"n": n, "exact": ok as f64 / nf, "agrees_with_descent": agree as f64 / nf, "violation_rate": bad as f64 / nf, "ms_per_step": 1000.0 * head_time / nf}))
 }
 
 /// Training tensors, all on the device: states, actions, continuous action params,
@@ -360,6 +505,9 @@ struct Data {
     ac: Option<Tensor>,
     next: Tensor,
     negs: Tensor,
+    /// The head's targets: the successor's normalised continuous fields and its discrete assignment.
+    next_u: Tensor,
+    next_combo: Tensor,
     n: usize,
 }
 
@@ -368,6 +516,11 @@ fn dataset<R: Rng>(model: &ContinuousModel, cfg: &TrainConfig, rng: &mut R) -> R
     let oracle = Oracle::new(spec);
     let (n, k, sd, nc) = (cfg.cont_pairs, cfg.cont_negatives.max(1), enc.state_dim, enc.cont_params.len());
     let (mut s, mut a, mut ac, mut next, mut negs) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut next_u, mut next_combo) = (Vec::new(), Vec::new());
+    let disc_fields = spec.discrete_fields();
+    let combo_of = |st: &State| -> Result<u32> {
+        model.combos.iter().position(|c| disc_fields.iter().all(|&i| c[i] == st[i])).map(|i| i as u32).context("successor has an unknown discrete assignment")
+    };
     for _ in 0..n {
         let st = valid_state(spec, &oracle, rng)?;
         let act = sample_action(spec, rng)?;
@@ -376,16 +529,21 @@ fn dataset<R: Rng>(model: &ContinuousModel, cfg: &TrainConfig, rng: &mut R) -> R
         a.push(enc.action_id(spec, &act)? as u32);
         ac.extend(enc.action_cont(spec, &act));
         next.extend(enc.state(spec, &nx)?);
+        next_u.extend(model.cont_norm(&nx));
+        next_combo.push(combo_of(&nx)?);
         for _ in 0..k {
             negs.extend(enc.state(spec, &near_miss(spec, &nx, rng)?)?);
         }
     }
+    let n_cont = enc.cont_fields.len();
     Ok(Data {
         s: Tensor::from_vec(s, (n, sd), dev)?,
         a: Tensor::from_vec(a, n, dev)?,
         ac: if nc == 0 { None } else { Some(Tensor::from_vec(ac, (n, nc), dev)?) },
         next: Tensor::from_vec(next, (n, sd), dev)?,
         negs: Tensor::from_vec(negs, (n, k, sd), dev)?,
+        next_u: Tensor::from_vec(next_u, (n, n_cont), dev)?,
+        next_combo: Tensor::from_vec(next_combo, n, dev)?,
         n,
     })
 }
@@ -396,7 +554,7 @@ pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Continuous
     if dev.is_cuda() {
         dev.set_seed(cfg.seed)?;
     }
-    let model = ContinuousModel::new(spec.clone(), ContinuousModel::config_for(spec, cfg)?, dev)?;
+    let mut model = ContinuousModel::new(spec.clone(), ContinuousModel::config_for(spec, cfg)?, dev)?;
     let data = dataset(&model, cfg, &mut rng)?;
     ensure!(data.n >= 2, "{}: fewer than two training pairs", spec.name);
     println!(
@@ -420,13 +578,14 @@ pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Continuous
         for chunk in order.chunks(cfg.batch).filter(|c| c.len() >= 2) {
             let idx = Tensor::from_slice(chunk, chunk.len(), dev)?;
             let ac = data.ac.as_ref().map(|t| t.index_select(&idx, 0)).transpose()?;
-            let (loss, _) = model.jepa.loss_continuous(
-                &data.s.index_select(&idx, 0)?,
-                &data.a.index_select(&idx, 0)?,
-                ac.as_ref(),
-                &data.next.index_select(&idx, 0)?,
-                &data.negs.index_select(&idx, 0)?,
-            )?;
+            let (s_b, a_b) = (data.s.index_select(&idx, 0)?, data.a.index_select(&idx, 0)?);
+            let (energy_loss, _) = model.jepa.loss_continuous(&s_b, &a_b, ac.as_ref(), &data.next.index_select(&idx, 0)?, &data.negs.index_select(&idx, 0)?)?;
+            // The head: regression to the successor's continuous values, classification of its
+            // discrete assignment. It shares no parameters with the energy; one optimiser serves both.
+            let (cont, logits) = model.head.fwd(&model.head_input(&s_b, &a_b, ac.as_ref())?)?;
+            let u_loss = (cont - data.next_u.index_select(&idx, 0)?)?.sqr()?.mean_all()?;
+            let combo_loss = candle_nn::loss::cross_entropy(&logits, &data.next_combo.index_select(&idx, 0)?)?;
+            let loss = (energy_loss + (u_loss * 10.0)? + combo_loss)?;
             let v = loss.to_dtype(DType::F32)?.to_scalar::<f32>()?;
             if !v.is_finite() {
                 skipped += 1; // never let one bad batch poison the run
@@ -437,7 +596,9 @@ pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Continuous
             tot += f64::from(v) * chunk.len() as f64;
         }
         if ep % cfg.log_every.max(1) == 0 || ep + 1 == cfg.epochs {
-            let ev = evaluate(&model.on_device(&Device::Cpu)?, PROGRESS_SAMPLES.min(cfg.eval_samples))?;
+            let mut probe = model.on_device(&Device::Cpu)?;
+            probe.head_trained = false;
+            let ev = evaluate(&probe, PROGRESS_SAMPLES.min(cfg.eval_samples))?;
             println!(
                 "  ep {ep:3} loss {:.4} | within-tol {:.3} violations {:.3} score {:.3}{}",
                 tot / data.n as f64,
@@ -448,6 +609,7 @@ pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Continuous
             );
         }
     }
+    model.head_trained = true;
     let mut report = evaluate(&model.on_device(&Device::Cpu)?, cfg.eval_samples)?;
     report["train_pairs"] = json!(data.n);
     report["negatives"] = json!(data.n * cfg.cont_negatives);
@@ -511,10 +673,15 @@ mod tests {
         let (pred, per) = m.step_all(&s, &a)?;
         assert_eq!(per.len(), 3, "one best state per track");
         assert!(sp.fields[1].contains(&pred[1]) && sp.fields[0].contains(&pred[0]));
+        assert!(m.head_trained && report["head"]["agrees_with_descent"].is_number(), "{report}");
+        let fast = m.step_head(&s, &a)?;
+        assert!(sp.fields[1].contains(&fast[1]) && sp.fields[0].contains(&fast[0]));
         let dir = std::env::temp_dir().join(format!("nerve-cont-test-{}", std::process::id()));
         m.save(&dir, &cfg, &report)?;
         let back = ContinuousModel::load(sp.clone(), &dir, &Device::Cpu)?;
-        assert_eq!(back.step(&s, &a)?, pred);
+        assert!(back.head_trained);
+        assert_eq!(back.step(&s, &a)?, fast, "the fast path round-trips");
+        assert_eq!(back.step_descent(&s, &a)?, pred);
         assert_eq!(back.energy(&s, Some(&a), &pred)?, m.energy(&s, Some(&a), &pred)?);
         assert!(crate::train::load_learned(sp, &dir, &Device::Cpu)?.describe()["kind"] == "jepa-continuous");
         std::fs::remove_dir_all(&dir).ok();

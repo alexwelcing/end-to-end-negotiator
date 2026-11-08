@@ -26,9 +26,17 @@ pub struct NetworkStepper(pub Arc<dyn LearnedEnergy>);
 
 impl BlockStep for NetworkStepper {
     fn step(&self, s: &State, a: &ActionInst) -> Result<State> {
+        if let Some(next) = self.0.step(s, a)? {
+            return Ok(next);
+        }
         let energies = self.0.step_energies(s, a)?.context("this block's network cannot enumerate its successors")?;
         energies.into_iter().min_by(|x, y| x.1.total_cmp(&y.1)).map(|(st, _)| st).context("the block has no candidate successor")
     }
+}
+
+/// Agreement between two machine states: exact for finite blocks, within 1% of range for continuous ones.
+pub fn agree(m: &MachineSpec, a: &MachineState, b: &MachineState) -> bool {
+    m.blocks.iter().zip(a.iter().zip(b)).all(|((_, _, spec), (x, y))| if spec.finite() { x == y } else { crate::continuous::close(spec, x, y, crate::continuous::TOLERANCE) })
 }
 
 /// The steppers for a machine: each block's type network when the lab has one, else its oracle.
@@ -162,7 +170,7 @@ impl App {
                 .map(|((inst, ty, spec), net)| {
                     let mut summary = match self.entry(ty) {
                         Ok(entry) => spec_summary(entry),
-                        Err(_) => spec_summary(&Entry { spec: spec.clone(), model: None, source: String::new() }),
+                        Err(_) => spec_summary(&Entry { spec: spec.clone(), model: None, picture: None, source: String::new() }),
                     };
                     summary["instance"] = json!(inst);
                     summary["type"] = json!(ty);
@@ -240,6 +248,7 @@ impl App {
                 let spec: &Spec = &m.blocks[r.block].2;
                 // Per step, the oracle's answer from the same state the network saw.
                 let truth_step = Oracle::new(spec).step(&r.before, &r.action)?;
+                let agrees = if spec.finite() { r.after == truth_step } else { crate::continuous::close(spec, &r.after, &truth_step, crate::continuous::TOLERANCE) };
                 Ok(json!({
                     "block": m.blocks[r.block].0,
                     "action": r.action.name,
@@ -248,7 +257,8 @@ impl App {
                     "before": spec.state_json(&r.before),
                     "after": spec.state_json(&r.after),
                     "oracle": spec.state_json(&truth_step),
-                    "agrees": r.after == truth_step,
+                    "agrees": agrees,
+                    "continuous": !spec.finite(),
                     "events": r.events,
                     "violations": r.violations,
                     "network": learned[r.block],
@@ -263,7 +273,8 @@ impl App {
             "steps": steps_json,
             "violations": out.trace.violations,
             "oracle": state_json(m, &truth.state),
-            "agrees": out.state == truth.state,
+            "agrees": agree(m, &out.state, &truth.state),
+            "tolerance": m.blocks.iter().any(|(_, _, s)| !s.finite()),
             "ms": ms,
             "networks": J::Object(m.blocks.iter().zip(&learned).map(|((inst, _, _), l)| (inst.clone(), json!(l))).collect()),
         }))

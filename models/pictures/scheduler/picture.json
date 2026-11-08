@@ -1,0 +1,39 @@
+{
+  "spec": "scheduler",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 192,
+    "state_dim": 78,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 80,
+    "batch": 64,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 1728,
+    "mae": 0.01501732226730652,
+    "worst_mae": 0.017763478681445122,
+    "worst_state": "(0, 0, 3, 1, 0, 3, 1, 0, 3)",
+    "w": 192,
+    "h": 192,
+    "loss": 0.0071962978690862656,
+    "seconds": 1550.9367628,
+    "trained_on": "cuda",
+    "params": 667067
+  }
+}

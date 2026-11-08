@@ -20,3 +20,4 @@ docs/paper2/fig_cost.tex
 !models/served/**/*.safetensors
 /target-cuda/
 /site/dist/
+/target-cuda2/

@@ -57,7 +57,7 @@ pub struct Store {
 }
 
 impl Store {
-    fn add(&mut self, name: String, t: Tensor, trainable: bool) -> Result<Var> {
+    pub(crate) fn add(&mut self, name: String, t: Tensor, trainable: bool) -> Result<Var> {
         let v = Var::from_tensor(&t)?;
         self.vars.push((name, v.clone(), trainable));
         Ok(v)
@@ -77,14 +77,14 @@ impl Store {
 }
 
 #[derive(Clone)]
-struct Lin {
+pub(crate) struct Lin {
     w: Var,
     b: Option<Var>,
 }
 
 impl Lin {
     /// PyTorch's default `nn.Linear` init: U(±1/sqrt(fan_in)) for weight and bias.
-    fn new(st: &mut Store, name: &str, nin: usize, nout: usize, bias: bool, dev: &Device, trainable: bool) -> Result<Self> {
+    pub(crate) fn new(st: &mut Store, name: &str, nin: usize, nout: usize, bias: bool, dev: &Device, trainable: bool) -> Result<Self> {
         let r = 1.0 / (nin.max(1) as f64).sqrt();
         let w = st.add(format!("{name}.weight"), Tensor::rand(-r as f32, r as f32, (nout, nin), dev)?, trainable)?;
         let b = if bias {
@@ -95,7 +95,7 @@ impl Lin {
         Ok(Self { w, b })
     }
 
-    fn fwd(&self, x: &Tensor, detach: bool) -> Result<Tensor> {
+    pub(crate) fn fwd(&self, x: &Tensor, detach: bool) -> Result<Tensor> {
         let w = if detach { self.w.as_tensor().detach() } else { self.w.as_tensor().clone() };
         let y = x.matmul(&w.t()?)?;
         Ok(match &self.b {

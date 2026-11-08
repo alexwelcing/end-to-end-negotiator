@@ -6,7 +6,7 @@
 <title>The machine room</title>
 <style>
 :root { --bg:#f6f4ef; --card:#fff; --ink:#1c1b19; --mute:#6b6760; --line:#e4e0d8; --acc:#2d5bd1; --ok:#1d8a4b; --bad:#c6362b; --warn:#b7791f; --hold:#7a4fd1; --learn:#8a5bd6;
-  /* the skins (skins.js) use the lab's names too */
+  /* the lab's colour names, shared by both pages */
   --panel:#fff; --mut:#6b6760; --track:#c9cfdc; --ghost:#8da2d8; --f0:#3b6cf6; --f1:#12a17a; --f2:#e8833a; --f3:#9b5cf6; --f4:#e5484d; --f5:#0aa2c0; --f6:#c2a20a; --f7:#d6409f; --f8:#5c7a29; --f9:#7a5c3a; }
 @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --card:#202024; --ink:#ececea; --mute:#a3a09a; --line:#34343a; --acc:#7aa2ff; --ok:#4fc97f; --bad:#ff6b5e; --warn:#e6b35a; --hold:#b79bff; --learn:#b79bff; --panel:#202024; --mut:#a3a09a; --track:#39425a; --ghost:#5d6f9e; } }
 * { box-sizing: border-box; }
@@ -89,6 +89,7 @@ pre { white-space: pre-wrap; margin: 8px 0 0; }
     <span class="pill" id="violpill">0 violations</span>
     <span class="pill" id="mspill">— ms/tick</span>
     <span class="pill hold" id="holdpill" hidden></span>
+    <span id="inputs"></span>
     <button class="ctl" id="share" hidden title="Open this machine in a shared room: everyone with the link sees and drives the same machine">Share this machine</button>
     <span class="pill" id="roompill" hidden></span>
   </div>
@@ -104,15 +105,40 @@ pre { white-space: pre-wrap; margin: 8px 0 0; }
     </aside>
   </div>
 </main>
-<script src="/skins.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
-const skinOf = name => (window.NERVE_SKINS ? window.NERVE_SKINS.get(name) : null);
 const PAD = 18, TITLE_H = 46, PANEL_GAP = 46, ROW_GAP = 70, LIGHT_R = 5, MAX_ROW = 900, Z = 1.5;
 let machines = [], M = null, state = null, pending = [], detached = [], positions = {}, derived = {};
 let layout = null, running = false, timer = null, busy = false, tick = 0, stats = null, last = null, drag = null, lastFired = new Set();
 let lastPos = {};   // where each block's elements were last drawn, so a tick is seen as motion
+let pictures = {};  // per block: the render network's picture of its current state
+/** A raster from the API (RGB bytes, base64) as a data URL the stage can show. */
+function rgbToUrl(b64, w, h) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext("2d"), img = ctx.createImageData(w, h);
+  for (let i = 0, j = 0; i < bytes.length; i += 3, j += 4) { img.data[j] = bytes[i]; img.data[j + 1] = bytes[i + 1]; img.data[j + 2] = bytes[i + 2]; img.data[j + 3] = 255; }
+  ctx.putImageData(img, 0, 0);
+  return canvas.toDataURL();
+}
+
+/** Fetches the picture of every block whose state changed; redraws when one arrives. */
+function ensurePictures() {
+  for (const b of M.blocks) {
+    if (!b.scene) continue;
+    const inst = b.instance, key = JSON.stringify(state[inst]);
+    const have = pictures[inst];
+    if (have && (have.key === key || have.busy)) { if (have.key !== key) have.pending = true; continue; }
+    pictures[inst] = {...(have || {}), busy: true, pending: false};
+    api(`/api/${b.type}/picture`, {state: state[inst]}).then(r => {
+      const again = pictures[inst] && pictures[inst].pending;
+      pictures[inst] = {key, url: rgbToUrl(r.network || r.oracle, r.w, r.h), view: r.view, mae: r.mae ?? null, network: !!r.network, busy: false, pending: false};
+      draw();
+      if (again) ensurePictures();
+    }).catch(() => { pictures[inst] = {key, url: null, busy: false, pending: false}; });
+  }
+}
 // A shared room (docs/machine-room.md, M4): the machine lives in a Durable Object on the server, which ticks it
 // and sends every tick here; this page only draws, drives the clock and runs its own drags locally.
 const PARAMS = new URLSearchParams(location.search);
@@ -155,13 +181,33 @@ function select(name) {
   pause();
   M = machines.find(m => m.name === name);
   for (const t of $("tabs").children) t.setAttribute("aria-selected", t.textContent === name);
-  state = structuredClone(M.initial); pending = []; detached = []; drag = null; tick = 0; last = null; lastFired = new Set(); lastPos = {};
+  state = structuredClone(M.initial); pending = []; detached = []; drag = null; tick = 0; last = null; lastFired = new Set(); lastPos = {}; pictures = {};
   stats = {ticks: 0, agree: 0, viol: 0, ms: []};
   const nets = M.blocks.filter(b => b.network).length;
   $("who").textContent = `${M.blocks.length} blocks · ${nets} networks · ${M.wires.length} wires · ${M.states.toLocaleString()} states`;
   $("src").textContent = M.source; $("srcLines").textContent = `— ${M.source.trimEnd().split("\n").length} lines, and nothing else joins these blocks.`;
   $("trace").innerHTML = ""; $("last").innerHTML = ""; $("stop").innerHTML = "";
+  // What a hand can do here: each block's grabs, merged across the instances of one type.
+  const grabs = new Map();
+  for (const b of M.blocks) {
+    const names = [...new Set(b.futures.map(f => f.grab))];
+    for (const what of names.length > 2 ? ["an item of"] : names.map(g => `the ${g} of`)) grabs.set(what, [...(grabs.get(what) || []), b.instance]);
+  }
+  const list = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}` : xs[0];
+  const can = [...grabs].map(([what, insts]) => `${what} ${list(insts)}`);
+  $("hint").textContent = can.length ? `Press Run, or drag ${list(can)} while it runs.` : "Press Run.";
   layout = computeLayout();
+  // The other parameterless inputs (dropping the ball, say) as buttons; the clock's input is the Run button.
+  const drive = new Set(driveInputs().map(i => `${i.block}.${i.action}`));
+  const box = $("inputs"); box.innerHTML = "";
+  for (const i of M.inputs.filter(i => !Object.keys(i.params).length && !drive.has(`${i.block}.${i.action}`))) {
+    const key = `${i.block}.${i.action}`;
+    if ([...box.children].some(b => b.dataset.key === key)) continue;
+    const b = document.createElement("button"); b.className = "ctl"; b.dataset.key = key; b.textContent = key;
+    b.title = `Apply ${key} to the machine now`;
+    b.onclick = () => shared ? send({type: "external", block: i.block, action: i.action}) : doTick([{block: i.block, action: i.action, params: {}}]);
+    box.append(b);
+  }
   updatePills();
   if (shared) { const ws = shared.ws; shared = null; ws.onclose = null; ws.close(); }
   if (ROOM && canShare) connect(); else view();
@@ -172,7 +218,7 @@ function select(name) {
 function computeLayout() {
   const panels = {}; let x = 10, y = 10, rowH = 0, width = 0;
   for (const b of M.blocks) {
-    const sb = skinOf(b.type)?.bounds;
+    const sb = b.scene ? {x0: b.scene.box[0], y0: b.scene.box[1], x1: b.scene.box[2], y1: b.scene.box[3]} : null;
     const ex = b.extent && sb ? {x0: Math.min(b.extent.x0, sb.x0), y0: Math.min(b.extent.y0, sb.y0), x1: Math.max(b.extent.x1, sb.x1), y1: Math.max(b.extent.y1, sb.y1)} : b.extent || sb;
     const textLines = b.fields.filter(f => !rendered(b, f.name)).length;
     const w = (ex ? Math.max(ex.x1 - ex.x0, 40) * Z : 100) + 2 * PAD + 20;
@@ -220,7 +266,8 @@ async function doTick(external = driveInputs()) {
 function updatePills() {
   $("tickpill").textContent = `tick ${tick}`;
   const a = $("agreepill");
-  a.textContent = stats.ticks ? `agreement ${stats.agree}/${stats.ticks} ticks` : "agreement —";
+  const tol = M.blocks.some(b => !b.finite) ? " (within 1%)" : "";
+  a.textContent = stats.ticks ? `agreement ${stats.agree}/${stats.ticks} ticks${tol}` : "agreement —";
   a.className = "pill" + (stats.ticks ? (stats.agree === stats.ticks ? " ok" : " bad") : "");
   const v = $("violpill"); v.textContent = `${stats.viol} violation${stats.viol === 1 ? "" : "s"}`; v.className = "pill" + (stats.viol ? " bad" : stats.ticks ? " ok" : "");
   const ms = Array.isArray(stats.ms) ? (stats.ms.length ? stats.ms.reduce((x, y) => x + y, 0) / stats.ms.length : null) : (stats.ms || null);
@@ -301,6 +348,7 @@ function showStop(r) {
 }
 
 function draw() {
+  ensurePictures();
   const svg = $("stage"); svg.innerHTML = "";
   svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
   const rect = svg.getBoundingClientRect();
@@ -340,11 +388,10 @@ function draw() {
     // Fields with no element: as text.
     let ty = p.y + p.h - 10 - 18 * (b.fields.filter(f => !rendered(b, f.name)).length - 1);
     for (const f of b.fields) if (!rendered(b, f.name)) { text(p.x + 12, ty, `${f.name} = ${fmt(state[inst][f.name])}`, "fieldtext mono", svg); ty += 18; }
-    // The block's picture, in its spec's own coordinates: the skin's scenery, then each element.
-    const skin = skinOf(b.type);
+    // The block's picture, in its spec's own coordinates: its render network's pixels, then hit targets.
     const bg = el("g", {transform: `translate(${p.ox},${p.oy}) scale(${Z})`}, svg);
-    const sctx = {state: state[inst], positions: pos, k: Z, active: false};
-    if (skin && skin.scenery) skin.scenery(el("g", {}, bg), sctx);
+    const pic = pictures[inst] && pictures[inst].url && pictures[inst].key === JSON.stringify(state[inst]) ? pictures[inst] : null;
+    if (pic) el("image", {href: pic.url, x: pic.view[0], y: pic.view[1], width: pic.view[2], height: pic.view[3], preserveAspectRatio: "none"}, bg);
     // Landing spots while this block is grabbed.
     if (drag && drag.block === inst && drag.candidates) for (const c of drag.candidates) el("circle", {cx: c.x, cy: c.y, r: 9, class: "el ghost"}, bg);
     for (const name of b.render) {
@@ -352,12 +399,14 @@ function draw() {
       const g = b.futures.find(f => f.grab === name);
       const active = !!(drag && drag.block === inst);
       const grp = el("g", {class: g ? "el grab" : ""}, bg);
-      if (!(skin && skin.element && skin.element(grp, name, q, {...sctx, active}))) {
+      if (pic) el("circle", {cx: q.x, cy: q.y, r: 12, fill: "transparent", stroke: active ? "var(--acc)" : "none", "stroke-width": 1.5}, grp);
+      else {
         el("circle", {cx: q.x, cy: q.y, r: 9, class: "el" + (g ? " grab" : "") + (active ? " preview" : "")}, grp);
         text(q.x, q.y + 3, name.length > 4 ? name.slice(0, 3) : name, "ellabel", grp);
       }
       const id = `${inst}.${name}`, prev = lastPos[id];
-      if (prev && !active && (prev.x !== q.x || prev.y !== q.y)) slideFrom(grp, prev.x - q.x, prev.y - q.y, 260);
+      // With a picture on show the motion is in the pixels, tick by tick; only plain markers slide.
+      if (!pic && prev && !active && (prev.x !== q.x || prev.y !== q.y)) slideFrom(grp, prev.x - q.x, prev.y - q.y, 260);
       lastPos[id] = {x: q.x, y: q.y};
       if (g && !isHeld) grp.onpointerdown = e => startDrag(e, b, g, p);
     }

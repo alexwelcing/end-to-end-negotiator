@@ -1,0 +1,39 @@
+{
+  "spec": "negotiate",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 128,
+    "state_dim": 42,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 400,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 216,
+    "mae": 0.012937732282336111,
+    "worst_mae": 0.013284978456795216,
+    "worst_state": "('b', 0, 2, 'no_deal', 1)",
+    "w": 192,
+    "h": 128,
+    "loss": 0.005398372653871775,
+    "seconds": 630.7077986,
+    "trained_on": "cuda",
+    "params": 460475
+  }
+}

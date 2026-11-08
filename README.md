@@ -40,8 +40,9 @@ Seventeen interfaces, each a small neural network trained to be the program, eac
   [/machine](https://nerve-machine-room.aw-ab5.workers.dev/machine) (the machine room) are the same two pages on a WebAssembly build of the engine,
   served as static files from Cloudflare's edge: every click, drag frame and machine tick is a function call in
   your browser. **Share this machine** on the machine room page opens a shared room: a Durable Object runs the
-  same networks on the server and every browser with the link sees the same machine, and can grab it.
-  `python scripts/build_site.py` writes `site/dist` for any static host;
+  same networks on the server and every browser with the link sees the same machine, and can grab it. The
+  behaviour networks load up front (about 13 MB); each interface's render network loads when it is first drawn.
+  `cargo run --release -p nerve -- site` writes `site/dist` for any static host;
   `wrangler deploy --config site/wrangler.toml` publishes it, and `.github/workflows/pages.yml` does so on push
   once the Cloudflare secrets are set.
 * **Locally, one command** (needs a Rust toolchain, no GPU, no Python):
@@ -187,6 +188,18 @@ every metric, invented four roles that did not exist at iteration 0 (`split_prob
 `margin_auditor`, `margin_checker`), and, once the score was saturated, restructured the team to cut its own cost
 per iteration. The full record (every TEAM_CONFIG, eval and role report) is in `docs/runs/negotiate-claude-2026-11-06/`.
 
+## The picture is a network too
+
+What an interface looks like is declared in its spec and drawn by weights. A spec's `scene:` gives the
+picture's box and static shapes (pegs, a board, a track) and each `render:` element carries the shapes drawn
+at its position (a disc, a tile, a car), in named colours, with `when` predicates and expressions where a
+shape depends on the state. `crates/nerve/src/render.rs` is the render oracle: it rasterises a state exactly,
+the way the behaviour oracle steps it. `nerve train-picture specs/hanoi.nerve` trains a small decoder, the
+render network, from the state encoding to those pixels over every valid state (a sample of them for
+continuous specs), and `models/pictures/<spec>/` holds one per interface. The lab shows the render network's
+picture, reports its mean pixel error against the oracle's drawing for the state on show, and can switch to the
+oracle's picture for comparison. No JavaScript draws a disc or a car.
+
 ## Machines
 
 Blocks wire into machines without a line of code between them (paper 2, `docs/paper2/`; plan and status in
@@ -214,6 +227,16 @@ let go. `crates/nerve/tests/machine_chain.rs` runs the served networks for 10⁴
 disagreement, about 0.02 ms per tick) and through 1,000 scripted mid-run grabs (agreement with the composed
 oracle 1, 10 and 100 ticks after every release): paper 2's Predictions 2 and 3.
 
+`machines/ball.nerve` is paper 2's ball (§6.4): three `specs/rail.nerve` blocks in a loop, the clock advancing all
+three every tick, the ball handed from one rail to the next by the `exit` event. The hand-off is `enter`, which
+puts the ball at the next rail's canonical start, so a rail's error never reaches the next one (§5.4);
+`machines/ball_drift.nerve` is the same machine with `enter_at` carrying the sender's overshoot instead.
+The rail is continuous: its network answers a step with an amortised step head (one forward pass, checked by
+the energy and the spec) rather than by descent, and the machine room shows agreement within 1% of range.
+**r1.enter** is a button there: drop the ball. `crates/nerve/tests/ball_machine.rs` runs both machines on the
+served rail network against the composed oracle for 200 runs (Prediction 4: the error after 1, 10 and 100
+hand-offs, with and without the snapping rule) and checks the head against descent (Prediction 5).
+
 ## Paper
 
 `docs/paper/` holds the manuscript (NeurIPS format, 9 pages + appendix), its sources, the CPU sweep that re-derives
@@ -225,7 +248,9 @@ this branch and what to do next.
 
 ```
 specs/*.nerve            behavior specs (toggle, counter, slider, negotiate)
-machines/*.nerve         machines: block instances wired by events (odometer, odometer6)
+machines/*.nerve         machines: block instances wired by events (odometer, odometer6, chain, ball, ball_drift)
+models/pictures/*        the render network of each interface (state -> pixels), one per spec
+crates/nerve/src/gen     the generated specs as Rust (`nerve gen`); render.rs the render oracle; picture.rs the render network
 nerve/spec               schema, safe expression language, parser, oracle, self-check, exact circuit compiler,
                          drag.py: gestures as energy minimisation over spec-derived futures (docs/dragology.md)
 nerve/data               append-only episode log; coverage / random / adversarial rollouts; spec-derived negatives

@@ -50,7 +50,7 @@ would mean the network cannot represent that rule exactly and needs more capacit
 
 ### Q1–Q6 (hold-out sweeps; stopped at the goal change, one seed each)
 
-From `summarize.py`, tag `h*` and `rule-*` rows. Predictions were far off.
+From `nerve summarize`, tag `h*` and `rule-*` rows. Predictions were far off.
 
 | question | predicted | measured |
 |---|---|---|
@@ -69,7 +69,7 @@ rule": no, it learned the examples.
 ### Q7 (full-spec training)
 
 The sweep is complete (2026-11-08). All 14 finite interfaces are 100% exact with 0 violations on every seed
-trained (three seeds each, one for kanban and scheduler); `summarize.py` has the table and `docs/paper2/` the
+trained (three seeds each, one for kanban and scheduler); `nerve summarize` prints the table and `docs/paper2/` the
 generated version. The scheduler, the largest at 41,472 cells and 165,524 parameters, was exact from its first
 evaluation. The continuous specs:
 `tracks` 99.6% within 1% of range (0.1% violations), `slider_continuous` 100% (0), and **`linked_sliders`

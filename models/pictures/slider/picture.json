@@ -1,0 +1,39 @@
+{
+  "spec": "slider",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 32,
+    "state_dim": 36,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 200,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 50,
+    "mae": 0.03311287745833397,
+    "worst_mae": 0.03503977507352829,
+    "worst_state": "(100, True)",
+    "w": 192,
+    "h": 32,
+    "loss": 0.01754932850599289,
+    "seconds": 29.0181917,
+    "trained_on": "cuda",
+    "params": 162875
+  }
+}

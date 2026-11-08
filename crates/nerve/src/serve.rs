@@ -34,11 +34,18 @@ pub trait LearnedEnergy: Send + Sync {
     fn cheap(&self) -> bool {
         true
     }
+    /// The network's successor for `start -action->`, when it can give one directly (a finite
+    /// model's argmin, a continuous model's step head or descent); machines step blocks with it.
+    fn step(&self, _start: &State, _action: &ActionInst) -> Result<Option<State>> {
+        Ok(None)
+    }
 }
 
 pub struct Entry {
     pub spec: Spec,
     pub model: Option<Arc<dyn LearnedEnergy>>,
+    /// The render network: what the interface looks like, drawn by weights (`picture.rs`).
+    pub picture: Option<Arc<crate::picture::Picture>>,
     /// The spec's source text: shown in the lab as the whole description of the program.
     pub source: String,
 }
@@ -139,6 +146,13 @@ impl App {
         Ok(())
     }
 
+    /// Gives an interface its render network.
+    pub fn set_picture(&mut self, spec: &str, picture: Arc<crate::picture::Picture>) -> Result<()> {
+        let e = self.specs.iter_mut().find(|e| e.spec.name == spec).with_context(|| format!("unknown spec {spec:?}"))?;
+        e.picture = Some(picture);
+        Ok(())
+    }
+
     /// Adds a machine, replacing one of the same name.
     pub fn add_machine(&mut self, m: MachineEntry) {
         self.machines.retain(|x| x.spec.name != m.spec.name);
@@ -204,6 +218,10 @@ impl App {
                 self.view(spec, &r.state)?
             }
             ["api", spec, "step"] => self.step(spec, &parse(body)?)?,
+            ["api", spec, "picture"] => {
+                let r: ViewReq = parse(body)?;
+                self.picture(spec, &r.state)?
+            }
             ["api", spec, "field"] => self.field(spec, &parse(body)?)?,
             ["api", spec, "drag"] => self.drag_start(spec, &parse(body)?)?,
             _ => bail!("no route {path}"),
@@ -350,6 +368,34 @@ impl App {
     pub fn field(&self, spec: &str, req: &FieldReq) -> Result<J> {
         field_grid(self, spec, req)
     }
+
+    /// The picture of a state: what the render network draws, what the render oracle draws, and the
+    /// mean absolute pixel error between them. Rasters are RGB bytes, base64, `w` by `h`, covering
+    /// `view` (the scene box widened to the raster's aspect) in the spec's coordinates.
+    pub fn picture(&self, spec: &str, state: &J) -> Result<J> {
+        let e = self.entry(spec)?;
+        let sp = &e.spec;
+        let scene = sp.scene.as_ref().with_context(|| format!("{spec} has no scene"))?;
+        let s = sp.state_from_json(state)?;
+        let (w, h) = match &e.picture {
+            Some(p) => (p.cfg.w, p.cfg.h),
+            None => scene.raster_size(),
+        };
+        let truth = crate::render::rasterize(sp, &s, w, h)?;
+        let (bw, bh) = (scene.x1 - scene.x0, scene.y1 - scene.y0);
+        let k = (w as f64 / bw).min(h as f64 / bh);
+        let view = [scene.x0 - (w as f64 / k - bw) / 2.0, scene.y0 - (h as f64 / k - bh) / 2.0, w as f64 / k, h as f64 / k];
+        let mut out = json!({
+            "w": w, "h": h, "view": view,
+            "oracle": crate::render::base64(&crate::render::to_rgb8(&truth, w, h)),
+        });
+        if let Some(p) = &e.picture {
+            let drawn = p.draw(&s)?;
+            out["network"] = json!(crate::render::base64(&crate::render::to_rgb8(&drawn, w, h)));
+            out["mae"] = json!(crate::render::mae(&drawn, &truth));
+        }
+        Ok(out)
+    }
 }
 
 /// One interface as the lab lists it: fields, gestures, actions, size, its network's record, its source.
@@ -406,6 +452,8 @@ pub fn spec_summary(e: &Entry) -> J {
         // States the invariants allow: 120 orders of five items, not all 3,125 position tuples.
         "valid_states": valid_states(sp),
         "model": e.model.as_ref().map(|m| m.describe()),
+        "picture": e.picture.as_ref().map(|p| p.describe()),
+        "scene": sp.scene.as_ref().map(|sc| json!({"box": [sc.x0, sc.y0, sc.x1, sc.y1], "raster": sc.raster_size()})),
         "source": e.source,
         "holes": sp.holes.iter().map(|h| json!({"name": h.name, "action": h.action, "examples": h.examples.len()})).collect::<Vec<_>>(),
     })
@@ -558,8 +606,6 @@ mod http {
 
     const INDEX: &str = include_str!("../web/index.html");
     const MACHINE_PAGE: &str = include_str!("../web/machine.html");
-    /// How each interface draws itself; shared by both pages.
-    const SKINS: &str = include_str!("../web/skins.js");
 
     pub struct ApiError(anyhow::Error);
 
@@ -582,13 +628,13 @@ mod http {
         Router::new()
             .route("/", get(|| async { Html(INDEX) }))
             .route("/machine", get(|| async { Html(MACHINE_PAGE) }))
-            .route("/skins.js", get(|| async { ([(axum::http::header::CONTENT_TYPE, "application/javascript; charset=utf-8")], SKINS) }))
             .route("/api/specs", get(list_specs))
             .route("/api/machines", get(list_machines))
             .route("/api/machine/{name}/view", post(machine_view))
             .route("/api/machine/{name}/tick", post(machine_tick))
             .route("/api/{spec}/view", post(view))
             .route("/api/{spec}/step", post(step))
+            .route("/api/{spec}/picture", post(picture))
             .route("/api/{spec}/field", post(field))
             .route("/api/{spec}/drag", post(drag_start))
             .route("/api/drag/{sid}/frame", post(drag_frame))
@@ -606,6 +652,10 @@ mod http {
 
     async fn step(AxState(app): S, Path(spec): Path<String>, Json(req): Json<StepReq>) -> ApiResult {
         Ok(Json(app.step(&spec, &req)?))
+    }
+
+    async fn picture(AxState(app): S, Path(spec): Path<String>, Json(req): Json<ViewReq>) -> ApiResult {
+        Ok(Json(app.picture(&spec, &req.state)?))
     }
 
     /// A `vary` per pixel (three for a three-track `each`) is real work: keep it off the runtime.
@@ -672,7 +722,7 @@ mod tests {
     #[test]
     fn dispatch_answers_the_api_paths_without_a_server() {
         let sp = counter();
-        let app = App::new(vec![Entry { spec: sp.clone(), model: None, source: String::new() }], 1.0);
+        let app = App::new(vec![Entry { spec: sp.clone(), model: None, picture: None, source: String::new() }], 1.0);
         let specs = app.dispatch("/api/specs", &J::Null).unwrap();
         assert_eq!(specs[0]["name"], "counter");
         let step = app.dispatch("/api/counter/step", &json!({"state": sp.state_json(&sp.initial), "action": "inc"})).unwrap();

@@ -1,0 +1,39 @@
+{
+  "spec": "fifteen",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 128,
+    "state_dim": 75,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 100,
+    "batch": 64,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 720,
+    "mae": 0.02292498747766432,
+    "worst_mae": 0.02485329657793045,
+    "worst_state": "(0, 3, 5, 2, 1)",
+    "w": 192,
+    "h": 128,
+    "loss": 0.010346646420657635,
+    "seconds": 483.7038198,
+    "trained_on": "cuda",
+    "params": 468923
+  }
+}

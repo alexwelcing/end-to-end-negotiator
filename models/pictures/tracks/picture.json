@@ -1,0 +1,39 @@
+{
+  "spec": "tracks",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 160,
+    "state_dim": 21,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 200,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 512,
+    "mae": 0.010565660370048136,
+    "worst_mae": 0.011093768291175365,
+    "worst_state": "(1, 61.45321282402973)",
+    "w": 192,
+    "h": 160,
+    "loss": 0.004589451476931572,
+    "seconds": 822.6141749,
+    "trained_on": "cuda",
+    "params": 553787
+  }
+}

@@ -61,6 +61,81 @@ enum Cmd {
         /// Directory of `machine:` documents, served at /machine with each block stepped by its type's network.
         #[arg(long, default_value = "machines")]
         machines: PathBuf,
+        /// Directory of render networks (`<dir>/<spec name>/picture.json`), as written by `nerve train-picture`.
+        #[arg(long, default_value = "models/pictures")]
+        pictures: Option<PathBuf>,
+    },
+    /// Train the render network of a spec with a `scene:` on its render oracle and save it to `<out>/<spec name>/`.
+    TrainPicture {
+        spec: PathBuf,
+        #[arg(long, default_value = "models/pictures")]
+        out: PathBuf,
+        #[arg(long, default_value_t = 400)]
+        epochs: usize,
+        #[arg(long, default_value_t = 32)]
+        batch: usize,
+        #[arg(long, default_value_t = 2e-3)]
+        lr: f64,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// States drawn for a spec whose state space cannot be enumerated.
+        #[arg(long, default_value_t = 512)]
+        samples: usize,
+        #[arg(long, default_value_t = 50)]
+        log_every: usize,
+        #[arg(long)]
+        cuda: bool,
+    },
+    /// Build the static site (the lab on WebAssembly) into `site/dist`.
+    Site {
+        #[arg(long, default_value = "site/dist")]
+        out: PathBuf,
+        /// Reuse the wasm package already in `--out`/pkg instead of rebuilding it.
+        #[arg(long)]
+        skip_wasm: bool,
+    },
+    /// Smoke-test a running lab: networks answer, the chain ticks in agreement, pictures draw.
+    Smoke {
+        #[arg(default_value = "http://127.0.0.1:8787")]
+        url: String,
+    },
+    /// Score a trained model and append its rows to the experiment log.
+    Record {
+        spec: PathBuf,
+        /// Directory holding `model.json` and `model.safetensors`.
+        model: PathBuf,
+        /// The split the run belongs to (`full`, `h15`, ...).
+        tag: String,
+        #[arg(long, default_value = "experiments/round2/results.jsonl")]
+        log: PathBuf,
+    },
+    /// Build `models/served` from the experiment log: the best full-spec run per spec.
+    ServeSet {
+        #[arg(long, default_value = "experiments/round2/results.jsonl")]
+        log: PathBuf,
+        #[arg(long, default_value = "models/served")]
+        served: PathBuf,
+        #[arg(long, default_value = "experiments/round2/served.json")]
+        manifest: PathBuf,
+    },
+    /// Print the experiment log as markdown tables (mean ± sd over seeds).
+    Summarize {
+        specs: Vec<String>,
+        #[arg(long, default_value = "experiments/round2/results.jsonl")]
+        log: PathBuf,
+    },
+    /// Write the generated specs (all of them, or the named ones) into `--out`.
+    Gen {
+        names: Vec<String>,
+        #[arg(long, default_value = "specs")]
+        out: PathBuf,
+    },
+    /// Write the render oracle's picture of a spec's initial state (or `--state` JSON) as a PPM file.
+    Picture {
+        spec: PathBuf,
+        out: PathBuf,
+        #[arg(long)]
+        state: Option<String>,
     },
     /// Train the JEPA energy for a finite spec and save it to `<out>/<spec name>/`.
     Train {
@@ -113,7 +188,47 @@ fn device(cuda: bool) -> Result<candle_core::Device> {
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
-        Cmd::Serve { specs, addr, lambda, models, cuda, machines } => serve(&specs, &addr, lambda, models.as_deref(), &machines, &device(cuda)?)?,
+        Cmd::Serve { specs, addr, lambda, models, cuda, machines, pictures } => serve(&specs, &addr, lambda, models.as_deref(), &machines, pictures.as_deref(), &device(cuda)?)?,
+        Cmd::TrainPicture { spec, out, epochs, batch, lr, seed, samples, log_every, cuda } => {
+            let s = Spec::load(&spec)?;
+            let cfg = nerve::picture::PictureTrainConfig { epochs, batch, lr, seed, samples, log_every, ..Default::default() };
+            let (p, report) = nerve::picture::train(&s, &cfg, &device(cuda)?)?;
+            let dir = out.join(&s.name);
+            p.save(&dir, &cfg, &report)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            println!("saved {}", dir.display());
+        }
+        Cmd::Site { out, skip_wasm } => {
+            let root = std::env::current_dir()?;
+            nerve::site::SiteBuild { dist: root.join(out), root, skip_wasm }.build()?;
+        }
+        Cmd::Smoke { url } => nerve::smoke::run(&url)?,
+        Cmd::Record { spec, model, tag, log } => {
+            nerve::exp::record(&spec, &model, &tag, &log)?;
+        }
+        Cmd::ServeSet { log, served, manifest } => {
+            let root = std::env::current_dir()?;
+            nerve::exp::serve_set(&log, &root, &served, &manifest)?;
+        }
+        Cmd::Summarize { specs, log } => print!("{}", nerve::exp::summarize(&log, &specs)?),
+        Cmd::Gen { names, out } => {
+            for n in nerve::gen::write(&out, &names)? {
+                println!("wrote {}", out.join(format!("{n}.nerve")).display());
+            }
+        }
+        Cmd::Picture { spec, out, state } => {
+            let s = Spec::load(&spec)?;
+            let st = match state {
+                Some(j) => s.state_from_json(&serde_json::from_str(&j)?)?,
+                None => s.initial.clone(),
+            };
+            let (w, h) = s.scene.as_ref().context("the spec has no scene")?.raster_size();
+            let px = nerve::render::rasterize(&s, &st, w, h)?;
+            let mut ppm = format!("P6\n{w} {h}\n255\n").into_bytes();
+            ppm.extend(nerve::render::to_rgb8(&px, w, h));
+            std::fs::write(&out, ppm)?;
+            println!("wrote {} ({w}x{h})", out.display());
+        }
         Cmd::Train { spec, out, epochs, batch, lr, seed, holdout, weight_decay, pairs, log_every, fact_weight, all_states, salt, holdout_rule, cuda } => {
             let s = Spec::load(&spec)?;
             let cfg = nerve::train::TrainConfig { epochs, batch, lr, seed, holdout, weight_decay, cont_pairs: pairs, log_every, fact_weight, candidates: if all_states { nerve::train::Candidates::All } else { nerve::train::Candidates::Valid }, holdout_salt: salt, holdout_rule, ..Default::default() };
@@ -237,7 +352,7 @@ fn check_machine(path: &Path) -> Result<()> {
         m.wires.len(),
         m.derived.len(),
         m.ensures.len(),
-        m.state_space_size()?
+        m.state_space_size().map(|n| n.to_string()).unwrap_or_else(|_| "continuous".to_string())
     );
     let report = m.check(WALKS, HORIZON)?;
     for p in &report.problems {
@@ -252,7 +367,7 @@ fn check_machine(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::path::Path>, machines_dir: &std::path::Path, dev: &candle_core::Device) -> Result<()> {
+fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::path::Path>, machines_dir: &std::path::Path, pictures: Option<&std::path::Path>, dev: &candle_core::Device) -> Result<()> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "nerve"))
@@ -266,8 +381,12 @@ fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::pa
             Some(d) if d.join("model.json").exists() => Some(nerve::train::load_learned(spec.clone(), &d, dev)?),
             _ => None,
         };
-        println!("  {:<22} {} futures{}", spec.name, spec.futures.len(), if model.is_some() { ", trained model" } else { "" });
-        entries.push(nerve::serve::Entry { spec, model, source });
+        let picture = match pictures.map(|p| p.join(&spec.name)) {
+            Some(d) if d.join(nerve::picture::META_FILE).exists() && spec.scene.is_some() => Some(std::sync::Arc::new(nerve::picture::Picture::load(spec.clone(), &d, dev)?)),
+            _ => None,
+        };
+        println!("  {:<22} {} futures{}{}", spec.name, spec.futures.len(), if model.is_some() { ", trained model" } else { "" }, if picture.is_some() { ", picture" } else { "" });
+        entries.push(nerve::serve::Entry { spec, model, picture, source });
     }
     let mut machines = Vec::new();
     if machines_dir.is_dir() {

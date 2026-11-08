@@ -1,0 +1,39 @@
+{
+  "spec": "sokoban",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 128,
+    "state_dim": 72,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 100,
+    "batch": 64,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 50
+  },
+  "eval": {
+    "n": 990,
+    "mae": 0.02092870336515133,
+    "worst_mae": 0.022431587800383568,
+    "worst_state": "(8, 3, 13)",
+    "w": 192,
+    "h": 128,
+    "loss": 0.009269039146602154,
+    "seconds": 904.7846856,
+    "trained_on": "cuda",
+    "params": 468155
+  }
+}

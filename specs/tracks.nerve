@@ -19,8 +19,21 @@ invariants:
   - "track != 1 or 60 <= pos <= 180"
 ensures:
   - { after: move, holds: "track == t or abs(t - old.track) > 1" }
+scene:
+  box: [-20, -30, 262, 192]
+  shapes:
+    - {line: [0, 0, 240, 0], color: track, width: 8}
+    - {line: [0, 80, 240, 80], color: track, width: 8}
+    - {line: [60, 80, 180, 80], color: ghost, width: 8}
+    - {line: [0, 160, 240, 160], color: track, width: 8}
+    - {label: '0', at: [0, -16], color: mut, size: 1.8}
+    - {label: '60', at: [60, -16], color: mut, size: 1.8}
+    - {label: '120', at: [120, -16], color: mut, size: 1.8}
+    - {label: '180', at: [180, -16], color: mut, size: 1.8}
+    - {label: '240', at: [240, -16], color: mut, size: 1.8}
+    - {label: the middle track only reaches from 60 to 180, at: [120, 104], color: mut, size: 1.5}
 render:
-  block: { x: "pos", y: "80 * track" }
+  block: { x: "pos", y: "80 * track", shape: {rect: [0, 0, 30, 30], r: 7, color: f2, stroke: ink, width: 1.5} }
 futures:
   # each: one `vary` per track the oracle can reach; closest picks the track, vary the position
   drag_block:

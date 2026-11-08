@@ -390,7 +390,7 @@ impl<'a> Machine<'a> {
             let after = self.steppers[block].step(&before, &action)?;
             let events = self.oracles[block].events(&before, &action, &after)?;
             let violations: Vec<String> =
-                self.oracles[block].violations(&before, Some(&action), &after, 0.01).into_iter().map(|v| format!("{}: {v}", spec.blocks[block].0)).collect();
+                self.oracles[block].violations(&before, Some(&action), &after, crate::continuous::TOLERANCE).into_iter().map(|v| format!("{}: {v}", spec.blocks[block].0)).collect();
             trace.violations.extend(violations.iter().cloned());
             let prev = cur.clone();
             cur[block] = after.clone();

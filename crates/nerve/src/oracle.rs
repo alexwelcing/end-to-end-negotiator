@@ -77,11 +77,14 @@ impl<'a> Oracle<'a> {
 
     /// Which spec properties does `state -action-> new` break?
     ///
-    /// Continuous fields within `tol` of their range of the true value are
-    /// taken as the true value before `ensures` are checked.
+    /// Continuous fields within `tol` of their range of the true value are taken as the true
+    /// value for the `ensures`, which relate the new state to the old. The types and the
+    /// invariants are checked on `new` as given: that is the state that will be stored and
+    /// stepped from, and a value a hair across a rule's threshold (a ball still `rolling` just
+    /// past the end of its rail) is wrong however close it is to the truth.
     pub fn violations(&self, state: &State, action: Option<&ActionInst>, new: &State, tol: f64) -> Vec<String> {
         let sp = self.spec;
-        let mut new = new.clone();
+        let mut snapped = new.clone();
         let cont = sp.continuous_fields();
         if let (false, Some(a)) = (cont.is_empty(), action) {
             if let Ok(truth) = self.step(state, a) {
@@ -89,20 +92,20 @@ impl<'a> Oracle<'a> {
                     let (lo, hi) = sp.fields[k].range();
                     if let (Some(p), Some(t)) = (new[k].as_f64(), truth[k].as_f64()) {
                         if (p - t).abs() <= tol * (hi - lo) {
-                            new[k] = truth[k].clone();
+                            snapped[k] = truth[k].clone();
                         }
                     }
                 }
             }
         }
         let mut bad = Vec::new();
-        for (f, v) in sp.fields.iter().zip(&new) {
+        for (f, v) in sp.fields.iter().zip(new) {
             if !f.contains(v) {
                 bad.push(format!("type:{}={}", f.name, v.repr()));
             }
         }
         let no_params: [(String, Value); 0] = [];
-        let inv_scope = StateScope { spec: sp, cur: &new, params: &no_params, old: Some(state) };
+        let inv_scope = StateScope { spec: sp, cur: new, params: &no_params, old: Some(state) };
         for inv in &sp.invariants {
             match inv.eval(&inv_scope) {
                 Ok(v) if v.truthy() => {}
@@ -120,7 +123,7 @@ impl<'a> Oracle<'a> {
                 continue;
             }
             let params = action.map_or(&no_params[..], |a| &a.params[..]);
-            let scope = StateScope { spec: sp, cur: &new, params, old: Some(state) };
+            let scope = StateScope { spec: sp, cur: &snapped, params, old: Some(state) };
             match e.holds.eval(&scope) {
                 Ok(v) if v.truthy() => {}
                 Ok(_) => bad.push(format!("ensures:{}:{}", e.after.as_deref().unwrap_or("*"), e.holds.source())),

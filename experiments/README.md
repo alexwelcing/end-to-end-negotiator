@@ -8,7 +8,7 @@ A round is a folder with:
   our minds; then the results, appended after, next to the predictions.
 - the scripts that ran it (training commands, sweeps), committed;
 - `results.jsonl`: one line per (trained model, scoring mode), written by the scripts, never edited by hand;
-- `summarize.py` output pasted into the README, with mean ± sd over seeds.
+- `nerve summarize` output pasted into the README, with mean ± sd over seeds.
 
 Rules from round 1:
 

@@ -7,8 +7,15 @@ actions:
   flip: {}
 transitions:
   flip: { status: "'on' if status == 'off' else 'off'", emits: { turned_on: "status == 'on'" } }   # the event a machine can wire
+scene:
+  box: [0, 0, 120, 60]
+  shapes:
+    - {rect: [60, 30, 92, 34], r: 17, color: track}
+    - {rect: [60, 30, 92, 34], r: 17, color: acc, when: "status == 'on'"}
+    - {label: off, at: [76, 30], color: ink, size: 2, when: "status == 'off'"}
+    - {label: on, at: [44, 30], color: white, size: 2, when: "status == 'on'"}
 render:                    # derived geometry, so a drag has a gap (docs/dragology.md)
-  knob: { x: "90 if status == 'on' else 30", y: 30 }
+  knob: { x: "90 if status == 'on' else 30", y: 30, shape: {circle: [0, 0, 14], color: panel, stroke: acc, width: 2.5} }
 futures:
   # dragology: dragging the knob leads to one of exactly these states
   drag_knob: { kind: between, over: status, values: [off, on], grab: knob }
