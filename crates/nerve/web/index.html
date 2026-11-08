@@ -146,10 +146,12 @@ input.num{width:86px;background:var(--bg);color:var(--ink);border:1px solid var(
   </div>
   <footer id="foot"></footer>
 </main>
+<script src="/skins.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
 const PAL = Array.from({length:10}, (_, i) => `var(--f${i})`);
+const skinOf = name => (window.NERVE_SKINS ? window.NERVE_SKINS.get(name) : null);
 let specs = [], cur = null, state = null, view = null, drag = null, fieldCache = null, lastFrame = null;
 
 async function api(path, body) {
@@ -406,6 +408,9 @@ async function refresh(changed = []) {
     if (g.track) pts.push([g.track.from.x, g.track.from.y], [g.track.to.x, g.track.to.y]);
     for (const t of g.tracks || []) pts.push([t.from.x, t.from.y], [t.to.x, t.to.y]);
   }
+  // The interface's scenery (pegs, a board, a track) is part of the picture too.
+  const sb = skinOf(cur.name)?.bounds;
+  if (sb) pts.push([sb.x0, sb.y0], [sb.x1, sb.y1]);
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
   let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
   const w = Math.max(x1 - x0, 60), h = Math.max(y1 - y0, 0);
@@ -446,6 +451,10 @@ function render() {
   el("g", {id: "field"}, svg);
   const k = scale(), R = 14 / k, small = 6 / k, fs = 11 / k;
   const layer = el("g", {}, svg);
+  // The skin: scenery under everything, then each element as the thing it is (a disc, a tile, a car).
+  const skin = skinOf(cur.name);
+  const shown = drag && lastFrame ? lastFrame.preview : state;
+  if (skin && skin.scenery) skin.scenery(el("g", {class: "scenery"}, layer), {state: shown, positions: drag && lastFrame ? lastFrame.positions : view.positions, k, active: false});
   const showGhosts = $("showGhosts").checked;
   for (const g of view.gestures) {
     if (drag && drag.gesture !== g.name) continue;
@@ -494,10 +503,13 @@ function render() {
       const far = cur.futures.find(f => f.name === g.name).far, c = positions[name];
       el("circle", {cx: c.x, cy: c.y, r: far, fill: "none", stroke: lastFrame.far ? "var(--bad)" : "var(--track)", "stroke-width": 1.5 / k, "stroke-dasharray": `${6 / k} ${5 / k}`}, grp);
     }
-    el("circle", {cx: p.x, cy: p.y, r: R, fill: active ? "var(--acc)" : "var(--panel)", stroke: "var(--acc)", "stroke-width": 2.5 / k, style: "transition:cx .12s ease-out, cy .12s ease-out"}, grp);
-    if (!floating) {
-      const t = el("text", {x: p.x, y: p.y + R + 14 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--ink)"}, grp);
-      t.textContent = name;
+    const skinned = skin && skin.element && skin.element(grp, name, p, {state: shown, positions, k, active: !!active});
+    if (!skinned) {
+      el("circle", {cx: p.x, cy: p.y, r: R, fill: active ? "var(--acc)" : "var(--panel)", stroke: "var(--acc)", "stroke-width": 2.5 / k, style: "transition:cx .12s ease-out, cy .12s ease-out"}, grp);
+      if (!floating) {
+        const t = el("text", {x: p.x, y: p.y + R + 14 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--ink)"}, grp);
+        t.textContent = name;
+      }
     }
     if (g) grp.addEventListener("pointerdown", e => startDrag(e, g));
   }

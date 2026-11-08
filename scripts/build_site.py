@@ -63,6 +63,7 @@ def main() -> None:
     page(web / "index.html", DIST / "index.html")
     page(web / "machine.html", DIST / "machine.html")
     shutil.copy(ROOT / "site" / "nerve-local.js", DIST / "nerve-local.js")
+    shutil.copy(web / "skins.js", DIST / "skins.js")
 
     specs = sorted(p.stem for p in (ROOT / "specs").glob("*.nerve"))
     machines = sorted(p.stem for p in (ROOT / "machines").glob("*.nerve"))

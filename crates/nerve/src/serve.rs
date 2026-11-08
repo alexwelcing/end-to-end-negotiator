@@ -558,6 +558,8 @@ mod http {
 
     const INDEX: &str = include_str!("../web/index.html");
     const MACHINE_PAGE: &str = include_str!("../web/machine.html");
+    /// How each interface draws itself; shared by both pages.
+    const SKINS: &str = include_str!("../web/skins.js");
 
     pub struct ApiError(anyhow::Error);
 
@@ -580,6 +582,7 @@ mod http {
         Router::new()
             .route("/", get(|| async { Html(INDEX) }))
             .route("/machine", get(|| async { Html(MACHINE_PAGE) }))
+            .route("/skins.js", get(|| async { ([(axum::http::header::CONTENT_TYPE, "application/javascript; charset=utf-8")], SKINS) }))
             .route("/api/specs", get(list_specs))
             .route("/api/machines", get(list_machines))
             .route("/api/machine/{name}/view", post(machine_view))

@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The machine room</title>
 <style>
-:root { --bg:#f6f4ef; --card:#fff; --ink:#1c1b19; --mute:#6b6760; --line:#e4e0d8; --acc:#2d5bd1; --ok:#1d8a4b; --bad:#c6362b; --warn:#b7791f; --hold:#7a4fd1; --learn:#8a5bd6; }
-@media (prefers-color-scheme: dark) { :root { --bg:#17171a; --card:#202024; --ink:#ececea; --mute:#a3a09a; --line:#34343a; --acc:#7aa2ff; --ok:#4fc97f; --bad:#ff6b5e; --warn:#e6b35a; --hold:#b79bff; --learn:#b79bff; } }
+:root { --bg:#f6f4ef; --card:#fff; --ink:#1c1b19; --mute:#6b6760; --line:#e4e0d8; --acc:#2d5bd1; --ok:#1d8a4b; --bad:#c6362b; --warn:#b7791f; --hold:#7a4fd1; --learn:#8a5bd6;
+  /* the skins (skins.js) use the lab's names too */
+  --panel:#fff; --mut:#6b6760; --track:#c9cfdc; --ghost:#8da2d8; --f0:#3b6cf6; --f1:#12a17a; --f2:#e8833a; --f3:#9b5cf6; --f4:#e5484d; --f5:#0aa2c0; --f6:#c2a20a; --f7:#d6409f; --f8:#5c7a29; --f9:#7a5c3a; }
+@media (prefers-color-scheme: dark) { :root { --bg:#17171a; --card:#202024; --ink:#ececea; --mute:#a3a09a; --line:#34343a; --acc:#7aa2ff; --ok:#4fc97f; --bad:#ff6b5e; --warn:#e6b35a; --hold:#b79bff; --learn:#b79bff; --panel:#202024; --mut:#a3a09a; --track:#39425a; --ghost:#5d6f9e; } }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
 main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 40px; }
@@ -102,9 +104,11 @@ pre { white-space: pre-wrap; margin: 8px 0 0; }
     </aside>
   </div>
 </main>
+<script src="/skins.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
+const skinOf = name => (window.NERVE_SKINS ? window.NERVE_SKINS.get(name) : null);
 const PAD = 18, TITLE_H = 46, PANEL_GAP = 46, ROW_GAP = 70, LIGHT_R = 5, MAX_ROW = 900, Z = 1.5;
 let machines = [], M = null, state = null, pending = [], detached = [], positions = {}, derived = {};
 let layout = null, running = false, timer = null, busy = false, tick = 0, stats = null, last = null, drag = null, lastFired = new Set();
@@ -167,7 +171,9 @@ function select(name) {
 function computeLayout() {
   const panels = {}; let x = 10, y = 10, rowH = 0, width = 0;
   for (const b of M.blocks) {
-    const ex = b.extent, textLines = b.fields.filter(f => !rendered(b, f.name)).length;
+    const sb = skinOf(b.type)?.bounds;
+    const ex = b.extent && sb ? {x0: Math.min(b.extent.x0, sb.x0), y0: Math.min(b.extent.y0, sb.y0), x1: Math.max(b.extent.x1, sb.x1), y1: Math.max(b.extent.y1, sb.y1)} : b.extent || sb;
+    const textLines = b.fields.filter(f => !rendered(b, f.name)).length;
     const w = (ex ? Math.max(ex.x1 - ex.x0, 40) * Z : 100) + 2 * PAD + 20;
     const h = (ex ? Math.max(ex.y1 - ex.y0, 12) * Z + 2 * PAD : 24) + TITLE_H + 18 * textLines + 12;
     if (x > 10 && x + w > MAX_ROW) { x = 10; y += rowH + ROW_GAP; rowH = 0; }
@@ -333,14 +339,23 @@ function draw() {
     // Fields with no element: as text.
     let ty = p.y + p.h - 10 - 18 * (b.fields.filter(f => !rendered(b, f.name)).length - 1);
     for (const f of b.fields) if (!rendered(b, f.name)) { text(p.x + 12, ty, `${f.name} = ${fmt(state[inst][f.name])}`, "fieldtext mono", svg); ty += 18; }
+    // The block's picture, in its spec's own coordinates: the skin's scenery, then each element.
+    const skin = skinOf(b.type);
+    const bg = el("g", {transform: `translate(${p.ox},${p.oy}) scale(${Z})`}, svg);
+    const sctx = {state: state[inst], positions: pos, k: Z, active: false};
+    if (skin && skin.scenery) skin.scenery(el("g", {}, bg), sctx);
     // Landing spots while this block is grabbed.
-    if (drag && drag.block === inst && drag.candidates) for (const c of drag.candidates) el("circle", {cx: p.ox + c.x * Z, cy: p.oy + c.y * Z, r: 13, class: "el ghost"}, svg);
+    if (drag && drag.block === inst && drag.candidates) for (const c of drag.candidates) el("circle", {cx: c.x, cy: c.y, r: 9, class: "el ghost"}, bg);
     for (const name of b.render) {
       const q = pos[name]; if (!q) continue;
       const g = b.futures.find(f => f.grab === name);
-      const c = el("circle", {cx: p.ox + q.x * Z, cy: p.oy + q.y * Z, r: 13, class: "el" + (g ? " grab" : "") + (drag && drag.block === inst ? " preview" : "")}, svg);
-      text(p.ox + q.x * Z, p.oy + q.y * Z + 4, name.length > 4 ? name.slice(0, 3) : name, "ellabel", svg);
-      if (g && !isHeld) c.onpointerdown = e => startDrag(e, b, g, p);
+      const active = !!(drag && drag.block === inst);
+      const grp = el("g", {class: g ? "el grab" : ""}, bg);
+      if (!(skin && skin.element && skin.element(grp, name, q, {...sctx, active}))) {
+        el("circle", {cx: q.x, cy: q.y, r: 9, class: "el" + (g ? " grab" : "") + (active ? " preview" : "")}, grp);
+        text(q.x, q.y + 3, name.length > 4 ? name.slice(0, 3) : name, "ellabel", grp);
+      }
+      if (g && !isHeld) grp.onpointerdown = e => startDrag(e, b, g, p);
     }
   }
 }
