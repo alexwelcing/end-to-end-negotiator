@@ -52,7 +52,8 @@ enum Cmd {
         #[arg(long, default_value_t = 1.0)]
         lambda: f64,
         /// Directory of trained models (`<dir>/<spec name>/model.json`), as written by `nerve train`.
-        #[arg(long)]
+        /// The committed set lives in `models/served`; a spec with no model there runs on the spec alone.
+        #[arg(long, default_value = "models/served")]
         models: Option<PathBuf>,
         /// Run loaded models on the GPU (needs a `--features cuda` build).
         #[arg(long)]

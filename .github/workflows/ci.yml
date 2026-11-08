@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [nerve, nerve-rs, master]
+  pull_request:
+
+jobs:
+  rust:
+    name: build, test, check every spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (CPU)
+        run: cargo build --release --workspace
+      - name: Tests
+        run: cargo test --release --workspace
+      - name: Every spec passes its own self-check
+        run: |
+          for s in specs/*.nerve; do
+            echo "== $s"; ./target/release/nerve check "$s"
+          done
+      - name: The served models load and answer
+        run: |
+          ./target/release/nerve serve --models models/served --addr 127.0.0.1:8787 &
+          sleep 2
+          curl -sf http://127.0.0.1:8787/api/specs | python3 -c '
+          import json, sys
+          specs = json.load(sys.stdin)
+          served = [s["name"] for s in specs if s["model"]]
+          print(len(specs), "interfaces,", len(served), "with a network:", ", ".join(served))
+          assert served, "no model loaded"'
+          curl -sf -X POST -H "content-type: application/json" http://127.0.0.1:8787/api/hanoi/step \
+            -d '{"state":{"d1":0,"d2":0,"d3":0,"d4":0},"action":"move","params":{"src":0,"dst":2}}' \
+            | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["verdict"], r["network"]); assert r["verdict"]=="agrees"'
+
+  docker:
+    name: lab image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: nerve-lab:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

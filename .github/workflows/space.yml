@@ -1,0 +1,25 @@
+# Mirrors the branch to a Hugging Face Docker Space, which builds the Dockerfile and serves the lab.
+# Set up once: create a Space with the Docker SDK at https://huggingface.co/new-space, then in this repository
+# add the variable HF_SPACE (e.g. AlexWelcing/nerve-lab) and the secret HF_TOKEN (a write-scope token).
+name: deploy lab to hugging face
+
+on:
+  push:
+    branches: [nerve]
+  workflow_dispatch:
+
+jobs:
+  push-to-space:
+    runs-on: ubuntu-latest
+    if: ${{ vars.HF_SPACE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          test -n "$HF_TOKEN" || { echo "HF_TOKEN secret is not set"; exit 1; }
+          git push --force "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" HEAD:main

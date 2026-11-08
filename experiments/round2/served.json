@@ -1,4 +1,11 @@
 {
+  "counter": {
+    "model": "runs\\round2\\counter\\full-s0\\counter",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 260
+  },
   "fifteen": {
     "model": "runs\\round2\\fifteen\\full-s0\\fifteen",
     "seed": 0,
@@ -12,6 +19,13 @@
     "exact": 1.0,
     "violation_rate": 0.0,
     "cells": 729
+  },
+  "insert_remove": {
+    "model": "runs\\round2\\insert_remove\\full-s0\\insert_remove",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 1300
   },
   "kanban": {
     "model": "runs\\round2\\kanban\\full-s0\\kanban",
@@ -48,12 +62,26 @@
     "violation_rate": 0.0,
     "cells": 3960
   },
+  "three_way_switch": {
+    "model": "runs\\round2\\three_way_switch\\full-s0\\three_way_switch",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 24
+  },
   "todo": {
     "model": "runs\\round2\\todo\\full-s0\\todo",
     "seed": 0,
     "exact": 1.0,
     "violation_rate": 0.0,
     "cells": 7680
+  },
+  "toggle": {
+    "model": "runs\\round2\\toggle\\full-s0\\toggle",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 2
   },
   "tracks": {
     "model": "runs\\round2\\tracks\\full-s0\\tracks",

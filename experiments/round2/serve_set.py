@@ -1,11 +1,12 @@
-"""Build the lab's model set from round-2 results: runs/served/<spec>/ for every spec trained on its full spec.
+"""Build the lab's model set from round-2 results: models/served/<spec>/ for every spec trained on its full spec.
 
 usage: python experiments/round2/serve_set.py
 
 For each spec, the full-spec seed with the highest score (spec-assisted exact for finite specs, within-tolerance
-for continuous ones; the lowest seed on ties) is copied unchanged to runs/served/<spec>/. The choice and its
-scores are written to experiments/round2/served.json, which is committed, so the served set is always traceable
-to the run that produced it. Model files are copied, never edited.
+for continuous ones; the lowest seed on ties) is copied unchanged to models/served/<spec>/, which is committed
+(about half a megabyte per network) so that a fresh clone can run the lab without training. The choice and its
+scores are written to experiments/round2/served.json, so the served set is always traceable to the run that
+produced it. Model files are copied, never edited.
 """
 import json
 import shutil
@@ -13,7 +14,7 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent.parent
-SERVED = ROOT / "runs" / "served"
+SERVED = ROOT / "models" / "served"
 
 
 def main() -> None:
