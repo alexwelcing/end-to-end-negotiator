@@ -1,0 +1,39 @@
+\section{Limitations, and what we do not know}
+\label{sec:limits}
+
+\emph{Most of this paper is a plan.} \Cref{sec:standing} is measured; \cref{sec:blocks,sec:arch,sec:runtime} are
+designs; \cref{sec:demos} is predictions. We have built none of the machines. The value of writing the plan as
+a paper is that the next one can be scored against it, and we expect some predictions to fail: round 2's first
+set did.
+
+\emph{Exactness composes only with correct wiring.} \Cref{thm:compose} moves the burden from the networks to
+the wiring and the composed spec, which are code and can be wrong in the ordinary way. The composed oracle
+checks them against properties a person wrote, and a property nobody wrote is not checked. Temporal properties
+are outside the theorem entirely.
+
+\emph{Read coupling does not split.} A machine whose blocks all read each other is one block, and kanban shows
+that such interfaces exist. The head programme of \cref{sec:heads} is a bet that most of them have a symmetry
+that makes the one block small; it is a bet.
+
+\emph{Continuous blocks are not exact, and coupled ones are not close.} $99.6$--$100\%$ within $1\%$ of range
+is what one continuous field gives; three coupled fields gave $10.4\%$ (linked sliders). The snapping rule
+contains the error between hand-offs and does nothing about it inside a block, and a block like linked sliders
+needs either a different inference (one descent per field, or the compiled core of \cref{sec:compiled} for the
+coupling) or to be split into three blocks wired by events, which is the design \cref{sec:couplings}
+recommends anyway.
+
+\emph{The sweep is not finished.} \Cref{tab:round2} and \cref{fig:cost} are generated from a log that is
+still being appended to as this draft is written; the finite rows present are exact, and we make no claim about
+rows that are not yet there. Everything is one GPU, one configuration, and three seeds for the small
+interfaces and one for the two largest.
+
+\emph{Scale comparisons are approximate.} Qwenputer's figures are from its repository's README; qwenGPU's
+repository was not reachable when we checked, and its size is taken from Part I's citation. The comparison is
+of kinds, not of a benchmark.
+
+\emph{What \method still cannot say.} No text, no drawing beyond points, no drag that chains several snaps,
+no snap radius, no list type: Dragology's largest demos (its permutation lab, braids, tableaux) remain out of
+reach, and the full-size fifteen and Sokoban levels wait on the proposer of \cref{sec:futures}.
+
+\emph{One machine, one user, one clock.} Nothing here is about machines that talk to machines, about two
+users in one session (the negotiation game's real setting), or about concurrency.

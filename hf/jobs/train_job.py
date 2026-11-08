@@ -5,7 +5,7 @@
 """Nerve training as a Hugging Face Job (pay-per-second GPU, no persistent Space).
 
     hf jobs uv run --flavor a10g-small --secrets HF_TOKEN \
-        https://raw.githubusercontent.com/alexwelcing/end-to-end-negotiator/nerve/hf/jobs/train_job.py \
+        https://raw.githubusercontent.com/alexwelcing/nerve/nerve/hf/jobs/train_job.py \
         -- --repo AlexWelcing/nerve-runs --run counter/2026-11-05T05-00 --epochs 300 --d 128
 
 Inputs (spec.nerve, episodes.v1.jsonl, config.json) are read from the HF dataset repo at runs/<run>/in/;
@@ -28,7 +28,7 @@ def main() -> int:
     ap.add_argument("--repo", required=True, help="HF dataset repo holding runs/<run>/{in,out}")
     ap.add_argument("--run", required=True)
     ap.add_argument("--branch", default="nerve")
-    ap.add_argument("--git", default="https://github.com/alexwelcing/end-to-end-negotiator.git")
+    ap.add_argument("--git", default="https://github.com/alexwelcing/nerve.git")
     ap.add_argument("--local-src", help="use a local checkout instead of cloning (for testing)")
     ap.add_argument("--no-upload", action="store_true")
     a = ap.parse_args()

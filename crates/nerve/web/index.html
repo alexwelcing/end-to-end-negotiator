@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nerve Drag Lab</title>
+<style>
+:root{
+  --bg:#f6f7fb;--panel:#ffffff;--ink:#141824;--mut:#646b7d;--line:#dfe3ec;--track:#c9cfdc;
+  --acc:#3b6cf6;--learn:#9b5cf6;--ok:#12a17a;--bad:#e5484d;--ghost:#8da2d8;--shadow:0 1px 2px rgba(20,24,36,.06),0 6px 24px rgba(20,24,36,.06);
+  --f0:#3b6cf6;--f1:#12a17a;--f2:#e8833a;--f3:#9b5cf6;--f4:#e5484d;--f5:#0aa2c0;--f6:#c2a20a;--f7:#d6409f;--f8:#5c7a29;--f9:#7a5c3a;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0d12;--panel:#141824;--ink:#e8eaf0;--mut:#8a90a0;--line:#232a3b;--track:#39425a;
+  --acc:#6ea8fe;--learn:#b794f6;--ok:#3ddc97;--bad:#ff6b6b;--ghost:#5d6f9e;--shadow:none;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0d12;--panel:#141824;--ink:#e8eaf0;--mut:#8a90a0;--line:#232a3b;--track:#39425a;
+  --acc:#6ea8fe;--learn:#b794f6;--ok:#3ddc97;--bad:#ff6b6b;--ghost:#5d6f9e;--shadow:none;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,-apple-system,"Segoe UI",Helvetica,sans-serif}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 40px}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+h1{font-size:22px;margin:0;letter-spacing:-.01em}
+.sub{color:var(--mut);margin:4px 0 0;max-width:720px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 16px}
+.tab{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:6px 14px;cursor:pointer;font:inherit}
+.tab[aria-selected="true"]{border-color:var(--acc);color:var(--acc);font-weight:600}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px}
+@media(max-width:900px){.layout{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
+.card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 10px;font-weight:600}
+.stagecard{padding:0;overflow:hidden}
+.stagebar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.stagebar .hint{color:var(--mut);font-size:13px}
+.toggles{display:flex;gap:12px;color:var(--mut);font-size:13px}
+.toggles label{display:flex;gap:5px;align-items:center;cursor:pointer}
+svg#stage{display:block;width:100%;height:420px;touch-action:none;user-select:none}
+.handle{cursor:grab}.dragging .handle{cursor:grabbing}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+.side{display:flex;flex-direction:column;gap:16px}
+.state{display:grid;grid-template-columns:auto 1fr;gap:4px 14px}
+.state b{color:var(--mut);font-weight:500}
+.state span{font-variant-numeric:tabular-nums}
+.state .changed{color:var(--ok);font-weight:600}
+.bars{display:flex;flex-direction:column;gap:5px}
+.bar{display:grid;grid-template-columns:62px 1fr 56px;gap:8px;align-items:center;font-size:12px}
+.bar .lab{color:var(--mut);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .track{height:12px;border-radius:6px;background:var(--line);position:relative;overflow:hidden}
+.bar .g{position:absolute;left:0;top:0;bottom:0;background:var(--acc);opacity:.75}
+.bar .l{position:absolute;top:0;bottom:0;background:var(--learn);opacity:.85}
+.bar.win .lab{color:var(--ink);font-weight:600}.bar.win .track{outline:2px solid var(--ok);outline-offset:1px}
+.bar .num{text-align:right;font-variant-numeric:tabular-nums;color:var(--mut)}
+.legend{display:flex;gap:12px;margin-top:8px;color:var(--mut);font-size:12px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;vertical-align:-1px;margin-right:4px}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--bg);border:1px solid var(--line);color:var(--mut);font-size:12px}
+.pill.far{color:var(--bad);border-color:var(--bad)}.pill.ok{color:var(--ok);border-color:var(--ok)}
+.actions{display:flex;flex-wrap:wrap;gap:6px}
+.actions .row{display:flex;gap:6px;align-items:center}
+button.act{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:6px 11px;font:inherit;cursor:pointer}
+button.act:hover{border-color:var(--acc)}
+select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px;font:inherit}
+.log{max-height:200px;overflow:auto;font-size:12px;color:var(--mut)}
+.log div{padding:4px 0;border-bottom:1px solid var(--line)}
+.log b{color:var(--ink);font-weight:600}
+.spark{width:100%;height:46px;display:block}
+.err{color:var(--bad)}
+footer{color:var(--mut);font-size:12px;margin-top:18px}
+.lede{font-size:16px;font-weight:600;margin:4px 0 0}
+.sub b{color:var(--ink);font-weight:600}
+.story{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:20px;margin-bottom:16px}
+@media(max-width:900px){.story{grid-template-columns:1fr}}
+.story h3{font-size:17px;margin:0 0 2px;letter-spacing:-.01em}
+.story .meta{color:var(--mut);font-size:12px;margin-bottom:8px}
+.story p{margin:0}
+.story ol{margin:0;padding-left:20px}
+.story li{margin:4px 0}
+.story h4{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 6px;font-weight:600}
+code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.92em;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:0 4px}
+.note{color:var(--mut);font-size:12.5px;margin:-4px 0 10px}
+.big{font-size:28px;font-weight:700;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums}
+.netfacts{color:var(--mut);font-size:12.5px;margin-top:6px}
+.verdict{margin-top:10px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);border-left-width:4px}
+.verdict .head{font-weight:600}
+.verdict .icon{display:inline-block;width:1.2em;font-weight:700}
+.verdict.ok{border-color:var(--ok)}.verdict.ok .icon{color:var(--ok)}
+.verdict.bad{border-color:var(--bad)}.verdict.bad .icon{color:var(--bad)}
+.verdict.learn{border-color:var(--learn)}.verdict.learn .icon{color:var(--learn)}
+.verdict small{display:block;color:var(--mut);margin-top:3px;font-size:12px}
+.cmp{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin-top:8px;font-size:12.5px}
+.cmp b{color:var(--mut);font-weight:500}
+.stagecol{min-width:0}
+details.specsrc{margin-top:16px}
+details.specsrc summary{cursor:pointer;font-weight:600}
+details.specsrc summary span{color:var(--mut);font-weight:400}
+details.specsrc pre{margin:10px 0 0;max-height:380px;overflow:auto;font-size:12px;line-height:1.45;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;white-space:pre}
+input.num{width:86px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px;font:inherit}
+.param{display:flex;gap:4px;align-items:center;color:var(--mut);font-size:12px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Nerve Drag Lab</h1>
+      <p class="lede">Interfaces that are neural networks, not code.</p>
+      <p class="sub">Each tab is a small interface with no code behind it. A spec says what is allowed, and a network trained from that spec runs it.
+        <b>Click an action</b> and the network computes the next state while the spec checks its answer.
+        <b>Drag a handle</b> and the states the spec allows compete to land under your pointer.</p>
+    </div>
+    <span class="pill" id="who">loading…</span>
+  </header>
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+  <section class="card story" id="story" aria-live="polite">
+    <div><h3 id="storyTitle"></h3><div class="meta" id="storyMeta"></div><p id="storyWhat"></p></div>
+    <div><h4>Try this</h4><ol id="storyTry"></ol></div>
+  </section>
+  <div class="layout">
+    <div class="stagecol">
+      <section class="card stagecard">
+        <div class="stagebar">
+          <span class="hint" id="hint">Drag a handle.</span>
+          <div class="toggles">
+            <label title="Shade each pointer position by where a drag would land"><input type="checkbox" id="showField" checked> regions</label>
+            <label title="Mark every state the spec lets this drag reach"><input type="checkbox" id="showGhosts" checked> landing spots</label>
+          </div>
+        </div>
+        <svg id="stage" role="img" aria-label="Draggable interface"></svg>
+      </section>
+      <details class="card specsrc" id="specCard">
+        <summary>The spec <span id="specLines"></span></summary>
+        <pre class="mono" id="specSrc"></pre>
+      </details>
+    </div>
+    <aside class="side">
+      <div class="card"><h2>The network</h2><div id="net"></div></div>
+      <div class="card"><h2>State</h2><div class="state mono" id="state"></div><div style="margin-top:8px" id="status"></div></div>
+      <div class="card"><h2>Run the network</h2><p class="note">Click an action. The trained network computes the next state, and the spec checks its answer.</p><div class="actions" id="actions"></div><div id="click"></div></div>
+      <div class="card"><h2>Where this drag can land</h2><p class="note">During a drag, each row is a state the spec allows from here. The shortest bar wins: blue is the distance to your pointer, purple is how surprised the network is.</p><div class="bars" id="bars"><span class="sub">Start a drag to see every landing spot scored.</span></div>
+        <div class="legend"><span><i class="sw" style="background:var(--acc)"></i>distance (px)</span><span><i class="sw" style="background:var(--learn)"></i>network</span><span><i class="sw" style="outline:2px solid var(--ok)"></i>wins</span></div>
+        <svg class="spark" id="spark" viewBox="0 0 300 46" preserveAspectRatio="none" aria-label="distance over the drag"></svg>
+      </div>
+      <div class="card"><h2>History</h2><div class="log mono" id="log"></div></div>
+    </aside>
+  </div>
+  <footer id="foot"></footer>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const PAL = Array.from({length:10}, (_, i) => `var(--f${i})`);
+let specs = [], cur = null, state = null, view = null, drag = null, fieldCache = null, lastFrame = null;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (j && j.error) throw new Error(j.error);
+  return j;
+}
+const el = (tag, attrs = {}, parent) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); if (parent) parent.append(n); return n; };
+const fmt = v => typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : String(v);
+const key = v => JSON.stringify(v);
+
+/** What each interface is here to show, and the clicks and drags that show it. */
+const STORIES = {
+  toggle: {
+    title: "Toggle: the smallest program",
+    what: "One switch, two states, one action. The network has to learn that <code>flip</code> always changes the state, and the drag has to decide when you have pulled far enough to flip it.",
+    tryit: [
+      "Click <b>flip</b>: the network computes the new state, and the spec checks it.",
+      "Drag the knob part of the way and let go: it only commits to <i>on</i> past the midpoint (<code>between</code>).",
+    ],
+  },
+  counter: {
+    title: "Counter: a rule the spec can only show",
+    what: "A 0–9 counter that only counts while it is armed. Its <code>nudge</code> action has no rule at all: the spec gives five examples and says the count must stay in range. The network learned the rest.",
+    tryit: [
+      "Drag the dial to 3, then click <b>nudge</b>: no example covers 3, yet the network answers 3 → 5 without breaking a rule.",
+      "Click <b>arm</b> to disarm the counter, then <b>inc</b>: nothing happens, because the spec only lets <code>inc</code> count while armed.",
+      "Drag the dial slowly: it snaps to the nearest count and keeps its choice for 4 px (<code>stickiness</code>).",
+    ],
+  },
+  slider: {
+    title: "Slider: a gesture that needs permission",
+    what: "A handle on a 0–240 track in steps of 10. The spec only lets <code>move</code> work while the handle is grabbed, and dragging goes through <code>move</code>, so the drag obeys that rule too.",
+    tryit: [
+      "Drag the handle now: it stays put, because it is not grabbed.",
+      "Click <b>grab</b>, then drag: the handle follows your pointer and snaps to the 10-step grid (<code>vary</code>).",
+      "Click <b>step_right</b> a few times: the network keeps the value on the grid and inside the track.",
+    ],
+  },
+  slider_continuous: {
+    title: "Continuous slider: no list of answers",
+    what: "The same slider with no grid. The value is a real number, so the network cannot score a list of possible next states. It finds its answer by gradient descent on its own energy, and the spec checks it to within 1% of the range.",
+    tryit: [
+      "Click <b>grab</b>, type 137.2 into <code>to</code> and click <b>move</b>: compare the network's value with the spec's.",
+      "Drag the handle while grabbed: the drop follows your pointer (<code>vary</code>).",
+    ],
+  },
+  negotiate: {
+    title: "Negotiate: Deal or No Deal as a game",
+    what: "Two sides split 2 books and 2 hats. A proposal says what the proposer keeps, the sides take turns, and after three proposals only <code>accept</code> or <code>walk</code> are left. It is the task from FAIR's 2017 negotiation paper, written as a finite interface.",
+    tryit: [
+      "Drag <b>books</b> to 2: that is a proposal, so the turn passes to b and the round count goes up.",
+      "Pull a handle well away from its track: past 70 px the drag gives up and keeps the current state (<code>far</code>).",
+      "Make three proposals, then try another drag: the spec allows no more.",
+    ],
+  },
+  reorder: {
+    title: "Reorder: Dragology's permutation demo",
+    what: "Five items in a row, 120 possible orders. Dragology's <code>perm</code> demo lists a drag's landing spots by hand, <code>moveItem(items, i, j)</code> for every <code>j</code>. Here they come from the spec's <code>move</code> rule, and a network trained from that rule runs the list. Moving one item shifts every item between its old and new place, a rule about order rather than about counting.",
+    tryit: [
+      "Drag <b>a</b> to the far right: it rides your pointer (<code>floating</code>) while the other four slide left to make room.",
+      "Click <b>move</b> with item=e, to=0: the network reorders the whole row, and the spec checks every position.",
+      "Drag an item back and forth across a neighbour: it keeps its slot for 6 px before switching (<code>stickiness</code>).",
+    ],
+  },
+  hanoi: {
+    title: "Hanoi: rules written, solver learned",
+    what: "Four disks on three pegs. The spec writes the rules (only a top disk moves, never onto a smaller one), so a drag only offers legal drops. It does not write how to solve the puzzle: <code>hint</code> is the best next move toward peg 2, given only by example, one per position. The network learned the solver from those examples; no rule in the spec describes it.",
+    tryit: [
+      "Drag the smallest disk to another peg, then try the largest: it has nowhere to go until it is on top.",
+      "Click <b>hint</b> again and again: the network plays the puzzle toward peg 2 in the fewest moves, and the spec checks every move is legal.",
+      "Click <b>move</b> with src=0, dst=1 when peg 1 holds a smaller disk: the spec refuses, and so does the network.",
+    ],
+  },
+  kanban: {
+    title: "Kanban: a board, not a list",
+    what: "Four cards in three columns. Dragging a card lifts it out of its column and drops it into any place in any column; the cards below close the gap or make room. Of the 20,736 ways to put four cards in twelve slots, only 360 are boards, and the network answers only with those.",
+    tryit: [
+      "Drag card <b>a</b> into the middle of another column: the cards below it move down to make room.",
+      "Drag a card far below the last card of a column: it lands right under that card, because a column has no gaps.",
+      "Click <b>move_d</b> with to=0: d jumps to the top of the first column, and the spec checks every card.",
+    ],
+  },
+  fifteen: {
+    title: "Fifteen: slide into the blank",
+    what: "Dragology's sliding puzzle on a 3 × 2 board: tiles 1–5 and a blank. A tile can only trade places with the blank, and only when they are side by side. Of the 7,776 ways to place the pieces, 720 are boards, and only half of those can be reached from any one board, as in the real puzzle.",
+    tryit: [
+      "Drag a tile next to the blank into it: they trade places.",
+      "Drag a tile that is not next to the blank: it has nowhere to go.",
+      "Drag the blank itself onto a neighbour, which Dragology allows too. Four slides solve the starting board.",
+    ],
+  },
+  rush_hour: {
+    title: "Rush hour: slide until something is in the way",
+    what: "Six cars on a 5 × 5 board, each sliding along its own row or column. A car may stop anywhere it can reach without passing through another car, and the red car alone can drive off the right edge. The spec writes the blocking rule once, so every drag offers exactly the stops that are open.",
+    tryit: [
+      "Drag the red car right: car <b>b</b> stands across its row, so it cannot move yet.",
+      "Free it in four drags: <b>d</b> left, <b>b</b> down, <b>c</b> up, then <b>red</b> off the right edge.",
+      "Drag a car through another one: the drop stops short of it, because the spec forbids passing through.",
+    ],
+  },
+  sokoban: {
+    title: "Sokoban: pushing, not carrying",
+    what: "The top of Dragology's level: the player and two boxes in a small walled room. Drag the player one cell; a box in the way is pushed one cell further, but only onto empty floor. The rule involves three objects at once, the player, the box ahead and the cell beyond it.",
+    tryit: [
+      "Drag the <b>player</b> right into box 1: the box moves one cell ahead of it.",
+      "Try to push a box into a wall or into the other box: the drag stays put.",
+      "Both boxes reach the goals (cells 5 and 14) in twelve drags.",
+    ],
+  },
+  insert_remove: {
+    title: "Insert and remove: a list that grows and shrinks",
+    what: "Fruit tiles in a list above a toolbar. Drag a tile to any place in the list (the others make room) or onto its toolbar slot to remove it; pull it back out to insert it again. The list holds two to four tiles, so its length is part of the state.",
+    tryit: [
+      "Drag <b>d</b> (grapes) from the toolbar into the middle of the list.",
+      "Drag a list tile onto its toolbar slot: it leaves, and the tiles after it close up.",
+      "Pull a tile far from every place it could go: past 50 px the drag gives up (<code>far</code>).",
+    ],
+  },
+  todo: {
+    title: "Todo: reorder and complete",
+    what: "Four cards: drag one to reorder the list, tick its box to complete it (a completed card sits 50 px to the right). Two independent rules, a reorder and a toggle, in one 384-state interface. Text is not part of the spec yet, so cards cannot be added or edited.",
+    tryit: [
+      "Drag card <b>a</b> below <b>c</b>: the cards in between move up.",
+      "Click <b>toggle_c</b>: c is completed, and nothing else changes.",
+      "Drag the completed card <b>b</b> to the top: it keeps its tick.",
+    ],
+  },
+  scheduler: {
+    title: "Scheduler: meetings on a timeline",
+    what: "Three meetings in two rooms on a three-slot timeline. Drag a bar to change a meeting's room; drag a dot to move one end, never off the timeline and never shorter than one slot. As in Dragology, two meetings may overlap; Dragology only colours a double booking red.",
+    tryit: [
+      "Drag meeting 0's right dot to the end of the timeline.",
+      "Drag a left dot past its right dot: it stops one slot short.",
+      "Drag <b>bar2</b> into room 0, where meeting 0 overlaps it: the spec allows the double booking, as Dragology does.",
+    ],
+  },
+  three_way_switch: {
+    title: "Three-way switch: between three places",
+    what: "A knob with three resting places, red at the top and green and blue below. Dragging blends between the places the knob may reach and lets go at the nearest. Turn on clockwise-only and the spec allows just the next place clockwise, so the drag only offers that one.",
+    tryit: [
+      "Drag the knob toward the bottom right and let go: it rests at b.",
+      "Click <b>toggle_clockwise_only</b>, then drag from r toward g: it refuses, because clockwise from r is b.",
+    ],
+  },
+  linked_sliders: {
+    title: "Linked sliders: values that push each other",
+    what: "Three sliders on tracks. Dragging one moves it and every slider below it by the same amount, and the group stops as soon as any of them reaches the end of its track. The values are continuous, so the network finds its answer by gradient descent over three numbers at once.",
+    tryit: [
+      "Drag slider 1 right: sliders 2 and 3 move with it.",
+      "Keep going: everything stops when slider 3 reaches the end of its track.",
+      "Drag slider 3 alone: the sliders above it do not move.",
+    ],
+  },
+  tracks: {
+    title: "Tracks: the drag asks the spec",
+    what: "A block on three rails. The drag spec only says <i>pick the closest rail, then slide along it</i>. How long each rail is, and which rails you can reach, both come from the <code>move</code> rule, so the drag finds out by asking the spec.",
+    tryit: [
+      "From the top rail, drag toward the bottom rail: the block stops on the middle one, because a move changes track by at most one.",
+      "Slide along the middle rail past its end: the block stops at 180, where the rule clamps it.",
+      "Let go on the middle rail and drag again: now all three rails are offered.",
+    ],
+  },
+};
+
+const pct = x => `${+(x * 100).toFixed(1)}%`;
+const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
+
+async function init() {
+  specs = (await api("/api/specs")).filter(s => s.futures.length);
+  const nets = specs.filter(s => s.model);
+  $("who").textContent = `${plural(specs.length, "interface")} · ${plural(nets.length, "trained network")}`;
+  const onGpu = nets.length && nets.every(s => s.model.trained && s.model.trained.trained_on === "cuda");
+  const runs = nets.length ? ` and running here on the ${nets[0].model.device === "cuda" ? "GPU" : "CPU"}` : "";
+  $("foot").textContent = `${nets.length ? `Networks trained ${onGpu ? "on the local GPU (CUDA)" : "locally"}${runs}` : "No trained networks loaded (pass --models)"} · Rust + candle · spec, oracle and drag semantics match the Python reference`;
+  const tabs = $("tabs");
+  for (const s of specs) {
+    const b = document.createElement("button");
+    b.className = "tab"; b.role = "tab"; b.textContent = s.name;
+    b.onclick = () => select(s.name);
+    tabs.append(b);
+  }
+  $("showField").onchange = () => drawField();
+  $("showGhosts").onchange = () => render();
+  select(specs[0].name);
+}
+
+function renderStory() {
+  const st = STORIES[cur.name] || {title: cur.name, what: "", tryit: ["Drag a handle.", "Click an action."]};
+  $("storyTitle").textContent = st.title;
+  const lines = cur.source.trimEnd().split("\n").length;
+  const holes = cur.holes.map(h => `<code>${h.action}</code> learned from ${plural(h.examples, "example")}`);
+  $("storyMeta").innerHTML = [cur.finite ? plural(cur.valid_states ?? cur.states, "valid state") : "continuous state", plural(cur.actions.length, "action"), `a ${lines}-line spec`, ...holes].join(" · ");
+  $("storyWhat").innerHTML = st.what;
+  $("storyTry").innerHTML = st.tryit.map(t => `<li>${t}</li>`).join("");
+}
+
+function renderSpec() {
+  const lines = cur.source.trimEnd().split("\n").length;
+  $("specLines").textContent = `— all ${lines} lines. Nothing else describes how ${cur.name} behaves.`;
+  $("specSrc").textContent = cur.source;
+}
+
+/** The network's own record: how it was trained and how it scored on transitions it never saw. */
+function renderNetwork() {
+  const m = cur.model, box = $("net");
+  if (!m) { box.innerHTML = '<p class="note" style="margin:0">No trained network is loaded for this interface, so clicks use the spec directly.</p>'; return; }
+  const t = m.trained || {}, all = t.all || {}, held = t.heldout || {};
+  let big = "", caption = "";
+  if (t.continuous) {
+    big = pct(all.exact); caption = `of ${plural(all.n, "random transition")} land within ${pct(all.tol)} of the right value`;
+  } else if (held.n && held.n < all.n) {
+    big = `${Math.round(held.exact * held.n)}/${held.n}`; caption = `transitions it never saw in training, right (${pct(t.holdout)} held out)`;
+  } else if (all.n) {
+    big = `${Math.round(all.exact * all.n)}/${all.n}`;
+    caption = t.holdout ? "transitions right (the spec is small enough to train on all of them)" : "transitions right, trained on the whole spec";
+  }
+  const viol = all.violation_rate === 0 ? "No rule broken on any of them." : all.violation_rate !== undefined ? `${pct(all.violation_rate)} break a rule.` : "";
+  const he = t.hole_examples;
+  const holes = he && he.n ? ` ${Math.round(he.exact * he.n)}/${he.n} learn-hole examples right.` : "";
+  const where = t.trained_on === "cuda" ? "the local GPU" : t.trained_on ? "the CPU" : "this machine";
+  box.innerHTML = `${big ? `<div class="big">${big}</div><div>${caption}</div>` : ""}
+    <div class="netfacts">${viol}${holes}<br>${m.params.toLocaleString()} parameters · trained on ${where}${t.epochs ? `, ${t.epochs} epochs` : ""} · running on the ${m.device === "cuda" ? "GPU" : "CPU"}</div>`;
+}
+
+async function select(name) {
+  cur = specs.find(s => s.name === name);
+  for (const t of $("tabs").children) t.setAttribute("aria-selected", t.textContent === name);
+  state = structuredClone(cur.initial); drag = null; lastFrame = null; fieldCache = null;
+  $("log").innerHTML = ""; $("click").innerHTML = ""; $("status").innerHTML = "";
+  $("bars").innerHTML = '<span class="sub">Start a drag to see every landing spot scored.</span>'; $("spark").innerHTML = "";
+  const grabs = [...new Set(cur.futures.map(f => f.grab))];
+  $("hint").textContent = grabs.length > 2 ? `Drag any of ${grabs.join(", ")}.` : `Drag the ${grabs.join(" or ")} handle.`;
+  renderStory(); renderNetwork(); renderSpec();
+  buildActions();
+  await refresh();
+}
+
+/** Geometry for the current state: element positions plus each gesture's futures. */
+async function refresh(changed = []) {
+  const v = await api(`/api/${cur.name}/view`, {state});
+  const gestures = [];
+  for (const f of cur.futures) {
+    const g = await api(`/api/${cur.name}/drag`, {gesture: f.name, state, preview: true});
+    gestures.push({...f, ...g});
+  }
+  const pts = [];
+  for (const p of Object.values(v.positions)) pts.push([p.x, p.y]);
+  for (const g of gestures) {
+    for (const c of g.candidates) pts.push([c.x, c.y]);
+    if (g.track) pts.push([g.track.from.x, g.track.from.y], [g.track.to.x, g.track.to.y]);
+    for (const t of g.tracks || []) pts.push([t.from.x, t.from.y], [t.to.x, t.to.y]);
+  }
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  let [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const w = Math.max(x1 - x0, 60), h = Math.max(y1 - y0, 0);
+  const padX = w * 0.18 + 30, padY = Math.max(h * 0.25, 45);
+  const prev = view && view.spec === cur.name ? view.fixed : null;
+  view = {spec: cur.name, positions: v.positions, gestures, box: fitStage([x0 - padX, y0 - padY, w + 2 * padX, h + 2 * padY])};
+  view.fixed = prev && inside(prev, view.box) ? prev : view.box;
+  renderState(changed);
+  render();
+  drawField();
+}
+const inside = (a, b) => b[0] >= a[0] && b[1] >= a[1] && b[0] + b[2] <= a[0] + a[2] && b[1] + b[3] <= a[1] + a[3];
+/** Grow a box around its centre so it has the stage's aspect ratio (the field then fills the stage). */
+function fitStage([x, y, w, h]) {
+  const r = $("stage").getBoundingClientRect(), aspect = r.height / Math.max(r.width, 1);
+  if (h / w < aspect) { const nh = w * aspect; return [x, y - (nh - h) / 2, w, nh]; }
+  const nw = h / aspect; return [x - (nw - w) / 2, y, nw, h];
+}
+const cssColor = (() => { const cache = {}; return v => cache[v] || (cache[v] = getComputedStyle(document.documentElement).getPropertyValue(v.slice(4, -1)).trim()); })();
+function hexRgb(c) { const m = c.match(/^#([0-9a-f]{6})$/i); if (!m) return [128, 128, 128]; const n = parseInt(m[1], 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+
+function renderState(changed = []) {
+  const box = $("state"); box.innerHTML = "";
+  for (const f of cur.fields) {
+    const b = document.createElement("b"); b.textContent = f.name;
+    const s = document.createElement("span"); s.textContent = fmt(state[f.name]);
+    if (changed.includes(f.name)) s.className = "changed";
+    box.append(b, s);
+  }
+}
+
+function scale() { const r = $("stage").getBoundingClientRect(); return Math.min(r.width / view.fixed[2], r.height / view.fixed[3]); }
+
+function render() {
+  const svg = $("stage"); svg.innerHTML = "";
+  svg.setAttribute("viewBox", view.fixed.join(" "));
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  el("g", {id: "field"}, svg);
+  const k = scale(), R = 14 / k, small = 6 / k, fs = 11 / k;
+  const layer = el("g", {}, svg);
+  const showGhosts = $("showGhosts").checked;
+  for (const g of view.gestures) {
+    if (drag && drag.gesture !== g.name) continue;
+    if (g.track) el("line", {x1: g.track.from.x, y1: g.track.from.y, x2: g.track.to.x, y2: g.track.to.y, stroke: "var(--track)", "stroke-width": 4 / k, "stroke-linecap": "round"}, layer);
+    // `each`: one rail per branch the oracle can reach, as long as the spec lets it be.
+    for (const t of g.tracks || []) el("line", {x1: t.from.x, y1: t.from.y, x2: t.to.x, y2: t.to.y, stroke: "var(--track)", "stroke-width": 4 / k, "stroke-linecap": "round"}, layer);
+    const cs = [...g.candidates].sort((a, b) => a.x - b.x || a.y - b.y);
+    if (cs.length > 1 && !(g.tracks || []).length) el("polyline", {points: cs.map(c => `${c.x},${c.y}`).join(" "), fill: "none", stroke: "var(--track)", "stroke-width": 2 / k, "stroke-dasharray": `${4 / k} ${4 / k}`}, layer);
+    if (!showGhosts) continue;
+    const scores = drag && drag.gesture === g.name && lastFrame ? lastFrame.scores : null;
+    const probs = scores ? softmin(scores.map(s => s.total)) : null;
+    g.candidates.forEach((c, i) => {
+      const si = scores ? scores.findIndex(s => key(s.value) === key(c.value)) : -1;
+      const p = si >= 0 ? probs[si] : 0;
+      // A branch's ghost sits where its own minimisation put the element this frame.
+      const at = si >= 0 ? {x: scores[si].x, y: scores[si].y} : c;
+      const win = lastFrame && drag && key(lastFrame.branch) === key(c.value);
+      const color = PAL[i % PAL.length];
+      el("circle", {cx: at.x, cy: at.y, r: small + p * R * 0.9, fill: color, "fill-opacity": scores ? 0.18 + 0.6 * p : 0.22, stroke: color, "stroke-width": (win ? 2.5 : 1) / k}, layer);
+      const t = el("text", {x: at.x, y: at.y - R - 4 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--mut)", class: "mono"}, layer);
+      t.textContent = fmt(c.value);
+    });
+  }
+  // `between`: Dragology interpolates the scene; draw the interpolated element.
+  if (drag && lastFrame && lastFrame.weights.length) {
+    const g = view.gestures.find(x => x.name === drag.gesture);
+    let bx = 0, by = 0;
+    for (const w of lastFrame.weights) { const c = g.candidates.find(c => key(c.value) === key(w.value)); bx += w.w * c.x; by += w.w * c.y; }
+    el("circle", {cx: bx, cy: by, r: R * 0.8, fill: "none", stroke: "var(--learn)", "stroke-width": 2 / k, "stroke-dasharray": `${3 / k} ${3 / k}`}, layer);
+  }
+  const positions = drag && lastFrame ? lastFrame.positions : view.positions;
+  for (const name of cur.render) {
+    const g = view.gestures.find(x => x.grab === name);
+    const active = drag && g && drag.gesture === g.name;
+    // Dragology `withFloating`: the element rides the pointer; an outline marks where it drops.
+    const floating = active && g.floating && drag.pointer && lastFrame;
+    if (floating) {
+      const d = positions[name];
+      el("circle", {cx: d.x, cy: d.y, r: R, fill: "none", stroke: lastFrame.far ? "var(--bad)" : "var(--acc)", "stroke-width": 1.5 / k, "stroke-dasharray": `${4 / k} ${3 / k}`}, layer);
+      const t = el("text", {x: d.x, y: d.y + R + 14 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--mut)"}, layer);
+      t.textContent = lastFrame.far ? "stays" : "drops here";
+    }
+    const p = floating ? drag.pointer : positions[name]; if (!p) continue;
+    const grp = el("g", {class: g ? "handle" : "", "data-el": name}, layer);
+    if (active && lastFrame && cur.futures.find(f => f.name === g.name).far) {
+      const far = cur.futures.find(f => f.name === g.name).far, c = positions[name];
+      el("circle", {cx: c.x, cy: c.y, r: far, fill: "none", stroke: lastFrame.far ? "var(--bad)" : "var(--track)", "stroke-width": 1.5 / k, "stroke-dasharray": `${6 / k} ${5 / k}`}, grp);
+    }
+    el("circle", {cx: p.x, cy: p.y, r: R, fill: active ? "var(--acc)" : "var(--panel)", stroke: "var(--acc)", "stroke-width": 2.5 / k, style: "transition:cx .12s ease-out, cy .12s ease-out"}, grp);
+    if (!floating) {
+      const t = el("text", {x: p.x, y: p.y + R + 14 / k, "text-anchor": "middle", "font-size": fs, fill: "var(--ink)"}, grp);
+      t.textContent = name;
+    }
+    if (g) grp.addEventListener("pointerdown", e => startDrag(e, g));
+  }
+  const g0 = drag && view.gestures.find(x => x.name === drag.gesture);
+  if (drag && drag.pointer && lastFrame && !g0.floating) {
+    const p = drag.pointer, g = view.gestures.find(x => x.name === drag.gesture), q = lastFrame.positions[g.grab];
+    el("line", {x1: p.x, y1: p.y, x2: q.x, y2: q.y, stroke: lastFrame.far ? "var(--bad)" : "var(--acc)", "stroke-width": 1.5 / k, "stroke-dasharray": `${3 / k} ${3 / k}`}, layer);
+    el("circle", {cx: p.x, cy: p.y, r: R * 0.75, fill: "var(--acc)", "fill-opacity": 0.25, stroke: "var(--acc)", "stroke-width": 1 / k}, layer);
+  }
+  drawField(true);
+}
+
+function softmin(xs) { const m = Math.min(...xs), T = 12; const e = xs.map(x => Math.exp(-(x - m) / T)); const z = e.reduce((a, b) => a + b, 0); return e.map(x => x / z); }
+
+async function drawField(cached = false) {
+  const layer = document.getElementById("field"); if (!layer) return;
+  layer.innerHTML = "";
+  if (!$("showField").checked) return;
+  const g = drag ? view.gestures.find(x => x.name === drag.gesture) : view.gestures[0];
+  if (!g) return;
+  const [x0, y0, w, h] = view.fixed;
+  const ck = key([cur.name, g.name, state, view.fixed]);
+  if (!fieldCache || fieldCache.k !== ck) {
+    if (cached) return;
+    const nx = 96, ny = Math.max(8, Math.min(96, Math.round(96 * h / w)));
+    const r = await api(`/api/${cur.name}/field`, {gesture: g.name, state, x0, x1: x0 + w, y0, y1: y0 + h, nx, ny});
+    fieldCache = {k: ck, r, g: g.name, url: null};
+  }
+  if (!fieldCache.url) {
+    // One pixel per cell; the browser's bilinear scaling softens the region borders.
+    const {nx, ny, grid, values} = fieldCache.r;
+    const order = view.gestures.find(x => x.name === fieldCache.g).candidates.map(c => key(c.value));
+    const cv = document.createElement("canvas"); cv.width = nx; cv.height = ny;
+    const ctx = cv.getContext("2d"), img = ctx.createImageData(nx, ny);
+    for (let c = 0; c < nx * ny; c++) {
+      const [idx] = grid[c];
+      const ci = idx < 0 ? -1 : order.indexOf(key(values[idx]));
+      const [r, g2, b] = hexRgb(cssColor(ci < 0 ? "var(--bad)" : PAL[ci % PAL.length]));
+      img.data.set([r, g2, b, ci < 0 ? 30 : 58], c * 4);
+    }
+    ctx.putImageData(img, 0, 0);
+    fieldCache.url = cv.toDataURL();
+  }
+  el("image", {href: fieldCache.url, x: x0, y: y0, width: w, height: h, preserveAspectRatio: "none"}, layer);
+}
+
+function toLocal(e) { const svg = $("stage"); const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const p = pt.matrixTransform(svg.getScreenCTM().inverse()); return {x: p.x, y: p.y}; }
+
+async function startDrag(e, g) {
+  e.preventDefault();
+  const svg = $("stage");
+  svg.setPointerCapture(e.pointerId);
+  document.body.classList.add("dragging");
+  const s = await api(`/api/${cur.name}/drag`, {gesture: g.name, state});
+  drag = {gesture: g.name, sid: s.session, pointer: toLocal(e), busy: false, pending: null};
+  $("hint").textContent = `${g.name}: ${g.kind} over ${g.field}${g.each ? `, each ${g.each.kind} over ${g.each.field}` : ""}${g.stickiness ? ` · stickiness ${g.stickiness}px` : ""}${g.far ? ` · far ${g.far}px` : ""}${g.floating ? " · floating" : ""}`;
+  await sendFrame(drag.pointer);
+  svg.onpointermove = ev => { if (!drag) return; drag.pointer = toLocal(ev); queueFrame(drag.pointer); };
+  svg.onpointerup = svg.onpointercancel = ev => endDrag(toLocal(ev));
+}
+function queueFrame(p) { if (drag.busy) { drag.pending = p; return; } sendFrame(p); }
+async function sendFrame(p) {
+  // The drag can end (release, tab switch) while a frame is in flight: answer only the drag that asked.
+  const d = drag; if (!d) return;
+  d.busy = true;
+  try {
+    const fr = await api(`/api/drag/${d.sid}/frame`, p);
+    if (drag === d) { lastFrame = fr; showFrame(); render(); }
+  } catch (err) { if (drag === d) $("hint").innerHTML = `<span class="err">${err.message}</span>`; }
+  d.busy = false;
+  if (drag === d && d.pending) { const q = d.pending; d.pending = null; sendFrame(q); }
+}
+
+function showFrame() {
+  const f = lastFrame, bars = $("bars"); bars.innerHTML = "";
+  const max = Math.max(...f.scores.map(s => s.gap + Math.max(0, s.learned)), 1);
+  const hasLearned = f.scores.some(s => s.learned !== 0);
+  for (const s of [...f.scores].sort((a, b) => a.total - b.total).slice(0, 10)) {
+    const d = document.createElement("div");
+    d.className = "bar" + (key(s.value) === key(f.branch) ? " win" : "");
+    const gw = 100 * s.gap / max, lw = 100 * Math.max(0, s.learned) / max;
+    d.innerHTML = `<span class="lab mono">${fmt(s.value)}</span><span class="track"><i class="g" style="width:${gw}%"></i><i class="l" style="left:${gw}%;width:${lw}%"></i></span><span class="num mono">${s.total.toFixed(1)}${hasLearned ? "" : "px"}</span>`;
+    bars.append(d);
+  }
+  $("status").innerHTML = `<span class="pill ${f.far ? "far" : "ok"}">${f.far ? "far: falls back to start" : "branch " + fmt(f.branch)}</span> <span class="pill">frame ${f.frames}</span> <span class="pill">gap ${f.gap.toFixed(1)}</span>`;
+  const sp = $("spark"); sp.innerHTML = "";
+  const pg = f.path_gap, m = Math.max(...pg, 1);
+  el("polyline", {points: pg.map((v, i) => `${(300 * i) / Math.max(pg.length - 1, 1)},${44 - 40 * v / m}`).join(" "), fill: "none", stroke: "var(--acc)", "stroke-width": 1.5, "vector-effect": "non-scaling-stroke"}, sp);
+  const st = $("state"); st.innerHTML = "";
+  for (const fl of cur.fields) {
+    const b = document.createElement("b"); b.textContent = fl.name;
+    const s = document.createElement("span"); s.textContent = fmt(f.preview[fl.name]);
+    if (key(f.preview[fl.name]) !== key(state[fl.name])) s.className = "changed";
+    st.append(b, s);
+  }
+}
+
+async function endDrag(p) {
+  if (!drag) return;
+  const d = drag; drag = null;
+  document.body.classList.remove("dragging");
+  const svg = $("stage"); svg.onpointermove = svg.onpointerup = svg.onpointercancel = null;
+  const spec = cur;
+  try {
+    const r = await api(`/api/drag/${d.sid}/release`, p);
+    if (cur !== spec) return; // switched tabs while releasing: this state belongs to the other interface
+    const before = state; state = r.state; lastFrame = null;
+    const line = document.createElement("div");
+    const delta = r.changed.length ? r.changed.map(k => `${k} ${fmt(before[k])}→${fmt(state[k])}`).join(", ") : "no change";
+    line.innerHTML = `<b>${d.gesture}</b> ${delta} · ${r.frames} frames · ${r.violations.length ? `<span class="err">${r.violations.join("; ")}</span>` : "0 violations"}`;
+    $("log").prepend(line);
+    $("hint").textContent = "Committed. Drag again, or click an action.";
+    fieldCache = null;
+    await refresh(r.changed);
+  } catch (err) { if (cur === spec) { $("hint").innerHTML = `<span class="err">${err.message}</span>`; await refresh(); } }
+}
+
+/** Which fields differ between two states, as `field a → b`. */
+function delta(before, after) {
+  const ch = cur.fields.map(f => f.name).filter(k => key(before[k]) !== key(after[k]));
+  return ch.length ? ch.map(k => `${k} ${fmt(before[k])} → ${fmt(after[k])}`).join(", ") : "no change";
+}
+
+const VERDICTS = {
+  agrees: ["ok", "✓", "Agrees with the spec"],
+  disagrees: ["bad", "✗", "Disagrees with the spec"],
+  violates: ["bad", "✗", "Breaks a rule"],
+  matches_example: ["ok", "✓", "Matches the spec's example"],
+  misses_example: ["bad", "✗", "Misses the spec's example"],
+  learned: ["learn", "★", "Learned behaviour"],
+};
+
+function verdictHtml(r, a, before) {
+  if (!r.network) return `<div class="cmp"><b>Spec</b><span>${delta(before, r.oracle)}</span></div><p class="note" style="margin:6px 0 0">No network is loaded, so the spec's answer was used.</p>`;
+  const [cls, icon, head] = VERDICTS[r.verdict] || ["bad", "?", r.verdict];
+  let why = "";
+  if (r.verdict === "learned") why = `The spec has no rule for <code>${a}</code>, only ${plural(r.hole.examples, "example")}, and none covers this state. The network's answer breaks no rule.`;
+  else if (r.verdict === "matches_example") why = `This state is one of the ${plural(r.hole.examples, "example")} the spec gives for <code>${a}</code>.`;
+  else if (r.verdict === "violates") why = r.violations.join("; ");
+  else if (r.verdict === "disagrees") why = "No rule is broken, but it is not the answer the spec writes down.";
+  else if (r.verdict === "agrees" && !cur.finite) why = "Within 1% of the range, the tolerance it is scored at.";
+  const spec = r.hole ? (r.hole.example ? `example: ${delta(before, r.hole.example)}` : "no rule here, only examples") : delta(before, r.oracle);
+  const seen = r.unseen === true ? ' <span class="pill">never seen in training</span>' : r.unseen === false ? ' <span class="pill">seen in training</span>' : "";
+  return `<div class="verdict ${cls}"><div class="head"><span class="icon">${icon}</span>${head}${seen}</div>${why ? `<small>${why}</small>` : ""}</div>
+    <div class="cmp"><b>Network</b><span>${delta(before, r.network)}</span><b>Spec</b><span>${spec}</span></div>`;
+}
+
+function buildActions() {
+  const box = $("actions"); box.innerHTML = "";
+  for (const a of cur.actions) {
+    const row = document.createElement("div"); row.className = "row";
+    const inputs = {};
+    for (const p of a.params) {
+      if (p.continuous && p.range) {
+        const [lo, hi] = p.range;
+        const lab = document.createElement("label"); lab.className = "param mono"; lab.textContent = `${p.name}=`;
+        const inp = document.createElement("input");
+        Object.assign(inp, {type: "number", className: "num", min: lo, max: hi, step: "any", value: (lo + hi) / 2});
+        inp.setAttribute("aria-label", `${a.name} ${p.name}`);
+        lab.append(inp); inputs[p.name] = {el: lab, read: () => parseFloat(inp.value)};
+      } else if (p.domain) {
+        const sel = document.createElement("select");
+        sel.setAttribute("aria-label", `${a.name} ${p.name}`);
+        for (const v of p.domain) { const o = document.createElement("option"); o.value = JSON.stringify(v); o.textContent = `${p.name}=${fmt(v)}`; sel.append(o); }
+        inputs[p.name] = {el: sel, read: () => JSON.parse(sel.value)};
+      }
+    }
+    const b = document.createElement("button"); b.className = "act"; b.textContent = a.name;
+    b.onclick = async () => {
+      const params = Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.read()]));
+      if (Object.values(params).some(v => typeof v === "number" && !Number.isFinite(v))) {
+        $("click").innerHTML = '<span class="err">Enter a number first.</span>'; return;
+      }
+      const spec = cur;
+      try {
+        const r = await api(`/api/${cur.name}/step`, {state, action: a.name, params});
+        if (cur !== spec) return; // switched tabs while the network answered
+        const before = state; state = r.network || r.oracle;
+        const changed = cur.fields.map(f => f.name).filter(k => key(before[k]) !== key(state[k]));
+        $("click").innerHTML = verdictHtml(r, a.name, before);
+        const line = document.createElement("div");
+        const mark = r.verdict ? (VERDICTS[r.verdict] || [, "?"])[1] + " " : "";
+        line.innerHTML = `${mark}<b>${a.name}</b>${Object.keys(params).length ? " " + JSON.stringify(params) : ""} → ${delta(before, state)}`;
+        $("log").prepend(line);
+        fieldCache = null;
+        await refresh(changed);
+      } catch (err) { $("click").innerHTML = `<span class="err">${err.message}</span>`; }
+    };
+    row.append(b, ...Object.values(inputs).map(i => i.el));
+    box.append(row);
+  }
+}
+
+window.addEventListener("resize", () => view && render());
+init().catch(err => { $("who").textContent = "error"; $("hint").innerHTML = `<span class="err">${err.message}</span>`; });
+</script>
+</body>
+</html>

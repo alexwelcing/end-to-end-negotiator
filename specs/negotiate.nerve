@@ -33,3 +33,10 @@ ensures:
   - { after: accept,  holds: "status != 'open' or old.rounds == 0" }
   - { holds: "status == old.status or old.status == 'open'" }   # terminal states are absorbing
 initial: {turn: a, books: 0, hats: 0, status: open, rounds: 0}
+render:                    # proposal markers on two 0..2 tracks: drag what you want to keep
+  books: { x: "40 + 80 * books", y: 40 }
+  hats:  { x: "40 + 80 * hats", y: 120 }
+futures:
+  # each drag is a `propose`; the oracle decides which counts are still legal (open, rounds < 3)
+  drag_books: { kind: closest, over: books, grab: books, action: propose, stickiness: 6, far: 70 }
+  drag_hats:  { kind: closest, over: hats, grab: hats, action: propose, stickiness: 6, far: 70 }

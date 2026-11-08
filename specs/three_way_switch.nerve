@@ -1,0 +1,37 @@
+# Dragology's study-three-way-switch (src/demos/study-three-way-switch.tsx): a knob with three resting
+# places, r at the top, g bottom left and b bottom right, drawn where Dragology draws them.
+# Rule: dragging the knob interpolates among the states it may reach and a release commits to the nearest one;
+# all three are reachable (`d.between(states)`), or with "clockwise only" just the next one clockwise
+# (`d.between([state, next])`: r -> b -> g -> r).
+# Changed: the demo's "clockwise only" checkbox is a state field here (`clockwise_only`, flipped by
+# `toggle_clockwise_only`), so both drag specs live in one spec. Dragology's clockwise mode also has a 15 px
+# snap radius with chaining (a drag that snaps onto b carries on to g); Nerve has no chaining, so one gesture
+# moves at most one step clockwise. The "use withFloating" checkbox is presentation only and is left out.
+nerve: 1
+name: three_way_switch
+state:
+  name: {type: enum, values: [r, g, b]}     # where the knob rests (Dragology's `state.name`)
+  clockwise_only: {type: bool}              # the demo's "Clockwise drag only" checkbox
+actions:
+  set: {params: {to: {type: enum, values: [r, g, b]}}}
+  toggle_clockwise_only: {}
+transitions:
+  set:
+    # clockwise only: the knob may move only to the next place clockwise
+    when: "not clockwise_only or to == ('b' if name == 'r' else 'g' if name == 'b' else 'r')"
+    name: "to"
+  toggle_clockwise_only: { clockwise_only: "not clockwise_only" }
+ensures:
+  # the knob lands where it was dropped, or (clockwise only) stays put
+  - { after: set, holds: "name == to or (old.clockwise_only and name == old.name)" }
+  # clockwise only: never a step counter-clockwise
+  - { after: set, holds: "not old.clockwise_only or name == old.name or name == ('b' if old.name == 'r' else 'g' if old.name == 'b' else 'r')" }
+  - { after: set, holds: "clockwise_only == old.clockwise_only" }
+  - { after: toggle_clockwise_only, holds: "clockwise_only != old.clockwise_only and name == old.name" }
+render:
+  # Dragology: translate(60, 30) plus POS = {r: (50, 20), g: (16, 78), b: (84, 78)}
+  knob: { x: "110 if name == 'r' else 76 if name == 'g' else 144", y: "50 if name == 'r' else 108" }
+futures:
+  # dragology: the knob may land on any of these the spec lets it reach; the release commits to the nearest
+  drag_knob: { kind: between, over: name, values: [r, g, b], grab: knob }
+initial: {name: r, clockwise_only: false}

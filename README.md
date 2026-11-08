@@ -1,3 +1,13 @@
+---
+title: Nerve drag lab
+emoji: 🧠
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Nerve
 
 **Software without code.** Describe an interface — as its source, as a screenshot, or in words — and get a
@@ -18,6 +28,26 @@ supervised then self-play — and jumps three tiers:
 
 The thesis is simple and the system is small. Nothing here is clever; it is the obvious thing once you stop
 treating software as the deliverable.
+
+## Play with it
+
+Seventeen interfaces, each a small neural network trained to be the program, each held to its spec as you use it.
+
+* **Hosted:** [huggingface.co/spaces/AlexWelcing/nerve-lab](https://huggingface.co/spaces/AlexWelcing/nerve-lab),
+  a Docker Space built from this repository's `Dockerfile` on a free CPU; `.github/workflows/space.yml` redeploys it
+  on every push to `nerve`.
+* **Locally, one command** (needs a Rust toolchain, no GPU, no Python):
+  ```
+  cargo run --release -p nerve -- serve
+  ```
+  then open http://127.0.0.1:8787. The trained networks are committed under `models/served/`, so a fresh clone
+  plays immediately; `docker build -t nerve-lab . && docker run -p 7860:7860 nerve-lab` does the same without Rust.
+* **Train one yourself:** `cargo run --release -p nerve -- train specs/hanoi.nerve --holdout 0` trains Tower of
+  Hanoi on every cell of its spec in a few CPU minutes and prints exactness and violations.
+
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md) has the rest: training on a GPU, writing a spec, reproducing the numbers.
+The current results are in [`experiments/round2/`](experiments/round2/README.md) and the plan for what comes next
+is paper 2, [`docs/paper2/`](docs/paper2/README.md).
 
 ## One run
 

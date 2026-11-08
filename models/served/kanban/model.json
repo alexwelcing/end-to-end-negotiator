@@ -1,0 +1,92 @@
+{
+  "spec": "kanban",
+  "kind": "finite",
+  "candidates": "valid",
+  "jepa": {
+    "state_dim": 84,
+    "action_dim": 48,
+    "d": 64,
+    "hidden": 128,
+    "ema": 0.99,
+    "tau": 0.1,
+    "margin": 1.0,
+    "var_weight": 0.05,
+    "action_cont_dim": 0,
+    "ord_dim": 4,
+    "ord_weight": 1.0,
+    "fields": [
+      [
+        0,
+        12,
+        true
+      ],
+      [
+        12,
+        12,
+        true
+      ],
+      [
+        24,
+        12,
+        true
+      ],
+      [
+        36,
+        12,
+        true
+      ]
+    ],
+    "fact_weight": 10.0
+  },
+  "train": {
+    "epochs": 300,
+    "batch": 128,
+    "lr": 0.003,
+    "d": 64,
+    "hidden": 128,
+    "ema": 0.99,
+    "tau": 0.1,
+    "holdout": 0.0,
+    "seed": 0,
+    "hole_weight": 20,
+    "negatives": 3,
+    "weight_decay": 0.05,
+    "ord_weight": 1.0,
+    "fact_weight": 10.0,
+    "holdout_salt": "nerve",
+    "log_every": 100,
+    "cont_pairs": 4000,
+    "cont_negatives": 16,
+    "eval_samples": 1000,
+    "candidates": "valid",
+    "holdout_rule": null
+  },
+  "eval": {
+    "all": {
+      "n": 17280,
+      "exact": 1.0,
+      "violation_rate": 0.0
+    },
+    "seen": {
+      "n": 17280,
+      "exact": 1.0,
+      "violation_rate": 0.0
+    },
+    "heldout": {
+      "n": 17280,
+      "exact": 1.0,
+      "violation_rate": 0.0
+    },
+    "learned_only": {
+      "n": 17280,
+      "exact": 1.0,
+      "violation_rate": 0.0
+    },
+    "score": 1.0,
+    "train_pairs": 17280,
+    "negatives": 51835,
+    "seconds": 4046.9,
+    "params": 130624,
+    "trained_on": "cuda"
+  }
+}

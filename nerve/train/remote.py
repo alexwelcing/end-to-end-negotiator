@@ -15,7 +15,7 @@ from typing import Any
 
 from .loop import TrainConfig
 
-JOB_SCRIPT = "https://raw.githubusercontent.com/alexwelcing/end-to-end-negotiator/nerve/hf/jobs/train_job.py"
+JOB_SCRIPT = "https://raw.githubusercontent.com/alexwelcing/nerve/nerve/hf/jobs/train_job.py"
 DEFAULT_REPO = "AlexWelcing/nerve-runs"
 
 

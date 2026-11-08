@@ -1,0 +1,85 @@
+\section{Block architecture}
+\label{sec:arch}
+
+A block's network is Part I's energy model with the changes round 2 made; this section says what it is, what
+has to change for blocks to be small and for lists and grids to be rules rather than tables, and what a block
+must cost for a machine of them to run at frame rate.
+
+\subsection{The energy block today}
+\label{sec:energyblock}
+
+A finite block scores a candidate successor $s'$ of $(s,a)$ by $E(s,a,s')=\Ej+\lambda_F\Ef$: the JEPA
+prediction error between a predictor's output for $(s,a)$ and a target encoder's embedding of $s'$, plus the
+factored per-field term whose shift kernel is equivariant along ordinal fields (Part I, \S4). It is trained
+with InfoNCE over the candidate set, a hinge on spec-wrong negatives, and a variance floor, over every cell of
+the spec; hole examples are oversampled twenty to one against written cells. The candidate set is the states
+the invariants allow (\cref{sec:valid}), both in the loss and at the argmin, and their target embeddings are
+computed once per set of weights, which is what makes a step on $3{,}125$ candidates take under a millisecond
+on a CPU (\texttt{docs/paper2/timings.md}). A continuous block contrasts each true successor against the batch and sixteen near-miss perturbations,
+and steps by sixty Adam iterations on the energy over its continuous fields from eleven seeds per discrete
+assignment, exactly as Part I's continuous inference. The networks in \cref{tab:round2} have \minParamsK k to \maxParamsK k
+parameters; three-layer GELU MLPs with $d=64$ throughout.
+
+\subsection{Heads by field type}
+\label{sec:heads}
+
+The factored head's shift kernel made ``$+1$'' the same function at every value of an ordinal field, and Part
+I's ablation showed that is what let a rule generalise from few cells. Round 2 trains on every cell, so
+generalisation is not the goal, but the same property decides \emph{how many cells a rule needs} and therefore
+how large a block may be. Reorder's residual errors under scarce data are mostly of one kind: a legal order in
+which the moved item is not where it was dropped, because the head has no notion that the shift rule is the
+same function for item $a$ as for item $e$.
+
+We propose that the type of a field chooses the symmetry of its head, and that the spec's type system is where
+that choice is made. An ordinal field keeps the shift kernel. A field that is one of several positions of
+interchangeable items (reorder's $p_a,\dots,p_e$; kanban's slots) is a \emph{list} in disguise, and its head
+should be permutation-equivariant: a per-item scorer that sees its own position, the moved item's old and new
+positions, and a set summary of the others, with parameters shared across items~\citep{zaheer2017deepsets,lee2019settransformer}.
+Under that head the rule ``if $\mathit{from}<p\le\mathit{to}$ then $p-1$'' is one function of three numbers;
+the cells it needs are the distinct $(\mathit{from},\mathit{to},p)$ triples, of order $n^3$, not the
+$n!\cdot n^2$ cells of the table. A field that is a position on a grid (fifteen, sokoban, rush hour) wants a
+translation-equivariant head that sees displacements, not coordinates~\citep{cohen2016gcnn}. Enums keep the
+plain head. The test is not generalisation for its own sake but size: a block whose rule is learned as a
+function can be trained on a sample of its cells, which is the other exit from the enumeration wall.
+
+\subsection{Candidates from a proposer}
+\label{sec:futures}
+
+The argmin over every valid state is exact and cheap at $10^3$ states and impossible at $10^{13}$. In the lab a
+drag already restricts candidates to the futures a gesture can reach, derived by the oracle; a shipped block
+cannot ask an oracle. But the factored head is a proposer: its per-field logits name the $k$ most likely values
+of each field, and the product of those is a candidate set of $k^F$ states that the energy then ranks. For a
+block whose rule changes one or two fields per action, $k=3$ covers the truth essentially always and the
+candidate set is tens of states whatever the block's size. The plan is to make this the inference path for any
+block over about $10^4$ states, keep the exhaustive argmin as the reference it is checked against on small
+blocks, and report the proposer's recall separately so that a miss can never be mistaken for a wrong ranking.
+
+\subsection{Compiled core, trained holes}
+\label{sec:compiled}
+
+Part I compiled every explicit transition of a finite spec into exact ReLU weights and trained only the holes
+and the generalisation; its guarantee (the compiled term dominates any learned term where the spec speaks) is
+the cleanest kind of exactness this programme has. Round 2 trained everything, because the Rust trainer does not
+yet have the compiler. Per block the division is natural: compile the explicit transitions, train the holes
+(hanoi's solver), and train the continuous parts. A compiled block has no seed to vary and nothing to score; the
+digit of \cref{fig:odometer-spec} should be compiled, not trained, and the odometer experiment of
+\cref{sec:demos} runs it both ways.
+
+Blocks meet at ports, and a port needs a notion of compatibility. We take Part I's roadmap item seriously:
+the energy is the type. Two blocks are compatible at a read port if the reader's expected domain and invariant
+for the field match the owner's, checked statically at wiring time, and if their energies agree on the owner's
+valid states for that field, checked by sampling. A block that is swapped for a retrained one must pass the
+same check before the machine accepts it, which is the machine-level version of Part I's rule that the weights
+that ship are the weights that were scored.
+
+\subsection{Sizes and budgets}
+\label{sec:budgets}
+
+Blocks must stay small for three independent reasons: the trainer's cost in states times cells
+(\cref{fig:cost}), the frame budget of a running machine, and the reviewer's ability to check a block
+exhaustively. We fix targets rather than hopes. A finite block has at most about $2\times10^3$ valid states and
+$2\times10^5$ parameters and steps in under $5$\,ms on a CPU core (under $1$\,ms measured on $3{,}125$
+candidates); a continuous block steps in under $50$\,ms ($44$\,ms measured for the descent today;
+\texttt{docs/paper2/timings.md}). At $60$ frames per second a tick has $16$\,ms; a cascade of ten finite
+blocks fits in it on one core, and blocks that are not on the same cascade path step in parallel. Anything
+that does not fit these budgets is two blocks.

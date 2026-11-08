@@ -1,0 +1,107 @@
+{
+  "spec": "slider_continuous",
+  "kind": "continuous",
+  "jepa": {
+    "state_dim": 11,
+    "action_dim": 5,
+    "d": 64,
+    "hidden": 128,
+    "ema": 0.99,
+    "tau": 0.1,
+    "margin": 1.0,
+    "var_weight": 0.05,
+    "action_cont_dim": 1,
+    "ord_dim": 0,
+    "ord_weight": 1.0,
+    "fields": [],
+    "fact_weight": 0.0
+  },
+  "train": {
+    "epochs": 1000,
+    "batch": 128,
+    "lr": 0.003,
+    "d": 64,
+    "hidden": 128,
+    "ema": 0.99,
+    "tau": 0.1,
+    "holdout": 0.15,
+    "seed": 0,
+    "hole_weight": 20,
+    "negatives": 3,
+    "weight_decay": 0.05,
+    "ord_weight": 1.0,
+    "fact_weight": 10.0,
+    "holdout_salt": "nerve",
+    "log_every": 100,
+    "cont_pairs": 8000,
+    "cont_negatives": 16,
+    "eval_samples": 1000,
+    "candidates": "valid",
+    "holdout_rule": null
+  },
+  "eval": {
+    "all": {
+      "n": 1000,
+      "exact": 1.0,
+      "violation_rate": 0.0,
+      "per_action": {
+        "grab": 1.0,
+        "move": 1.0,
+        "release": 1.0,
+        "step_left": 1.0,
+        "step_right": 1.0
+      },
+      "mean_abs_err_frac": 0.000864305046184088,
+      "tol": 0.01
+    },
+    "seen": {
+      "n": 1000,
+      "exact": 1.0,
+      "violation_rate": 0.0,
+      "per_action": {
+        "grab": 1.0,
+        "move": 1.0,
+        "release": 1.0,
+        "step_left": 1.0,
+        "step_right": 1.0
+      },
+      "mean_abs_err_frac": 0.000864305046184088,
+      "tol": 0.01
+    },
+    "heldout": {
+      "n": 1000,
+      "exact": 1.0,
+      "violation_rate": 0.0,
+      "per_action": {
+        "grab": 1.0,
+        "move": 1.0,
+        "release": 1.0,
+        "step_left": 1.0,
+        "step_right": 1.0
+      },
+      "mean_abs_err_frac": 0.000864305046184088,
+      "tol": 0.01
+    },
+    "learned_only": {
+      "n": 1000,
+      "exact": 1.0,
+      "violation_rate": 0.0,
+      "per_action": {
+        "grab": 1.0,
+        "move": 1.0,
+        "release": 1.0,
+        "step_left": 1.0,
+        "step_right": 1.0
+      },
+      "mean_abs_err_frac": 0.000864305046184088,
+      "tol": 0.01
+    },
+    "continuous": true,
+    "score": 1.0,
+    "train_pairs": 8000,
+    "negatives": 128000,
+    "seconds": 2323.6,
+    "params": 67968,
+    "trained_on": "cuda"
+  }
+}

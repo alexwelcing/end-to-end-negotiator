@@ -4,3 +4,17 @@ __pycache__/
 /runs/
 *.egg-info/
 .wrangler/
+/target
+*.safetensors
+# paper 2: generated numbers and build artifacts (make regenerates them)
+docs/paper2/main.pdf
+docs/paper2/main.log
+docs/paper2/main.blg
+docs/paper2/main.aux
+docs/paper2/main.xdv
+docs/paper2/main.bbl
+docs/paper2/numbers.tex
+docs/paper2/table_round2_rows.tex
+docs/paper2/fig_cost.tex
+# the lab's served networks are committed: a fresh clone runs without training
+!models/served/**/*.safetensors
