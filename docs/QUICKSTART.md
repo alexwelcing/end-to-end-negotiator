@@ -57,6 +57,24 @@ its own rules never reaches training. The language is documented by example in `
 predictions and the append-only results log behind paper 2's tables. `python docs/paper2/make_tables.py`
 regenerates the paper's numbers from that log; `make` in `docs/paper2` builds the PDF (latexmk or tectonic).
 
+## The lab in the browser (no server)
+
+The same two pages run on a WebAssembly build of the engine. Once:
+
+```
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.114
+```
+
+then `python scripts/build_site.py` builds the module and assembles `site/dist`: the lab, the machine room,
+the specs, the machines and the served networks (about 15 MB). Serve it with any static server, for example
+`python -m http.server 8791 --directory site/dist`, and open `index.html` or `machine.html`.
+`node scripts/wasm_smoke.mjs --dist site/dist --native http://127.0.0.1:8787` asks the browser build what
+`scripts/ci_smoke.py` asks a running server and compares the answers; CI does both on every push.
+`.github/workflows/pages.yml` deploys `site/dist` to Cloudflare Pages when the repository variable
+`CF_PAGES_PROJECT` and the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are set; by hand,
+`wrangler pages deploy site/dist --project-name <project>`.
+
 ## Layout
 
 | path | what |
@@ -65,7 +83,8 @@ regenerates the paper's numbers from that log; `make` in `docs/paper2` builds th
 | `machines/*.nerve` | machines: blocks wired by events (odometer, odometer6, chain); the lab serves them at `/machine` |
 | `models/served/` | the trained network for each, chosen from the results log by `experiments/round2/serve_set.py` |
 | `crates/nerve/` | the Rust implementation: spec, oracle, encoder, energy model, drags, trainer, lab |
-| `crates/nerve/web/index.html` | the lab page |
+| `crates/nerve/web/index.html`, `machine.html` | the lab page and the machine room |
+| `site/`, `scripts/build_site.py` | the static build of both pages on the WebAssembly core |
 | `nerve/` | the Python reference implementation (paper 1), with the compiler to exact weights |
 | `docs/paper/`, `docs/paper2/` | the papers; every number generated from committed logs |
 | `docs/dragology-demos.md` | all 115 Dragology demos, ranked for Nerve; which are built |

@@ -19,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "site" / "dist"
-WASM = ROOT / "target" / "wasm32-unknown-unknown" / "release" / "nerve.wasm"
+WASM = ROOT / "target" / "wasm32-unknown-unknown" / "wasm" / "nerve.wasm"
 INJECT = (
     '<script>window.nerveReady = new Promise(r => { window.nerveResolve = r; });</script>\n'
     '<script type="module" src="./nerve-local.js"></script>\n'
@@ -32,7 +32,8 @@ def run(*cmd: str) -> None:
 
 
 def build_wasm() -> None:
-    run("cargo", "rustc", "-p", "nerve", "--lib", "--crate-type", "cdylib", "--release",
+    # The `wasm` profile (workspace Cargo.toml): opt-level s, LTO, no debuginfo, for a smaller download.
+    run("cargo", "rustc", "-p", "nerve", "--lib", "--crate-type", "cdylib", "--profile", "wasm",
         "--target", "wasm32-unknown-unknown", "--no-default-features", "--features", "wasm")
     run("wasm-bindgen", "--target", "web", "--out-dir", str(DIST / "pkg"), str(WASM))
 

@@ -8,3 +8,11 @@ license = "CC-BY-NC-4.0"
 
 [profile.release]
 debug = 1
+
+# The browser build: small over quick to compile (scripts/build_site.py passes `--profile wasm`).
+[profile.wasm]
+inherits = "release"
+debug = false
+opt-level = "s"
+lto = true
+codegen-units = 1
