@@ -48,6 +48,13 @@
     "violation_rate": 0.0,
     "cells": 2376
   },
+  "rush_hour": {
+    "model": "runs\\round2\\rush_hour\\full-s0\\rush_hour",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 9000
+  },
   "slider": {
     "model": "runs\\round2\\slider\\full-s0\\slider",
     "seed": 0,
