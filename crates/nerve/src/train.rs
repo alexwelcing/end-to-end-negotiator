@@ -41,6 +41,12 @@ pub struct TrainConfig {
     pub fact_weight: f64,
     pub holdout_salt: String,
     pub log_every: usize,
+    /// Continuous specs: sampled (state, action) pairs to train on.
+    pub cont_pairs: usize,
+    /// Continuous specs: near-miss perturbations contrasted with each true successor.
+    pub cont_negatives: usize,
+    /// Continuous specs: sampled pairs in the final evaluation.
+    pub eval_samples: usize,
 }
 
 impl Default for TrainConfig {
@@ -62,6 +68,9 @@ impl Default for TrainConfig {
             fact_weight: 10.0,
             holdout_salt: "nerve".into(),
             log_every: 10,
+            cont_pairs: 4000,
+            cont_negatives: 16,
+            eval_samples: 1000,
         }
     }
 }
@@ -75,6 +84,8 @@ pub struct Model {
     cand_idx: Tensor,
     /// `(state, action) -> energies of every candidate`, so drag frames do not re-run the network.
     cache: Mutex<HashMap<String, Vec<f32>>>,
+    /// `model.json` of a loaded checkpoint (how it was trained and scored).
+    meta: Option<J>,
 }
 
 impl Model {
@@ -85,7 +96,7 @@ impl Model {
         let c = enc.states.len();
         let cand = Tensor::from_vec(enc.all_state_vectors(&spec)?, (c, enc.state_dim), dev)?;
         let cand_idx = Tensor::from_vec(enc.all_field_indices(&spec)?, (c, enc.slots.len()), dev)?;
-        Ok(Self { spec, enc, jepa, cand, cand_idx, cache: Mutex::new(HashMap::new()) })
+        Ok(Self { spec, enc, jepa, cand, cand_idx, cache: Mutex::new(HashMap::new()), meta: None })
     }
 
     pub fn config_for(spec: &Spec, t: &TrainConfig) -> Result<JepaConfig> {
@@ -146,27 +157,71 @@ impl Model {
     }
 
     pub fn save(&self, dir: &Path, t: &TrainConfig, report: &J) -> Result<()> {
-        std::fs::create_dir_all(dir)?;
-        let tensors: HashMap<String, Tensor> = self.jepa.store.vars.iter().map(|(n, v, _)| (n.clone(), v.as_tensor().clone())).collect();
-        candle_core::safetensors::save(&tensors, dir.join("model.safetensors"))?;
-        let meta = json!({"spec": self.spec.name, "jepa": self.jepa.cfg, "train": t, "eval": report});
-        std::fs::write(dir.join("model.json"), serde_json::to_string_pretty(&meta)?)?;
-        Ok(())
+        save_checkpoint(dir, &self.jepa, json!({"spec": self.spec.name, "kind": "finite", "jepa": self.jepa.cfg, "train": t, "eval": report}))
     }
 
     /// Loads `dir/model.{json,safetensors}` for `spec` onto `dev`.
     pub fn load(spec: Spec, dir: &Path, dev: &Device) -> Result<Self> {
-        let meta: J = serde_json::from_str(&std::fs::read_to_string(dir.join("model.json"))?)?;
-        ensure!(meta["spec"] == spec.name, "{} holds a model for {}, not {}", dir.display(), meta["spec"], spec.name);
+        let meta = read_meta(dir, &spec.name)?;
         let cfg: JepaConfig = serde_json::from_value(meta["jepa"].clone())?;
-        let m = Self::new(spec, cfg, dev)?;
-        let weights = candle_core::safetensors::load(dir.join("model.safetensors"), dev)?;
-        for (name, var, _) in &m.jepa.store.vars {
-            let w = weights.get(name).with_context(|| format!("checkpoint is missing {name}"))?;
-            var.set(w)?;
-        }
+        let mut m = Self::new(spec, cfg, dev)?;
+        load_weights(&m.jepa, dir, dev)?;
+        m.meta = Some(meta);
         Ok(m)
     }
+}
+
+/// What a checkpoint says about its own training, for people looking at the served model:
+/// how it was trained and how it scored on transitions it never saw.
+pub(crate) fn trained_facts(meta: &J) -> J {
+    let (e, t) = (&meta["eval"], &meta["train"]);
+    json!({
+        "continuous": e["continuous"].as_bool().unwrap_or(false),
+        "epochs": t["epochs"],
+        "holdout": t["holdout"],
+        "pairs": e["train_pairs"],
+        "trained_on": e["trained_on"],
+        "seconds": e["seconds"],
+        "heldout": e["heldout"],
+        "all": e["all"],
+        "hole_examples": e["hole_examples"],
+    })
+}
+
+/// Writes `dir/model.safetensors` (every named parameter) and `dir/model.json` (`meta`).
+pub(crate) fn save_checkpoint(dir: &Path, jepa: &Jepa, meta: J) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let tensors: HashMap<String, Tensor> = jepa.store.vars.iter().map(|(n, v, _)| (n.clone(), v.as_tensor().clone())).collect();
+    candle_core::safetensors::save(&tensors, dir.join("model.safetensors"))?;
+    std::fs::write(dir.join("model.json"), serde_json::to_string_pretty(&meta)?)?;
+    Ok(())
+}
+
+/// Reads `dir/model.json`, refusing a checkpoint trained for another spec.
+pub(crate) fn read_meta(dir: &Path, spec: &str) -> Result<J> {
+    let path = dir.join("model.json");
+    let meta: J = serde_json::from_str(&std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?)?;
+    ensure!(meta["spec"] == spec, "{} holds a model for {}, not {spec}", dir.display(), meta["spec"]);
+    Ok(meta)
+}
+
+pub(crate) fn load_weights(jepa: &Jepa, dir: &Path, dev: &Device) -> Result<()> {
+    let weights = candle_core::safetensors::load(dir.join("model.safetensors"), dev)?;
+    for (name, var, _) in &jepa.store.vars {
+        let w = weights.get(name).with_context(|| format!("checkpoint is missing {name}"))?;
+        var.set(w)?;
+    }
+    Ok(())
+}
+
+/// Loads whichever kind of model `dir` holds for `spec`, ready to serve.
+pub fn load_learned(spec: Spec, dir: &Path, dev: &Device) -> Result<std::sync::Arc<dyn LearnedEnergy>> {
+    let meta = read_meta(dir, &spec.name)?;
+    Ok(if meta["kind"] == "continuous" {
+        std::sync::Arc::new(crate::continuous::ContinuousModel::load(spec, dir, dev)?)
+    } else {
+        std::sync::Arc::new(Model::load(spec, dir, dev)?)
+    })
 }
 
 impl LearnedEnergy for Model {
@@ -192,6 +247,7 @@ impl LearnedEnergy for Model {
             "params": params,
             "device": device,
             "summary": format!("{} JEPA, {params} params on {device}", self.spec.name),
+            "trained": self.meta.as_ref().map(trained_facts),
         })
     }
 }
@@ -357,7 +413,7 @@ fn train_batch(m: &Model, data: &Dataset, idx: &[usize], rng: &mut impl Rng) -> 
 
 /// Trains a model for `spec` on `dev`, printing progress; returns it with its final report.
 pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Model, J)> {
-    ensure!(spec.finite(), "{}: continuous specs are not trained in Rust yet; use `python -m nerve train`", spec.name);
+    ensure!(spec.finite(), "{}: has continuous fields; train it with `continuous::train`", spec.name);
     let mut rng = rand::rngs::StdRng::seed_from_u64(cfg.seed);
     if dev.is_cuda() {
         dev.set_seed(cfg.seed)?;
@@ -413,6 +469,7 @@ pub fn train(spec: &Spec, cfg: &TrainConfig, dev: &Device) -> Result<(Model, J)>
     report["negatives"] = json!(data.neg.len());
     report["seconds"] = json!((t0.elapsed().as_secs_f64() * 10.0).round() / 10.0);
     report["params"] = json!(model.jepa.store.count_trainable());
+    report["trained_on"] = json!(if dev.is_cuda() { "cuda" } else { "cpu" });
     Ok((model, report))
 }
 

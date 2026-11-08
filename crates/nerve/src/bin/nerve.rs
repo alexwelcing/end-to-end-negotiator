@@ -1,6 +1,6 @@
 //! `nerve` command-line tool.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use nerve::oracle::{effective_holdout, holdout_mask, Oracle};
 use nerve::spec::Spec;
@@ -60,6 +60,12 @@ enum Cmd {
         holdout: f64,
         #[arg(long, default_value_t = 1e-4)]
         weight_decay: f64,
+        /// Specs with continuous fields: sampled (state, action) pairs to train on.
+        #[arg(long, default_value_t = 4000)]
+        pairs: usize,
+        /// Evaluate every N epochs (and at the last one).
+        #[arg(long, default_value_t = 10)]
+        log_every: usize,
         /// Train on the GPU (needs a `--features cuda` build).
         #[arg(long)]
         cuda: bool,
@@ -77,12 +83,20 @@ fn device(cuda: bool) -> Result<candle_core::Device> {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Serve { specs, addr, lambda, models, cuda } => serve(&specs, &addr, lambda, models.as_deref(), &device(cuda)?)?,
-        Cmd::Train { spec, out, epochs, batch, lr, seed, holdout, weight_decay, cuda } => {
+        Cmd::Train { spec, out, epochs, batch, lr, seed, holdout, weight_decay, pairs, log_every, cuda } => {
             let s = Spec::load(&spec)?;
-            let cfg = nerve::train::TrainConfig { epochs, batch, lr, seed, holdout, weight_decay, ..Default::default() };
-            let (model, report) = nerve::train::train(&s, &cfg, &device(cuda)?)?;
+            let cfg = nerve::train::TrainConfig { epochs, batch, lr, seed, holdout, weight_decay, cont_pairs: pairs, log_every, ..Default::default() };
             let dir = out.join(&s.name);
-            model.save(&dir, &cfg, &report)?;
+            // Finite specs score every enumerable successor; continuous ones descend the energy.
+            let report = if s.finite() {
+                let (model, report) = nerve::train::train(&s, &cfg, &device(cuda)?)?;
+                model.save(&dir, &cfg, &report)?;
+                report
+            } else {
+                let (model, report) = nerve::continuous::train(&s, &cfg, &device(cuda)?)?;
+                model.save(&dir, &cfg, &report)?;
+                report
+            };
             println!("{}", serde_json::to_string_pretty(&report)?);
             println!("saved {}", dir.display());
         }
@@ -134,13 +148,14 @@ fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::pa
     paths.sort();
     let mut entries = Vec::new();
     for p in paths {
-        let spec = Spec::load(&p)?;
+        let source = std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
+        let spec = Spec::parse(&source).with_context(|| format!("parsing {}", p.display()))?;
         let model: Option<std::sync::Arc<dyn nerve::serve::LearnedEnergy>> = match models.map(|m| m.join(&spec.name)) {
-            Some(d) if d.join("model.json").exists() => Some(std::sync::Arc::new(nerve::train::Model::load(spec.clone(), &d, dev)?)),
+            Some(d) if d.join("model.json").exists() => Some(nerve::train::load_learned(spec.clone(), &d, dev)?),
             _ => None,
         };
         println!("  {:<22} {} futures{}", spec.name, spec.futures.len(), if model.is_some() { ", trained model" } else { "" });
-        entries.push(nerve::serve::Entry { spec, model });
+        entries.push(nerve::serve::Entry { spec, model, source });
     }
     let app = std::sync::Arc::new(nerve::serve::App::new(entries, lambda));
     let rt = tokio::runtime::Runtime::new()?;

@@ -67,6 +67,36 @@ select{background:var(--bg);color:var(--ink);border:1px solid var(--line);border
 .spark{width:100%;height:46px;display:block}
 .err{color:var(--bad)}
 footer{color:var(--mut);font-size:12px;margin-top:18px}
+.lede{font-size:16px;font-weight:600;margin:4px 0 0}
+.sub b{color:var(--ink);font-weight:600}
+.story{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:20px;margin-bottom:16px}
+@media(max-width:900px){.story{grid-template-columns:1fr}}
+.story h3{font-size:17px;margin:0 0 2px;letter-spacing:-.01em}
+.story .meta{color:var(--mut);font-size:12px;margin-bottom:8px}
+.story p{margin:0}
+.story ol{margin:0;padding-left:20px}
+.story li{margin:4px 0}
+.story h4{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 6px;font-weight:600}
+code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.92em;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:0 4px}
+.note{color:var(--mut);font-size:12.5px;margin:-4px 0 10px}
+.big{font-size:28px;font-weight:700;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums}
+.netfacts{color:var(--mut);font-size:12.5px;margin-top:6px}
+.verdict{margin-top:10px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);border-left-width:4px}
+.verdict .head{font-weight:600}
+.verdict .icon{display:inline-block;width:1.2em;font-weight:700}
+.verdict.ok{border-color:var(--ok)}.verdict.ok .icon{color:var(--ok)}
+.verdict.bad{border-color:var(--bad)}.verdict.bad .icon{color:var(--bad)}
+.verdict.learn{border-color:var(--learn)}.verdict.learn .icon{color:var(--learn)}
+.verdict small{display:block;color:var(--mut);margin-top:3px;font-size:12px}
+.cmp{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin-top:8px;font-size:12.5px}
+.cmp b{color:var(--mut);font-weight:500}
+.stagecol{min-width:0}
+details.specsrc{margin-top:16px}
+details.specsrc summary{cursor:pointer;font-weight:600}
+details.specsrc summary span{color:var(--mut);font-weight:400}
+details.specsrc pre{margin:10px 0 0;max-height:380px;overflow:auto;font-size:12px;line-height:1.45;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;white-space:pre}
+input.num{width:86px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px;font:inherit}
+.param{display:flex;gap:4px;align-items:center;color:var(--mut);font-size:12px}
 </style>
 </head>
 <body>
@@ -74,33 +104,47 @@ footer{color:var(--mut);font-size:12px;margin-top:18px}
   <header>
     <div>
       <h1>Nerve Drag Lab</h1>
-      <p class="sub">Each pointer frame is one energy minimisation: the spec derives the legal futures, the gap is the distance from your pointer to where the element would land, and a trained network (on the GPU) adds its learned energy. Grab a handle and drag.</p>
+      <p class="lede">Interfaces that are neural networks, not code.</p>
+      <p class="sub">Each tab is a small interface with no code behind it. A spec says what is allowed, and a network trained from that spec runs it.
+        <b>Click an action</b> and the network computes the next state while the spec checks its answer.
+        <b>Drag a handle</b> and the states the spec allows compete to land under your pointer.</p>
     </div>
     <span class="pill" id="who">loading…</span>
   </header>
   <nav class="tabs" id="tabs" role="tablist"></nav>
+  <section class="card story" id="story" aria-live="polite">
+    <div><h3 id="storyTitle"></h3><div class="meta" id="storyMeta"></div><p id="storyWhat"></p></div>
+    <div><h4>Try this</h4><ol id="storyTry"></ol></div>
+  </section>
   <div class="layout">
-    <section class="card stagecard">
-      <div class="stagebar">
-        <span class="hint" id="hint">Drag a handle.</span>
-        <div class="toggles">
-          <label><input type="checkbox" id="showField" checked> decision field</label>
-          <label><input type="checkbox" id="showGhosts" checked> futures</label>
+    <div class="stagecol">
+      <section class="card stagecard">
+        <div class="stagebar">
+          <span class="hint" id="hint">Drag a handle.</span>
+          <div class="toggles">
+            <label title="Shade each pointer position by where a drag would land"><input type="checkbox" id="showField" checked> regions</label>
+            <label title="Mark every state the spec lets this drag reach"><input type="checkbox" id="showGhosts" checked> landing spots</label>
+          </div>
         </div>
-      </div>
-      <svg id="stage" role="img" aria-label="Draggable interface"></svg>
-    </section>
+        <svg id="stage" role="img" aria-label="Draggable interface"></svg>
+      </section>
+      <details class="card specsrc" id="specCard">
+        <summary>The spec <span id="specLines"></span></summary>
+        <pre class="mono" id="specSrc"></pre>
+      </details>
+    </div>
     <aside class="side">
+      <div class="card"><h2>The network</h2><div id="net"></div></div>
       <div class="card"><h2>State</h2><div class="state mono" id="state"></div><div style="margin-top:8px" id="status"></div></div>
-      <div class="card"><h2>Energy per future</h2><div class="bars" id="bars"><span class="sub">Start a drag to see every candidate scored.</span></div>
-        <div class="legend"><span><i class="sw" style="background:var(--acc)"></i>gap (px)</span><span><i class="sw" style="background:var(--learn)"></i>learned</span><span><i class="sw" style="outline:2px solid var(--ok)"></i>argmin</span></div>
-        <svg class="spark" id="spark" viewBox="0 0 300 46" preserveAspectRatio="none" aria-label="gap over the drag"></svg>
+      <div class="card"><h2>Run the network</h2><p class="note">Click an action. The trained network computes the next state, and the spec checks its answer.</p><div class="actions" id="actions"></div><div id="click"></div></div>
+      <div class="card"><h2>Where this drag can land</h2><p class="note">During a drag, each row is a state the spec allows from here. The shortest bar wins: blue is the distance to your pointer, purple is how surprised the network is.</p><div class="bars" id="bars"><span class="sub">Start a drag to see every landing spot scored.</span></div>
+        <div class="legend"><span><i class="sw" style="background:var(--acc)"></i>distance (px)</span><span><i class="sw" style="background:var(--learn)"></i>network</span><span><i class="sw" style="outline:2px solid var(--ok)"></i>wins</span></div>
+        <svg class="spark" id="spark" viewBox="0 0 300 46" preserveAspectRatio="none" aria-label="distance over the drag"></svg>
       </div>
-      <div class="card"><h2>Click actions</h2><div class="actions" id="actions"></div><div class="mono" id="click" style="margin-top:8px;font-size:12px"></div></div>
-      <div class="card"><h2>Trace</h2><div class="log mono" id="log"></div></div>
+      <div class="card"><h2>History</h2><div class="log mono" id="log"></div></div>
     </aside>
   </div>
-  <footer>Rust + candle on CUDA · spec, oracle and drag semantics match the Python reference · <span id="model"></span></footer>
+  <footer id="foot"></footer>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -118,11 +162,72 @@ const el = (tag, attrs = {}, parent) => { const n = document.createElementNS(NS,
 const fmt = v => typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : String(v);
 const key = v => JSON.stringify(v);
 
+/** What each interface is here to show, and the clicks and drags that show it. */
+const STORIES = {
+  toggle: {
+    title: "Toggle: the smallest program",
+    what: "One switch, two states, one action. The network has to learn that <code>flip</code> always changes the state, and the drag has to decide when you have pulled far enough to flip it.",
+    tryit: [
+      "Click <b>flip</b>: the network computes the new state, and the spec checks it.",
+      "Drag the knob part of the way and let go: it only commits to <i>on</i> past the midpoint (<code>between</code>).",
+    ],
+  },
+  counter: {
+    title: "Counter: a rule the spec can only show",
+    what: "A 0–9 counter that only counts while it is armed. Its <code>nudge</code> action has no rule at all: the spec gives five examples and says the count must stay in range. The network learned the rest.",
+    tryit: [
+      "Drag the dial to 3, then click <b>nudge</b>: no example covers 3, yet the network answers 3 → 5 without breaking a rule.",
+      "Click <b>arm</b> to disarm the counter, then <b>inc</b>: nothing happens, because the spec only lets <code>inc</code> count while armed.",
+      "Drag the dial slowly: it snaps to the nearest count and keeps its choice for 4 px (<code>stickiness</code>).",
+    ],
+  },
+  slider: {
+    title: "Slider: a gesture that needs permission",
+    what: "A handle on a 0–240 track in steps of 10. The spec only lets <code>move</code> work while the handle is grabbed, and dragging goes through <code>move</code>, so the drag obeys that rule too.",
+    tryit: [
+      "Drag the handle now: it stays put, because it is not grabbed.",
+      "Click <b>grab</b>, then drag: the handle follows your pointer and snaps to the 10-step grid (<code>vary</code>).",
+      "Click <b>step_right</b> a few times: the network keeps the value on the grid and inside the track.",
+    ],
+  },
+  slider_continuous: {
+    title: "Continuous slider: no list of answers",
+    what: "The same slider with no grid. The value is a real number, so the network cannot score a list of possible next states. It finds its answer by gradient descent on its own energy, and the spec checks it to within 1% of the range.",
+    tryit: [
+      "Click <b>grab</b>, type 137.2 into <code>to</code> and click <b>move</b>: compare the network's value with the spec's.",
+      "Drag the handle while grabbed: the drop follows your pointer (<code>vary</code>).",
+    ],
+  },
+  negotiate: {
+    title: "Negotiate: Deal or No Deal as a game",
+    what: "Two sides split 2 books and 2 hats. A proposal says what the proposer keeps, the sides take turns, and after three proposals only <code>accept</code> or <code>walk</code> are left. It is the task from FAIR's 2017 negotiation paper, written as a finite interface.",
+    tryit: [
+      "Drag <b>books</b> to 2: that is a proposal, so the turn passes to b and the round count goes up.",
+      "Pull a handle well away from its track: past 70 px the drag gives up and keeps the current state (<code>far</code>).",
+      "Make three proposals, then try another drag: the spec allows no more.",
+    ],
+  },
+  tracks: {
+    title: "Tracks: the drag asks the spec",
+    what: "A block on three rails. The drag spec only says <i>pick the closest rail, then slide along it</i>. How long each rail is, and which rails you can reach, both come from the <code>move</code> rule, so the drag finds out by asking the spec.",
+    tryit: [
+      "From the top rail, drag toward the bottom rail: the block stops on the middle one, because a move changes track by at most one.",
+      "Slide along the middle rail past its end: the block stops at 180, where the rule clamps it.",
+      "Let go on the middle rail and drag again: now all three rails are offered.",
+    ],
+  },
+};
+
+const pct = x => `${+(x * 100).toFixed(1)}%`;
+const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
+
 async function init() {
   specs = (await api("/api/specs")).filter(s => s.futures.length);
-  const m = specs.find(s => s.model);
-  $("who").textContent = `${specs.length} interfaces · ${m ? "network loaded" : "oracle energy only"}`;
-  $("model").textContent = m ? `model: ${m.model.summary}` : "no trained network loaded (pass --models)";
+  const nets = specs.filter(s => s.model);
+  $("who").textContent = `${plural(specs.length, "interface")} · ${plural(nets.length, "trained network")}`;
+  const onGpu = nets.length && nets.every(s => s.model.trained && s.model.trained.trained_on === "cuda");
+  const runs = nets.length ? ` and running here on the ${nets[0].model.device === "cuda" ? "GPU" : "CPU"}` : "";
+  $("foot").textContent = `${nets.length ? `Networks trained ${onGpu ? "on the local GPU (CUDA)" : "locally"}${runs}` : "No trained networks loaded (pass --models)"} · Rust + candle · spec, oracle and drag semantics match the Python reference`;
   const tabs = $("tabs");
   for (const s of specs) {
     const b = document.createElement("button");
@@ -135,12 +240,52 @@ async function init() {
   select(specs[0].name);
 }
 
+function renderStory() {
+  const st = STORIES[cur.name] || {title: cur.name, what: "", tryit: ["Drag a handle.", "Click an action."]};
+  $("storyTitle").textContent = st.title;
+  const lines = cur.source.trimEnd().split("\n").length;
+  const holes = cur.holes.map(h => `<code>${h.action}</code> learned from ${plural(h.examples, "example")}`);
+  $("storyMeta").innerHTML = [cur.finite ? plural(cur.states, "state") : "continuous state", plural(cur.actions.length, "action"), `a ${lines}-line spec`, ...holes].join(" · ");
+  $("storyWhat").innerHTML = st.what;
+  $("storyTry").innerHTML = st.tryit.map(t => `<li>${t}</li>`).join("");
+}
+
+function renderSpec() {
+  const lines = cur.source.trimEnd().split("\n").length;
+  $("specLines").textContent = `— all ${lines} lines. Nothing else describes how ${cur.name} behaves.`;
+  $("specSrc").textContent = cur.source;
+}
+
+/** The network's own record: how it was trained and how it scored on transitions it never saw. */
+function renderNetwork() {
+  const m = cur.model, box = $("net");
+  if (!m) { box.innerHTML = '<p class="note" style="margin:0">No trained network is loaded for this interface, so clicks use the spec directly.</p>'; return; }
+  const t = m.trained || {}, all = t.all || {}, held = t.heldout || {};
+  let big = "", caption = "";
+  if (t.continuous) {
+    big = pct(all.exact); caption = `of ${plural(all.n, "random transition")} land within ${pct(all.tol)} of the right value`;
+  } else if (held.n && held.n < all.n) {
+    big = `${Math.round(held.exact * held.n)}/${held.n}`; caption = `transitions it never saw in training, right (${pct(t.holdout)} held out)`;
+  } else if (all.n) {
+    big = `${Math.round(all.exact * all.n)}/${all.n}`; caption = "transitions right (the spec is small enough to train on all of them)";
+  }
+  const viol = all.violation_rate === 0 ? "No rule broken on any of them." : all.violation_rate !== undefined ? `${pct(all.violation_rate)} break a rule.` : "";
+  const he = t.hole_examples;
+  const holes = he && he.n ? ` ${Math.round(he.exact * he.n)}/${he.n} learn-hole examples right.` : "";
+  const where = t.trained_on === "cuda" ? "the local GPU" : t.trained_on ? "the CPU" : "this machine";
+  box.innerHTML = `${big ? `<div class="big">${big}</div><div>${caption}</div>` : ""}
+    <div class="netfacts">${viol}${holes}<br>${m.params.toLocaleString()} parameters · trained on ${where}${t.epochs ? `, ${t.epochs} epochs` : ""} · running on the ${m.device === "cuda" ? "GPU" : "CPU"}</div>`;
+}
+
 async function select(name) {
   cur = specs.find(s => s.name === name);
   for (const t of $("tabs").children) t.setAttribute("aria-selected", t.textContent === name);
-  $("model").textContent = cur.model ? `model: ${cur.model.summary}` : "no trained network for this interface";
   state = structuredClone(cur.initial); drag = null; lastFrame = null; fieldCache = null;
-  $("log").innerHTML = ""; $("bars").innerHTML = '<span class="sub">Start a drag to see every candidate scored.</span>'; $("spark").innerHTML = "";
+  $("log").innerHTML = ""; $("click").innerHTML = ""; $("status").innerHTML = "";
+  $("bars").innerHTML = '<span class="sub">Start a drag to see every landing spot scored.</span>'; $("spark").innerHTML = "";
+  const grabs = [...new Set(cur.futures.map(f => f.grab))];
+  $("hint").textContent = `Drag the ${grabs.join(" or ")} handle.`;
+  renderStory(); renderNetwork(); renderSpec();
   buildActions();
   await refresh();
 }
@@ -314,11 +459,15 @@ async function startDrag(e, g) {
 }
 function queueFrame(p) { if (drag.busy) { drag.pending = p; return; } sendFrame(p); }
 async function sendFrame(p) {
-  drag.busy = true;
-  try { lastFrame = await api(`/api/drag/${drag.sid}/frame`, p); showFrame(); render(); }
-  catch (err) { $("hint").innerHTML = `<span class="err">${err.message}</span>`; }
-  drag.busy = false;
-  if (drag && drag.pending) { const q = drag.pending; drag.pending = null; sendFrame(q); }
+  // The drag can end (release, tab switch) while a frame is in flight: answer only the drag that asked.
+  const d = drag; if (!d) return;
+  d.busy = true;
+  try {
+    const fr = await api(`/api/drag/${d.sid}/frame`, p);
+    if (drag === d) { lastFrame = fr; showFrame(); render(); }
+  } catch (err) { if (drag === d) $("hint").innerHTML = `<span class="err">${err.message}</span>`; }
+  d.busy = false;
+  if (drag === d && d.pending) { const q = d.pending; d.pending = null; sendFrame(q); }
 }
 
 function showFrame() {
@@ -350,8 +499,10 @@ async function endDrag(p) {
   const d = drag; drag = null;
   document.body.classList.remove("dragging");
   const svg = $("stage"); svg.onpointermove = svg.onpointerup = svg.onpointercancel = null;
+  const spec = cur;
   try {
     const r = await api(`/api/drag/${d.sid}/release`, p);
+    if (cur !== spec) return; // switched tabs while releasing: this state belongs to the other interface
     const before = state; state = r.state; lastFrame = null;
     const line = document.createElement("div");
     const delta = r.changed.length ? r.changed.map(k => `${k} ${fmt(before[k])}→${fmt(state[k])}`).join(", ") : "no change";
@@ -360,36 +511,80 @@ async function endDrag(p) {
     $("hint").textContent = "Committed. Drag again, or click an action.";
     fieldCache = null;
     await refresh(r.changed);
-  } catch (err) { $("hint").innerHTML = `<span class="err">${err.message}</span>`; await refresh(); }
+  } catch (err) { if (cur === spec) { $("hint").innerHTML = `<span class="err">${err.message}</span>`; await refresh(); } }
+}
+
+/** Which fields differ between two states, as `field a → b`. */
+function delta(before, after) {
+  const ch = cur.fields.map(f => f.name).filter(k => key(before[k]) !== key(after[k]));
+  return ch.length ? ch.map(k => `${k} ${fmt(before[k])} → ${fmt(after[k])}`).join(", ") : "no change";
+}
+
+const VERDICTS = {
+  agrees: ["ok", "✓", "Agrees with the spec"],
+  disagrees: ["bad", "✗", "Disagrees with the spec"],
+  violates: ["bad", "✗", "Breaks a rule"],
+  matches_example: ["ok", "✓", "Matches the spec's example"],
+  misses_example: ["bad", "✗", "Misses the spec's example"],
+  learned: ["learn", "★", "Learned behaviour"],
+};
+
+function verdictHtml(r, a, before) {
+  if (!r.network) return `<div class="cmp"><b>Spec</b><span>${delta(before, r.oracle)}</span></div><p class="note" style="margin:6px 0 0">No network is loaded, so the spec's answer was used.</p>`;
+  const [cls, icon, head] = VERDICTS[r.verdict] || ["bad", "?", r.verdict];
+  let why = "";
+  if (r.verdict === "learned") why = `The spec has no rule for <code>${a}</code>, only ${plural(r.hole.examples, "example")}, and none covers this state. The network's answer breaks no rule.`;
+  else if (r.verdict === "matches_example") why = `This state is one of the ${plural(r.hole.examples, "example")} the spec gives for <code>${a}</code>.`;
+  else if (r.verdict === "violates") why = r.violations.join("; ");
+  else if (r.verdict === "disagrees") why = "No rule is broken, but it is not the answer the spec writes down.";
+  else if (r.verdict === "agrees" && !cur.finite) why = "Within 1% of the range, the tolerance it is scored at.";
+  const spec = r.hole ? (r.hole.example ? `example: ${delta(before, r.hole.example)}` : "no rule here, only examples") : delta(before, r.oracle);
+  return `<div class="verdict ${cls}"><div class="head"><span class="icon">${icon}</span>${head}</div>${why ? `<small>${why}</small>` : ""}</div>
+    <div class="cmp"><b>Network</b><span>${delta(before, r.network)}</span><b>Spec</b><span>${spec}</span></div>`;
 }
 
 function buildActions() {
   const box = $("actions"); box.innerHTML = "";
   for (const a of cur.actions) {
     const row = document.createElement("div"); row.className = "row";
-    const sels = {};
+    const inputs = {};
     for (const p of a.params) {
-      if (!p.domain) continue;
-      const s = document.createElement("select");
-      for (const v of p.domain) { const o = document.createElement("option"); o.value = JSON.stringify(v); o.textContent = `${p.name}=${fmt(v)}`; s.append(o); }
-      sels[p.name] = s;
+      if (p.continuous && p.range) {
+        const [lo, hi] = p.range;
+        const lab = document.createElement("label"); lab.className = "param mono"; lab.textContent = `${p.name}=`;
+        const inp = document.createElement("input");
+        Object.assign(inp, {type: "number", className: "num", min: lo, max: hi, step: "any", value: (lo + hi) / 2});
+        inp.setAttribute("aria-label", `${a.name} ${p.name}`);
+        lab.append(inp); inputs[p.name] = {el: lab, read: () => parseFloat(inp.value)};
+      } else if (p.domain) {
+        const sel = document.createElement("select");
+        sel.setAttribute("aria-label", `${a.name} ${p.name}`);
+        for (const v of p.domain) { const o = document.createElement("option"); o.value = JSON.stringify(v); o.textContent = `${p.name}=${fmt(v)}`; sel.append(o); }
+        inputs[p.name] = {el: sel, read: () => JSON.parse(sel.value)};
+      }
     }
     const b = document.createElement("button"); b.className = "act"; b.textContent = a.name;
     b.onclick = async () => {
-      const params = Object.fromEntries(Object.entries(sels).map(([k, s]) => [k, JSON.parse(s.value)]));
+      const params = Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.read()]));
+      if (Object.values(params).some(v => typeof v === "number" && !Number.isFinite(v))) {
+        $("click").innerHTML = '<span class="err">Enter a number first.</span>'; return;
+      }
+      const spec = cur;
       try {
         const r = await api(`/api/${cur.name}/step`, {state, action: a.name, params});
+        if (cur !== spec) return; // switched tabs while the network answered
         const before = state; state = r.network || r.oracle;
         const changed = cur.fields.map(f => f.name).filter(k => key(before[k]) !== key(state[k]));
-        $("click").innerHTML = r.network ? `network ${r.agrees ? '<span style="color:var(--ok)">agrees with the oracle</span>' : '<span class="err">disagrees with the oracle</span>'}` + (r.futures ? `<br>runner-up E = ${r.futures[1] ? r.futures[1].energy.toFixed(2) : "-"} vs ${r.futures[0].energy.toFixed(2)}` : "") : "oracle step";
+        $("click").innerHTML = verdictHtml(r, a.name, before);
         const line = document.createElement("div");
-        line.innerHTML = `<b>${a.name}</b>${Object.keys(params).length ? " " + JSON.stringify(params) : ""} → ${changed.length ? changed.map(k => `${k} ${fmt(before[k])}→${fmt(state[k])}`).join(", ") : "no change"}`;
+        const mark = r.verdict ? (VERDICTS[r.verdict] || [, "?"])[1] + " " : "";
+        line.innerHTML = `${mark}<b>${a.name}</b>${Object.keys(params).length ? " " + JSON.stringify(params) : ""} → ${delta(before, state)}`;
         $("log").prepend(line);
         fieldCache = null;
         await refresh(changed);
       } catch (err) { $("click").innerHTML = `<span class="err">${err.message}</span>`; }
     };
-    row.append(b, ...Object.values(sels));
+    row.append(b, ...Object.values(inputs).map(i => i.el));
     box.append(row);
   }
 }

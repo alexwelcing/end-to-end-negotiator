@@ -358,6 +358,57 @@ impl Jepa {
     }
 }
 
+impl Jepa {
+    /// Energy of candidate states `x` `[N, state_dim]` against fixed predictions `zh` `[N, d]`,
+    /// with the gradient flowing into `x` (descent over continuous fields) but not the target.
+    pub fn energy_to(&self, zh: &Tensor, x: &Tensor) -> Result<Tensor> {
+        Ok(zh.broadcast_sub(&self.target(x)?)?.sqr()?.sum(1)?)
+    }
+
+    /// Variance floor on the online latents, so the encoder cannot collapse to a point.
+    fn var_reg(&self, s: &Tensor) -> Result<Option<Tensor>> {
+        let z = self.encode(s)?;
+        let b = z.dim(0)?;
+        if b < 2 {
+            return Ok(None); // one sample would give NaN and poison the run
+        }
+        let mean = z.mean_keepdim(0)?;
+        let var = (z.broadcast_sub(&mean)?.sqr()?.sum(0)? / (b - 1) as f64)?;
+        Ok(Some(((var + 1e-4)?.sqrt()?.neg()? + 1.0)?.relu()?.mean_all()?))
+    }
+
+    /// Continuous specs have no finite candidate set: the true successor is contrasted with
+    /// the batch's other successors and `K` near-miss perturbations, `negs` `[B, K, state_dim]`
+    /// (port of `JEPA.loss_continuous`).
+    pub fn loss_continuous(
+        &self,
+        s: &Tensor,
+        a_idx: &Tensor,
+        a_cont: Option<&Tensor>,
+        s_next: &Tensor,
+        negs: &Tensor,
+    ) -> Result<(Tensor, Vec<(&'static str, Tensor)>)> {
+        let zh = self.predict(s, a_idx, a_cont)?;
+        let zp = self.target(s_next)?;
+        let (b, k, d) = negs.dims3()?;
+        let zn = self.target(&negs.reshape((b * k, d))?)?.reshape((b, k, self.cfg.d))?;
+        let e_pos = (&zh - &zp)?.sqr()?.sum(1)?;
+        let e_batch = sqdist(&zh, &zp)?; // [B, B], the diagonal is e_pos
+        let e_neg = zh.unsqueeze(1)?.broadcast_sub(&zn)?.sqr()?.sum(2)?; // [B, K]
+        let logits = (Tensor::cat(&[&e_batch, &e_neg], 1)?.neg()? / self.cfg.tau)?;
+        let target = Tensor::arange(0u32, b as u32, &self.device)?;
+        let nce = candle_nn::loss::cross_entropy(&logits, &target)?;
+        let jepa = e_pos.mean_all()?;
+        let mut total = (&nce + (&jepa * 0.1)?)?;
+        let mut parts = vec![("nce", nce), ("jepa", jepa)];
+        if let Some(reg) = self.var_reg(s)? {
+            total = (total + (&reg * self.cfg.var_weight)?)?;
+            parts.push(("var", reg));
+        }
+        Ok((total, parts))
+    }
+}
+
 /// Builds the factored head's per-field shift gather indices for a batch of current indices `[B, F]`.
 pub fn shift_indices(fields: &[(usize, usize, bool)], cur: &[u32], b: usize, dev: &Device) -> Result<Vec<Option<Tensor>>> {
     let nf = fields.len();
@@ -389,6 +440,33 @@ mod tests {
         let b = Tensor::new(&[[3f32, 4.0]], &dev)?;
         let d: Vec<Vec<f32>> = sqdist(&a, &b)?.to_vec2()?;
         assert!((d[0][0] - 25.0).abs() < 1e-4 && (d[1][0] - 8.0).abs() < 1e-4);
+        Ok(())
+    }
+
+    #[test]
+    fn continuous_loss_trains_the_online_side_only() -> Result<()> {
+        let dev = Device::Cpu;
+        let mut cfg = JepaConfig::new(5, 2);
+        (cfg.d, cfg.hidden, cfg.action_cont_dim) = (8, 16, 1);
+        let m = Jepa::new(cfg, &[], &dev)?;
+        let s = Tensor::rand(0f32, 1.0, (4, 5), &dev)?;
+        let next = Tensor::rand(0f32, 1.0, (4, 5), &dev)?;
+        let negs = Tensor::rand(0f32, 1.0, (4, 3, 5), &dev)?;
+        let a = Tensor::new(&[0u32, 1, 0, 1], &dev)?;
+        let ac = Tensor::new(&[[0.1f32], [0.5], [0.9], [0.3]], &dev)?;
+        let (total, parts) = m.loss_continuous(&s, &a, Some(&ac), &next, &negs)?;
+        assert!(total.to_scalar::<f32>()?.is_finite());
+        assert!(parts.iter().any(|(n, _)| *n == "nce"));
+        let grads = total.backward()?;
+        for name in ["enc.0.weight", "pred.4.weight", "act.weight", "act_cont.weight"] {
+            assert!(grads.get(m.store.get(name).unwrap().as_tensor()).is_some(), "{name} gets no gradient");
+        }
+        assert!(grads.get(m.store.get("tgt.0.weight").unwrap().as_tensor()).is_none());
+        // energy_to: gradient reaches the candidate state, not the prediction.
+        let zh = m.predict(&s, &a, Some(&ac))?.detach();
+        let x = candle_core::Var::from_tensor(&next)?;
+        let g = m.energy_to(&zh, x.as_tensor())?.sum_all()?.backward()?;
+        assert!(g.get(x.as_tensor()).is_some());
         Ok(())
     }
 

@@ -27,11 +27,18 @@ pub trait LearnedEnergy: Send + Sync {
     /// Energies of every candidate future for one click, if the model can score the whole space.
     fn step_energies(&self, start: &State, action: &ActionInst) -> Result<Option<Vec<(State, f64)>>>;
     fn describe(&self) -> J;
+    /// Whether one energy per probe is cheap enough for the decision field (thousands of
+    /// pixels, each a few hundred probes). Drags use the energy either way.
+    fn cheap(&self) -> bool {
+        true
+    }
 }
 
 pub struct Entry {
     pub spec: Spec,
     pub model: Option<Arc<dyn LearnedEnergy>>,
+    /// The spec's source text: shown in the lab as the whole description of the program.
+    pub source: String,
 }
 
 struct Session {
@@ -137,7 +144,14 @@ async fn list_specs(AxState(app): AxState<Arc<App>>) -> ApiResult {
                 let params: Vec<J> = a
                     .params
                     .iter()
-                    .map(|p| json!({"name": p.name, "domain": p.domain().ok().map(|d| d.iter().map(Value::to_json).collect::<Vec<_>>())}))
+                    .map(|p| {
+                        json!({
+                            "name": p.name,
+                            "domain": p.domain().ok().map(|d| d.iter().map(Value::to_json).collect::<Vec<_>>()),
+                            "continuous": p.continuous(),
+                            "range": p.continuous().then(|| p.range()),
+                        })
+                    })
                     .collect();
                 json!({"name": a.name, "params": params})
             })
@@ -152,6 +166,8 @@ async fn list_specs(AxState(app): AxState<Arc<App>>) -> ApiResult {
             "finite": sp.finite(),
             "states": sp.state_space_size().unwrap_or(0),
             "model": e.model.as_ref().map(|m| m.describe()),
+            "source": e.source,
+            "holes": sp.holes.iter().map(|h| json!({"name": h.name, "action": h.action, "examples": h.examples.len()})).collect::<Vec<_>>(),
         }));
     }
     Ok(Json(J::Array(out)))
@@ -190,13 +206,39 @@ async fn step(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, Json(re
             energies.sort_by(|x, y| x.1.total_cmp(&y.1));
             let pred = energies[0].0.clone();
             out["network"] = sp.state_json(&pred);
-            out["agrees"] = J::Bool(pred == truth);
-            out["violations"] = json!(oracle.violations(&s, Some(&a), &pred, 0.01));
+            // Continuous fields agree within the same 1% of range the evaluation scores.
+            let agrees = if sp.finite() { pred == truth } else { crate::continuous::close(sp, &pred, &truth, 0.01) };
+            out["agrees"] = J::Bool(agrees);
+            let violations = oracle.violations(&s, Some(&a), &pred, 0.01);
+            let (verdict, hole) = verdict(sp, &s, &a, &pred, agrees, &violations);
+            out["verdict"] = json!(verdict);
+            out["hole"] = hole;
+            out["violations"] = json!(violations);
             out["futures"] = J::Array(energies.iter().take(6).map(|(st, en)| json!({"state": sp.state_json(st), "energy": en})).collect());
             out["positions"] = App::positions(sp, &pred)?;
         }
     }
     Ok(Json(out))
+}
+
+/// How the network's answer relates to the spec, in the terms the lab shows:
+/// `agrees` / `disagrees` with a written rule, `matches_example` / `misses_example` of a
+/// `learn` hole, `learned` (a hole with no example here: the spec only bounds it), or
+/// `violates` (it breaks an invariant or `ensures`, whatever else is true).
+pub fn verdict(sp: &Spec, s: &State, a: &ActionInst, pred: &State, agrees: bool, violations: &[String]) -> (&'static str, J) {
+    let hole = sp.holes.iter().find(|h| h.action == a.name);
+    let same_params = |p: &[(String, Value)]| p.len() == a.params.len() && p.iter().all(|(k, v)| a.param(k) == Some(v));
+    let example = hole.and_then(|h| h.examples.iter().find(|ex| ex.state == *s && same_params(&ex.params)));
+    let info = hole.map_or(J::Null, |h| json!({"name": h.name, "examples": h.examples.len(), "example": example.map(|ex| sp.state_json(&ex.next))}));
+    let v = match (hole, example) {
+        _ if !violations.is_empty() => "violates",
+        (Some(_), Some(ex)) if ex.next == *pred => "matches_example",
+        (Some(_), Some(_)) => "misses_example",
+        (Some(_), None) => "learned",
+        (None, _) if agrees => "agrees",
+        (None, _) => "disagrees",
+    };
+    (v, info)
 }
 
 #[derive(Deserialize)]
@@ -369,13 +411,18 @@ async fn field(AxState(app): AxState<Arc<App>>, Path(spec): Path<String>, Json(r
     Ok(Json(out))
 }
 
+/// The field includes the learned term only for models cheap enough to run per probe.
+fn field_uses_network(e: &Entry) -> bool {
+    e.model.as_ref().is_some_and(|m| m.cheap())
+}
+
 /// `(branch, gap)` per cell of one row; `None` is the `far` fallback.
 type FieldRow = Vec<(Option<Value>, f64)>;
 
 /// One row of the field: `(branch, gap)` per cell, from a session whose memory is reset per cell.
 fn field_row(app: &App, e: &Entry, f: &crate::spec::Future, start: &State, req: &FieldReq, j: usize) -> Result<FieldRow> {
     let (nx, ny) = req.cells();
-    let energy = app.energy_fn(e);
+    let energy = if field_uses_network(e) { app.energy_fn(e) } else { None };
     let mut sess = DragSession::new(&e.spec, f, start.clone(), energy.as_deref())?;
     (0..nx)
         .map(|i| {
@@ -426,5 +473,42 @@ fn field_grid(app: &App, spec: &str, req: &FieldReq) -> Result<J> {
             grid.push(json!([idx, gap]));
         }
     }
-    Ok(json!({"nx": nx, "ny": ny, "values": values.iter().map(Value::to_json).collect::<Vec<_>>(), "grid": grid}))
+    Ok(json!({
+        "nx": nx,
+        "ny": ny,
+        "values": values.iter().map(Value::to_json).collect::<Vec<_>>(),
+        "grid": grid,
+        "learned": field_uses_network(e),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn counter() -> Spec {
+        Spec::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../specs/counter.nerve")).unwrap()
+    }
+
+    fn st(sp: &Spec, count: i64, armed: bool) -> State {
+        sp.state_from_json(&json!({"count": count, "armed": armed})).unwrap()
+    }
+
+    #[test]
+    fn verdicts_tell_rules_from_examples_from_learned_behaviour() {
+        let sp = counter();
+        let nudge = ActionInst::new("nudge");
+        // An example in the spec's `learn` hole: 0 -> 2.
+        assert_eq!(verdict(&sp, &st(&sp, 0, true), &nudge, &st(&sp, 2, true), false, &[]).0, "matches_example");
+        assert_eq!(verdict(&sp, &st(&sp, 0, true), &nudge, &st(&sp, 1, true), false, &[]).0, "misses_example");
+        // No example covers 3: whatever legal answer the network gives is learned, not wrong.
+        let (v, hole) = verdict(&sp, &st(&sp, 3, true), &nudge, &st(&sp, 5, true), false, &[]);
+        assert_eq!((v, hole["examples"].as_u64()), ("learned", Some(5)));
+        // Written rules: agreement or not, and a broken rule beats everything.
+        let inc = ActionInst::new("inc");
+        assert_eq!(verdict(&sp, &st(&sp, 3, true), &inc, &st(&sp, 4, true), true, &[]).0, "agrees");
+        assert_eq!(verdict(&sp, &st(&sp, 3, true), &inc, &st(&sp, 3, false), false, &[]).0, "disagrees");
+        let broken = vec!["ensures:inc:count >= old.count".to_string()];
+        assert_eq!(verdict(&sp, &st(&sp, 3, true), &inc, &st(&sp, 2, true), false, &broken).0, "violates");
+    }
 }
