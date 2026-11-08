@@ -55,6 +55,20 @@ pub struct MachineSpec {
     pub ensures: Vec<MachineEnsures>,
     /// Deliveries one tick may process before it is declared non-terminating.
     pub max_events: usize,
+    /// Where each block sits in the machine's one picture (`place:`), per block; `None` for a block the
+    /// document does not place (the page then gives it a panel).
+    pub place: Vec<Option<Place>>,
+    /// The machine's own backdrop (`scene:`), in machine coordinates.
+    pub scene: Option<crate::render::Scene>,
+}
+
+/// A block's placement in the machine's picture: a block point `(bx, by)` sits at
+/// `(x + scale * bx, y + scale * by)` in machine coordinates.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Place {
+    pub x: f64,
+    pub y: f64,
+    pub scale: f64,
 }
 
 /// The machine's state: one state per block, in block order.
@@ -210,7 +224,71 @@ impl MachineSpec {
             ensures.push(MachineEnsures { after, holds });
         }
         let max_events = get(&doc, "max_events").and_then(Yaml::as_u64).map_or(DEFAULT_MAX_EVENTS, |n| n as usize);
-        Ok(Self { name, blocks, inputs, wires, derived, ensures, max_events })
+
+        // One scene: `place:` puts blocks (which must have a scene of their own) in machine coordinates,
+        // and the machine's own `scene:` is the backdrop behind them.
+        let mut place = vec![None; blocks.len()];
+        for (inst, pv) in entries(get(&doc, "place"))? {
+            let b = block_idx(&inst).with_context(|| format!("place {inst:?}: unknown block"))?;
+            let Yaml::Mapping(pm) = &pv else { bail!("place {inst}: needs a mapping with x, y and scale") };
+            let num = |k: &str, dflt: f64| -> Result<f64> {
+                match get(pm, k) {
+                    None | Some(Yaml::Null) => Ok(dflt),
+                    Some(v) => v.as_f64().or_else(|| v.as_i64().map(|i| i as f64)).with_context(|| format!("place {inst}.{k}: must be a number")),
+                }
+            };
+            let p = Place { x: num("x", 0.0)?, y: num("y", 0.0)?, scale: num("scale", 1.0)? };
+            ensure!(p.scale > 0.0, "place {inst}: scale must be positive");
+            ensure!(blocks[b].2.scene.is_some(), "place {inst}: block type {} has no scene to place", blocks[b].1);
+            place[b] = Some(p);
+        }
+        let scene = get(&doc, "scene").map(crate::render::Scene::parse).transpose().context("scene")?;
+        if place.iter().any(Option::is_some) {
+            let missing: Vec<&str> = blocks.iter().zip(&place).filter(|(_, p)| p.is_none()).map(|((n, _, _), _)| n.as_str()).collect();
+            ensure!(missing.is_empty(), "place: every block or none; not placed: {}", missing.join(", "));
+        }
+        ensure!(scene.is_none() || place.iter().any(Option::is_some), "a machine scene needs placed blocks");
+        Ok(Self { name, blocks, inputs, wires, derived, ensures, max_events, place, scene })
+    }
+
+    /// Whether the document composes one picture (any block placed).
+    pub fn has_picture(&self) -> bool {
+        self.place.iter().any(Option::is_some)
+    }
+
+    /// A block's point in machine coordinates, when the block is placed.
+    pub fn to_machine(&self, block: usize, (x, y): (f64, f64)) -> Option<(f64, f64)> {
+        self.place[block].map(|p| (p.x + p.scale * x, p.y + p.scale * y))
+    }
+
+    /// A block's port in machine coordinates: the port of that name, else the centre of its scene box.
+    pub fn port(&self, block: usize, name: &str) -> Option<(f64, f64)> {
+        let spec = &self.blocks[block].2;
+        let sc = spec.scene.as_ref()?;
+        let p = spec.ports.iter().find(|(n, _)| n == name).map(|(_, p)| *p).unwrap_or(((sc.x0 + sc.x1) / 2.0, (sc.y0 + sc.y1) / 2.0));
+        self.to_machine(block, p)
+    }
+
+    /// Where a wire runs in the machine's picture: from the source's port named after the event to the
+    /// target's port named after the action, when both blocks are placed.
+    pub fn wire_path(&self, w: &Wire) -> Option<((f64, f64), (f64, f64))> {
+        Some((self.port(w.from_block, &w.event)?, self.port(w.to_block, &w.action)?))
+    }
+
+    /// The box of the machine's picture, `(x0, y0, x1, y1)`: its scene's, else the union of the placed
+    /// blocks' boxes.
+    pub fn picture_box(&self) -> Option<(f64, f64, f64, f64)> {
+        if let Some(sc) = &self.scene {
+            return Some((sc.x0, sc.y0, sc.x1, sc.y1));
+        }
+        let mut out: Option<(f64, f64, f64, f64)> = None;
+        for (b, (_, _, spec)) in self.blocks.iter().enumerate() {
+            let (Some(sc), Some(p)) = (spec.scene.as_ref(), self.place[b]) else { continue };
+            let (x0, y0) = (p.x + p.scale * sc.x0, p.y + p.scale * sc.y0);
+            let (x1, y1) = (p.x + p.scale * sc.x1, p.y + p.scale * sc.y1);
+            out = Some(out.map_or((x0, y0, x1, y1), |(a, b, c, d)| (a.min(x0), b.min(y0), c.max(x1), d.max(y1))));
+        }
+        out
     }
 
     pub fn initial(&self) -> MachineState {

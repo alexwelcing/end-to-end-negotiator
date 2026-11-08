@@ -14,6 +14,10 @@ transitions:
 ensures:
   - { after: inc, holds: "d == (old.d + 1) % 10" }
   - { after: reset, holds: "d == 0" }
+ports:
+  inc: [0, 40]      # a machine's wires: counts come in on the left,
+  wrap: [60, 40]    # the carry leaves on the right,
+  reset: [30, 80]   # a reset arrives from below
 scene:
   box: [0, 0, 60, 80]
   shapes:

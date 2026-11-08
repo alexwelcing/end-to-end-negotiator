@@ -237,6 +237,12 @@ the energy and the spec) rather than by descent, and the machine room shows agre
 served rail network against the composed oracle for 200 runs (Prediction 4: the error after 1, 10 and 100
 hand-offs, with and without the snapping rule) and checks the head against descent (Prediction 5).
 
+A machine can be one picture. Specs declare `ports:` (the rail's `exit` at `[240, 0]`, its `enter` at
+`[0, 0]`), a machine document places its blocks (`place: {r2: {x: 240, y: 0}}`) and gives itself a backdrop
+`scene:`, and the machine room composites the render networks' rasters where the document says, with the
+wires running port to port. The ball machine's rails sit end to end, so the ball leaves one rail's picture
+where the next begins; `crates/nerve/tests/one_scene.rs` finds the ball in the rasters at every hand-off.
+
 ## Paper
 
 `docs/paper/` holds the manuscript (NeurIPS format, 9 pages + appendix), its sources, the CPU sweep that re-derives

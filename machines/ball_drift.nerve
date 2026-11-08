@@ -21,3 +21,14 @@ wires:
 derived:
   rail: "1 if r1.rolling else 2 if r2.rolling else 3 if r3.rolling else 0"
   balls: "int(r1.rolling) + int(r2.rolling) + int(r3.rolling)"   # a second press of `enter` adds a second ball
+# The same picture as machines/ball.nerve, so the two hand-off rules can be watched side by side.
+place:
+  clock: {x: -10, y: -96, scale: 0.4}
+  r1: {x: 0, y: 0}
+  r2: {x: 240, y: 0}
+  r3: {x: 480, y: 0}
+scene:
+  box: [-60, -110, 790, 70]
+  shapes:
+    - {label: "the same rails, the hand-off carrying the overshoot", at: [365, -70], color: mute, size: 1.6}
+    - {line: [-30, 52, 760, 52], color: line, width: 1}

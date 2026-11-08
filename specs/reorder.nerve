@@ -25,6 +25,9 @@ invariants:
   - "pa != pb and pa != pc and pa != pd and pa != pe and pb != pc and pb != pd and pb != pe and pc != pd and pc != pe and pd != pe"
 ensures:
   - { after: move, holds: "(pa if item == 'a' else pb if item == 'b' else pc if item == 'c' else pd if item == 'd' else pe) == to" }   # the moved item lands where it was dropped
+ports:
+  move: [0, 40]     # a machine's wire into the list
+  home: [330, 40]   # and out of it
 scene:
   box: [0, 0, 330, 80]
   shapes:

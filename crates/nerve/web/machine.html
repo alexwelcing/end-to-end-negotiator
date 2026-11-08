@@ -52,6 +52,12 @@ svg#stage { width: 100%; height: 360px; display: block; touch-action: none; user
 .wire.held { stroke: var(--hold); stroke-dasharray: 6 4; }
 .wirelabel { font-size: 10px; fill: var(--mute); text-anchor: middle; }
 .wirelabel.live { fill: var(--ok); font-weight: 600; }
+/* One scene: the blocks' pictures composited where the machine document places them, over the backdrop. */
+.pic { mix-blend-mode: multiply; }
+.wire, .frame { vector-effect: non-scaling-stroke; }
+.frame { fill: none; stroke-width: 1.5; }
+.frame.lit { stroke: var(--ok); } .frame.bad { stroke: var(--bad); } .frame.held { stroke: var(--hold); stroke-dasharray: 6 4; }
+.scenetext { fill: var(--mute); font-weight: 600; }
 .stop { border-left: 4px solid var(--bad); padding-left: 10px; margin: 10px 0; }
 .trace { max-height: 320px; overflow: auto; font-size: 13px; }
 .trace div { padding: 4px 0; border-bottom: 1px dashed var(--line); }
@@ -113,6 +119,7 @@ let machines = [], M = null, state = null, pending = [], detached = [], position
 let layout = null, running = false, timer = null, busy = false, tick = 0, stats = null, last = null, drag = null, lastFired = new Set();
 let lastPos = {};   // where each block's elements were last drawn, so a tick is seen as motion
 let pictures = {};  // per block: the render network's picture of its current state
+let backdrops = {}; // per machine: its own scene, rasterised once by the render oracle
 /** A raster from the API (RGB bytes, base64) as a data URL the stage can show. */
 function rgbToUrl(b64, w, h) {
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -216,6 +223,7 @@ function select(name) {
 /** One panel per block, in rows wrapped at MAX_ROW; each panel fits the box its elements can occupy over
  *  all valid states, drawn Z times larger than the spec's pixels. */
 function computeLayout() {
+  if (M.picture_box) return sceneLayout();
   const panels = {}; let x = 10, y = 10, rowH = 0, width = 0;
   for (const b of M.blocks) {
     const sb = b.scene ? {x0: b.scene.box[0], y0: b.scene.box[1], x1: b.scene.box[2], y1: b.scene.box[3]} : null;
@@ -225,7 +233,7 @@ function computeLayout() {
     const h = (ex ? Math.max(ex.y1 - ex.y0, 12) * Z + 2 * PAD : 24) + TITLE_H + 18 * textLines + 12;
     if (x > 10 && x + w > MAX_ROW) { x = 10; y += rowH + ROW_GAP; rowH = 0; }
     const ox = x + PAD + 10 - (ex ? ex.x0 : 0) * Z, oy = y + TITLE_H + PAD - (ex ? ex.y0 : 0) * Z;
-    panels[b.instance] = {x, y, w, h, ox, oy, block: b};
+    panels[b.instance] = {x, y, w, h, ox, oy, z: Z, block: b};
     x += w + PANEL_GAP; rowH = Math.max(rowH, h); width = Math.max(width, x);
   }
   return {panels, width, height: y + rowH + 20};
@@ -348,6 +356,7 @@ function showStop(r) {
 }
 
 function draw() {
+  if (layout.scene) return drawScene();
   ensurePictures();
   const svg = $("stage"); svg.innerHTML = "";
   svg.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
@@ -389,7 +398,7 @@ function draw() {
     let ty = p.y + p.h - 10 - 18 * (b.fields.filter(f => !rendered(b, f.name)).length - 1);
     for (const f of b.fields) if (!rendered(b, f.name)) { text(p.x + 12, ty, `${f.name} = ${fmt(state[inst][f.name])}`, "fieldtext mono", svg); ty += 18; }
     // The block's picture, in its spec's own coordinates: its render network's pixels, then hit targets.
-    const bg = el("g", {transform: `translate(${p.ox},${p.oy}) scale(${Z})`}, svg);
+    const bg = el("g", {transform: `translate(${p.ox},${p.oy}) scale(${p.z})`}, svg);
     const pic = pictures[inst] && pictures[inst].url && pictures[inst].key === JSON.stringify(state[inst]) ? pictures[inst] : null;
     if (pic) el("image", {href: pic.url, x: pic.view[0], y: pic.view[1], width: pic.view[2], height: pic.view[3], preserveAspectRatio: "none"}, bg);
     // Landing spots while this block is grabbed.
@@ -413,6 +422,84 @@ function draw() {
   }
 }
 
+/** One scene (docs/rube-goldberg.md, M6): the viewBox is the machine's picture box and every block's
+ *  picture sits where the document's `place:` puts it, in machine coordinates. */
+function sceneLayout() {
+  const [x0, y0, x1, y1] = M.picture_box;
+  const pad = Math.max(10, (x1 - x0) * 0.015);
+  const panels = {};
+  for (const b of M.blocks) {
+    const pl = M.place[b.instance]; if (!pl || !b.scene) continue;
+    const [bx0, by0, bx1, by1] = b.scene.box;
+    panels[b.instance] = {ox: pl.x, oy: pl.y, z: pl.scale, block: b, box: [pl.x + pl.scale * bx0, pl.y + pl.scale * by0, pl.scale * (bx1 - bx0), pl.scale * (by1 - by0)]};
+  }
+  return {scene: true, panels, view: [x0 - pad, y0 - pad, x1 - x0 + 2 * pad, y1 - y0 + 2 * pad]};
+}
+
+/** The backdrop: the machine's own scene, rasterised by the render oracle once per machine (it has no state,
+ *  so there is nothing for a network to learn). */
+function ensureBackdrop() {
+  if (!M.scene || backdrops[M.name]) return;
+  backdrops[M.name] = {busy: true};
+  api(`/api/machine/${M.name}/backdrop`).then(r => { backdrops[M.name] = {url: rgbToUrl(r.rgb, r.w, r.h), view: r.view}; draw(); }).catch(() => { backdrops[M.name] = {url: null}; });
+}
+
+function drawScene() {
+  ensurePictures(); ensureBackdrop();
+  const svg = $("stage"); svg.innerHTML = "";
+  const [vx, vy, vw, vh] = layout.view;
+  svg.setAttribute("viewBox", `${vx} ${vy} ${vw} ${vh}`);
+  const rect = svg.getBoundingClientRect();
+  svg.style.height = `${Math.min(560, Math.max(200, rect.width * vh / vw))}px`;
+  const k = Math.max(rect.width, 1) / vw;   // screen pixels per machine unit, so text keeps its size on screen
+  const fs = px => `${px / k}px`;
+  const bd = backdrops[M.name];
+  if (bd && bd.url) el("image", {href: bd.url, x: bd.view[0], y: bd.view[1], width: bd.view[2], height: bd.view[3], preserveAspectRatio: "none"}, svg);
+  // Wires run port to port: forward as a gentle curve, backward as a loop below the row, and a hand-off whose
+  // ports coincide (the ball leaving one rail where the next begins) as a short mark across the join.
+  for (const w of M.wires) {
+    if (!w.path) continue;
+    const [x1, y1] = w.path.from, [x2, y2] = w.path.to;
+    const id = `${w.from}.${w.event}>${w.to}.${w.action}`;
+    const live = lastFired.has(id);
+    const heldWire = detached.includes(w.to) && pending.some(p => p.block === w.to && p.via && p.via.block === w.from && p.via.event === w.event);
+    const dx = x2 - x1, dy = y2 - y1;
+    let d, lx, ly;
+    if (Math.hypot(dx, dy) < 1) { const m = 14 / k; d = `M${x1},${y1 - m} L${x1},${y1 + m}`; lx = x1; ly = y1 - m - 6 / k; }
+    else if (dx >= 0) { const mx = (x1 + x2) / 2; d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`; lx = mx; ly = Math.min(y1, y2) - 8 / k; }
+    else { const drop = 60 / k + Math.abs(dx) * 0.08; d = `M${x1},${y1} C${x1},${y1 + drop} ${x2},${y2 + drop} ${x2},${y2}`; lx = (x1 + x2) / 2; ly = Math.max(y1, y2) + drop * 0.75 + 12 / k; }
+    el("path", {d, class: "wire" + (live ? " live" : "") + (heldWire ? " held" : "")}, svg);
+    text(lx, ly, `${w.event} → ${w.action}${Object.keys(w.with).length ? "(…)" : ""}`, "wirelabel" + (live ? " live" : ""), svg).style.fontSize = fs(10);
+  }
+  for (const b of M.blocks) {
+    const p = layout.panels[b.instance]; if (!p) continue;
+    const inst = b.instance, isHeld = detached.includes(inst);
+    const stepped = last ? last.steps.filter(s => s.block === inst) : [];
+    const bad = stepped.some(s => s.violations.length || !s.agrees);
+    const [bx, by, bw, bh] = p.box;
+    // The block's picture: its render network's pixels, where the document places them.
+    const bg = el("g", {transform: `translate(${p.ox},${p.oy}) scale(${p.z})`}, svg);
+    const pic = pictures[inst] && pictures[inst].url && pictures[inst].key === JSON.stringify(state[inst]) ? pictures[inst] : null;
+    if (pic) el("image", {href: pic.url, x: pic.view[0], y: pic.view[1], width: pic.view[2], height: pic.view[3], preserveAspectRatio: "none", class: "pic"}, bg);
+    // The check as a thin frame while the block has just stepped, is held or is wrong; the name small above.
+    if (isHeld || bad || stepped.length) el("rect", {x: bx, y: by, width: bw, height: bh, rx: 4, class: "frame" + (isHeld ? " held" : bad ? " bad" : " lit")}, svg);
+    text(bx, by - 4 / k, `${inst}${isHeld ? " · held" : ""}`, "scenetext", svg).style.fontSize = fs(11);
+    el("circle", {cx: bx + bw - 5 / k, cy: by - 8 / k, r: 3.5 / k, class: "light", fill: bad ? "var(--bad)" : stepped.length ? "var(--ok)" : "var(--line)"}, svg);
+    const pos = (drag && drag.block === inst && drag.preview) ? drag.preview : (positions[inst] || {});
+    if (drag && drag.block === inst && drag.candidates) for (const c of drag.candidates) el("circle", {cx: c.x, cy: c.y, r: 9, class: "el ghost"}, bg);
+    for (const name of b.render) {
+      const q = pos[name]; if (!q) continue;
+      const g = b.futures.find(f => f.grab === name);
+      const active = !!(drag && drag.block === inst);
+      const grp = el("g", {class: g ? "el grab" : ""}, bg);
+      if (pic) el("circle", {cx: q.x, cy: q.y, r: 12, fill: "transparent", stroke: active ? "var(--acc)" : "none", "stroke-width": 1.5}, grp);
+      else { el("circle", {cx: q.x, cy: q.y, r: 9, class: "el" + (g ? " grab" : "") + (active ? " preview" : "")}, grp); text(q.x, q.y + 3, name.length > 4 ? name.slice(0, 3) : name, "ellabel", grp); }
+      lastPos[`${inst}.${name}`] = {x: q.x, y: q.y};
+      if (g && !isHeld) grp.onpointerdown = e => startDrag(e, b, g, p);
+    }
+  }
+}
+
 /** Motion: a freshly drawn node starts offset by (dx, dy) and slides to where it belongs. */
 function slideFrom(node, dx, dy, ms) {
   node.style.transition = "none";
@@ -422,7 +509,7 @@ function slideFrom(node, dx, dy, ms) {
   node.style.transform = "translate(0px, 0px)";
 }
 
-function toLocal(e, p) { const svg = $("stage"); const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return {x: (q.x - p.ox) / Z, y: (q.y - p.oy) / Z}; }
+function toLocal(e, p) { const svg = $("stage"); const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return {x: (q.x - p.ox) / p.z, y: (q.y - p.oy) / p.z}; }
 
 /** Grab an element: its block detaches from the machine until release; the rest keeps running. */
 async function startDrag(e, b, g, p) {

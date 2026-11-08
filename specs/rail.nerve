@@ -34,6 +34,11 @@ scene:
   shapes:
     - {line: [0, 12, 240, 12], color: track, width: 8}
     - {rect: [246, 10, 6, 28], r: 2, color: line}
+# Where the ball comes in and goes out, for machines that place rails end to end (docs/rube-goldberg.md, M6).
+ports:
+  enter: [0, 0]
+  enter_at: [0, 0]
+  exit: [240, 0]
 render:
   ball: { x: "pos", y: 0, shape: {circle: [0, 0, 11], color: f2, stroke: ink, width: 1.5, when: rolling} }
 futures:

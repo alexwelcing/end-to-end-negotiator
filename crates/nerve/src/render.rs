@@ -7,7 +7,7 @@
 //! a state into pixels the same way the oracle turns a state and an action into the next state: it is
 //! the teacher of the render network (`picture`) and the check on what that network draws.
 
-use crate::expr::Expr;
+use crate::expr::{Expr, Scope};
 use crate::oracle::StateScope;
 use crate::spec::{Spec, State};
 use crate::value::Value;
@@ -68,8 +68,14 @@ impl Scene {
     /// The raster this scene is drawn into: at most `RASTER_MAX` on the long side, sides multiples of
     /// `RASTER_STEP`, as near the scene's aspect as that allows.
     pub fn raster_size(&self) -> (usize, usize) {
+        self.raster_size_up_to(RASTER_MAX)
+    }
+
+    /// The same rule with a longer side allowed: a machine's backdrop is drawn once, by the oracle, and
+    /// can afford more pixels than a render network learns.
+    pub fn raster_size_up_to(&self, max: usize) -> (usize, usize) {
         let (bw, bh) = (self.x1 - self.x0, self.y1 - self.y0);
-        let s = RASTER_MAX as f64 / bw.max(bh).max(1.0);
+        let s = max as f64 / bw.max(bh).max(1.0);
         let fit = |v: f64| (((v * s / RASTER_STEP as f64).round() as usize).max(1)) * RASTER_STEP;
         (fit(bw), fit(bh))
     }
@@ -426,7 +432,7 @@ impl Canvas {
         }
     }
 
-    fn shape(&mut self, sh: &Shape, dx: f64, dy: f64, scope: &StateScope) -> Result<()> {
+    fn shape(&mut self, sh: &Shape, dx: f64, dy: f64, scope: &dyn Scope) -> Result<()> {
         if let Some(w) = &sh.when {
             if !w.eval(scope)?.truthy() {
                 return Ok(());
@@ -485,15 +491,7 @@ fn text_of(v: &Value) -> String {
 /// element's position, as RGB floats in CHW order of a `w` x `h` raster.
 pub fn rasterize(spec: &Spec, state: &State, w: usize, h: usize) -> Result<Vec<f32>> {
     let scene = spec.scene.as_ref().context("the spec has no scene to draw")?;
-    let (bw, bh) = (scene.x1 - scene.x0, scene.y1 - scene.y0);
-    let s = (w as f64 / bw).min(h as f64 / bh);
-    // Centred, so a raster whose aspect differs a little from the scene's shows a margin, not a stretch.
-    let ox = scene.x0 - (w as f64 / s - bw) / 2.0;
-    let oy = scene.y0 - (h as f64 / s - bh) / 2.0;
-    let mut cv = Canvas { w, h, px: Vec::with_capacity(3 * w * h), s, ox, oy };
-    for ch in 0..3 {
-        cv.px.extend(std::iter::repeat_n(scene.background[ch], w * h));
-    }
+    let mut cv = canvas(scene, w, h);
     let params: Vec<(String, Value)> = Vec::new();
     let scope = StateScope { spec, cur: state, params: &params, old: None };
     for sh in &scene.shapes {
@@ -507,6 +505,48 @@ pub fn rasterize(spec: &Spec, state: &State, w: usize, h: usize) -> Result<Vec<f
         for sh in &e.shapes {
             cv.shape(sh, x, y, &scope)?;
         }
+    }
+    Ok(cv.px)
+}
+
+/// Scene units to pixels (`s`) and the scene-space origin of pixel (0, 0) for a `w` x `h` raster of
+/// `scene`: centred, so a raster whose aspect differs a little from the scene's shows a margin, not a
+/// stretch. The same mapping the pages invert when they place a raster.
+pub fn raster_transform(scene: &Scene, w: usize, h: usize) -> (f64, f64, f64) {
+    let (bw, bh) = (scene.x1 - scene.x0, scene.y1 - scene.y0);
+    let s = (w as f64 / bw).min(h as f64 / bh);
+    (s, scene.x0 - (w as f64 / s - bw) / 2.0, scene.y0 - (h as f64 / s - bh) / 2.0)
+}
+
+/// The scene-space box a `w` x `h` raster of `scene` covers, as `[x0, y0, width, height]`.
+pub fn raster_view(scene: &Scene, w: usize, h: usize) -> [f64; 4] {
+    let (s, ox, oy) = raster_transform(scene, w, h);
+    [ox, oy, w as f64 / s, h as f64 / s]
+}
+
+fn canvas(scene: &Scene, w: usize, h: usize) -> Canvas {
+    let (s, ox, oy) = raster_transform(scene, w, h);
+    let mut cv = Canvas { w, h, px: Vec::with_capacity(3 * w * h), s, ox, oy };
+    for ch in 0..3 {
+        cv.px.extend(std::iter::repeat_n(scene.background[ch], w * h));
+    }
+    cv
+}
+
+/// A scope with nothing in it: a backdrop's shapes are constants, and a name in one is an error.
+pub struct NoScope;
+
+impl Scope for NoScope {
+    fn get(&self, _: &str) -> Option<Value> {
+        None
+    }
+}
+
+/// The picture of a scene with no state behind it (a machine's backdrop): its background and shapes.
+pub fn rasterize_scene(scene: &Scene, w: usize, h: usize) -> Result<Vec<f32>> {
+    let mut cv = canvas(scene, w, h);
+    for sh in &scene.shapes {
+        cv.shape(sh, 0.0, 0.0, &NoScope)?;
     }
     Ok(cv.px)
 }

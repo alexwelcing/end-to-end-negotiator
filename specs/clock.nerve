@@ -11,6 +11,8 @@ transitions:
   advance: { phase: "(phase + 1) % 10", emits: { tick: "True" } }
 ensures:
   - { after: advance, holds: "phase == (old.phase + 1) % 10" }
+ports:
+  tick: [185, 30]   # where a machine's wires leave the clock
 scene:
   box: [0, 5, 185, 55]
   shapes:

@@ -250,6 +250,10 @@ pub struct Spec {
     pub render: Vec<RenderElement>,
     /// The picture's box, background and static shapes, when the spec says what it looks like.
     pub scene: Option<crate::render::Scene>,
+    /// Named points in scene coordinates (`ports: {exit: [240, 0]}`): where a machine's wires attach,
+    /// named after the event or action they carry, so a hand-off reads as leaving one picture where the
+    /// next begins.
+    pub ports: Vec<(String, (f64, f64))>,
 }
 
 impl Spec {
@@ -675,6 +679,14 @@ fn parse_doc(doc: &Yaml) -> Result<Spec> {
         render.push(RenderElement { name: ename, x: Expr::compile(&expr_src(x)?)?, y: Expr::compile(&expr_src(y)?)?, shapes });
     }
     let scene = key(doc, "scene").map(crate::render::Scene::parse).transpose().context("scene")?;
+    let mut ports = Vec::new();
+    for (pname, pv) in key(doc, "ports").and_then(Yaml::as_mapping).into_iter().flatten() {
+        let pname = pname.as_str().context("port names must be strings")?.to_string();
+        ensure!(scene.is_some(), "port {pname}: a spec needs a scene before it has ports");
+        let xy = pv.as_sequence().filter(|s| s.len() == 2).with_context(|| format!("port {pname}: needs [x, y]"))?;
+        let num = |v: &Yaml| v.as_f64().or_else(|| v.as_i64().map(|i| i as f64)).with_context(|| format!("port {pname}: coordinates must be numbers"));
+        ports.push((pname.clone(), (num(&xy[0])?, num(&xy[1])?)));
+    }
 
     let init_map = key(doc, "initial").and_then(Yaml::as_mapping).cloned().unwrap_or_default();
     let initial = fields
@@ -698,7 +710,7 @@ fn parse_doc(doc: &Yaml) -> Result<Spec> {
         .map(|i| Expr::compile(&expr_src(i)?))
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(Spec { name, fields, actions, transitions, invariants, ensures, futures, holes, initial, render, scene })
+    Ok(Spec { name, fields, actions, transitions, invariants, ensures, futures, holes, initial, render, scene, ports })
 }
 
 #[cfg(test)]

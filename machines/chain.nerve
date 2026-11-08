@@ -27,3 +27,15 @@ derived:
 ensures:
   # Every clock tick reaches the toggle (checked on quiescent ticks: nothing grabbed, nothing queued).
   - { after: clock.advance, holds: "toggle.status != old.toggle.status" }
+# One scene (docs/rube-goldberg.md, M6): the five blocks in a row, each at its own size, the wires running
+# from each block's out port to the next block's in port; the reset wire loops back below the row.
+place:
+  clock: {x: 0, y: -30}
+  toggle: {x: 225, y: -30}
+  digit: {x: 385, y: -40}
+  list: {x: 485, y: -40}
+  switch: {x: 815, y: -80}
+scene:
+  box: [-30, -100, 1070, 110]
+  shapes:
+    - {label: "a machine that runs itself: five networks, five wires, no code", at: [520, -86], color: mute, size: 1.6}

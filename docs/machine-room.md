@@ -181,11 +181,36 @@ check remain JavaScript, which is what a browser runs).
   the render network's pixels, tick by tick. `crates/nerve/tests/ball_machine.rs` on the served rail network:
   Prediction 4 (200 runs each, the ball dropped at a random offset): with the snapping hand-off the error against the composed oracle is mean 1.8%, worst 3.7% of the rail after 1, 10 and 100 hand-offs alike; without it, 2.4% after one hand-off, 17% after ten and off the rail entirely (164%) after a hundred. The flat 1.8% is one rail's own drift: within an episode (590,100 ticks with both balls on the same rail) the networks' ball is mean 2.3%, worst 4.4% from the oracle's, and one tick of travel is 3.2%, so about half the runs cross the end of a rail one tick before the oracle does and stay one tick ahead for ever; the plan's "within 1%" was a guess at that drift and it is a tick, not a percent. The bound holds (the hand-off error never exceeds the within-episode worst), the level is a tick. Prediction 5: on the machine's own ticks (1,213 rail steps over 400 ticks) the head agrees with descent on 1,213 of 1,213, all within tolerance of the oracle, with no answer the spec rejected, at 0.036 ms per step on the CPU; on 500 uniformly random steps (states and parameters the machine never visits) it agrees with descent on 489, 97.8%. A tick of the ball machine in WebAssembly (the clock and three rails, each rail stepped by its head) takes 0.24 ms in Node against the plan's 4 ms budget, and scripts/wasm_smoke.mjs now checks every render network's picture and the ball machine's ticks against the native lab within tolerance.
 
+## M6. One scene
+
+- **Acceptance (`docs/rube-goldberg.md`):** at every hand-off of 100 runs the ball's picture leaves one block
+  at its exit port on tick t and appears at the next block's entry port on tick t+1, checked from the
+  rasters' element positions, not by eye.
+- **Status (2026-11-08): done.** A spec may declare `ports:` (named points in its scene's coordinates, named
+  after the events and actions a machine wires to them: the rail's `enter` and `enter_at` at `[0, 0]`, its
+  `exit` at `[240, 0]`; the clock's `tick`, the toggle's `flip` and `turned_on`, the digit's `inc`, `wrap` and
+  `reset`, the list's `move` and `home`, the switch's `set` and `home`). A machine document may `place:` its
+  blocks (`{x, y, scale}` in machine coordinates, every block or none) and give the machine its own
+  `scene:`, the backdrop. The listing then carries each block's transform, every wire's path from the
+  source's port named after the event to the target's port named after the action (a block's centre when
+  it has no such port), and the picture's box; `/api/machine/<name>/backdrop` is the backdrop rasterised
+  by the render oracle (static, so there is nothing for a network to learn; up to 768 pixels on the long
+  side). The machine page composites: the backdrop, then each block's render-network raster where `place:`
+  puts it (multiply-blended, so the rails' margins overlap without hiding each other's ball), the wires port
+  to port (forward as a curve, backward as a loop below the row, a hand-off whose ports coincide as a mark
+  across the join), the check as a thin frame and a light per block, and the hit targets where the elements
+  are. `machines/ball.nerve` and `ball_drift.nerve` lay the three rails end to end (r1's exit port is r2's
+  entry port, r2's is r3's; the return wire runs below) with the clock small at the top left;
+  `machines/chain.nerve` puts its five blocks in a row at their own sizes with the reset wire looping back.
+  The odometers keep their panels. `crates/nerve/tests/one_scene.rs` runs the ball machine by its networks
+  and finds the ball in each rail's render-network raster (the pixels in its fill colour, mapped through the
+  raster's transform and the block's place): Over 100 runs (300 hand-offs, the ball dropped at a random offset), the ball's picture left a rail at most 8.7 units short of its exit port (one tick of travel is 8) and appeared at most 1.3 units from the next rail's entry port, which is less than one raster pixel of the 192x32 picture (about 1.9 units).
+
 ## Next: The Most Complicated Way to Turn On a Light
 
 The plan for the Rube Goldberg machine: fifty networks turning on the toggle through self-solving puzzles, a
 negotiation, a marble and a bell, grabbable in a shared room, with milestones M5–M8 and Predictions 4–7,
-is `docs/rube-goldberg.md`. M5 is above; M6–M8 are next.
+is `docs/rube-goldberg.md`. M5 and M6 are above; M7 and M8 are next.
 
 ## Later, on the same foundation
 

@@ -208,6 +208,7 @@ impl App {
                 let r: PointReq = parse(body)?;
                 self.drag_release(sid, (r.x, r.y))?
             }
+            ["api", "machine", name, "backdrop"] => self.machine_backdrop(name)?,
             ["api", "machine", name, "view"] => {
                 let r: ViewReq = parse(body)?;
                 self.machine_view(name, &r.state)?
@@ -382,11 +383,8 @@ impl App {
             None => scene.raster_size(),
         };
         let truth = crate::render::rasterize(sp, &s, w, h)?;
-        let (bw, bh) = (scene.x1 - scene.x0, scene.y1 - scene.y0);
-        let k = (w as f64 / bw).min(h as f64 / bh);
-        let view = [scene.x0 - (w as f64 / k - bw) / 2.0, scene.y0 - (h as f64 / k - bh) / 2.0, w as f64 / k, h as f64 / k];
         let mut out = json!({
-            "w": w, "h": h, "view": view,
+            "w": w, "h": h, "view": crate::render::raster_view(scene, w, h),
             "oracle": crate::render::base64(&crate::render::to_rgb8(&truth, w, h)),
         });
         if let Some(p) = &e.picture {
@@ -454,6 +452,7 @@ pub fn spec_summary(e: &Entry) -> J {
         "model": e.model.as_ref().map(|m| m.describe()),
         "picture": e.picture.as_ref().map(|p| p.describe()),
         "scene": sp.scene.as_ref().map(|sc| json!({"box": [sc.x0, sc.y0, sc.x1, sc.y1], "raster": sc.raster_size()})),
+        "ports": J::Object(sp.ports.iter().map(|(n, (x, y))| (n.clone(), json!([x, y]))).collect()),
         "source": e.source,
         "holes": sp.holes.iter().map(|h| json!({"name": h.name, "action": h.action, "examples": h.examples.len()})).collect::<Vec<_>>(),
     })
@@ -630,6 +629,7 @@ mod http {
             .route("/machine", get(|| async { Html(MACHINE_PAGE) }))
             .route("/api/specs", get(list_specs))
             .route("/api/machines", get(list_machines))
+            .route("/api/machine/{name}/backdrop", get(machine_backdrop))
             .route("/api/machine/{name}/view", post(machine_view))
             .route("/api/machine/{name}/tick", post(machine_tick))
             .route("/api/{spec}/view", post(view))
@@ -682,6 +682,10 @@ mod http {
 
     async fn machine_view(AxState(app): S, Path(name): Path<String>, Json(req): Json<ViewReq>) -> ApiResult {
         Ok(Json(app.machine_view(&name, &req.state)?))
+    }
+
+    async fn machine_backdrop(AxState(app): S, Path(name): Path<String>) -> ApiResult {
+        Ok(Json(app.machine_backdrop(&name)?))
     }
 
     async fn machine_tick(AxState(app): S, Path(name): Path<String>, Json(req): Json<TickReq>) -> ApiResult {

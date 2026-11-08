@@ -56,6 +56,9 @@ pub fn spec() -> String {
     lines.push(format!("  - \"{}\"", distinct.join(" and ")));
     lines.push(l("ensures:"));
     lines.push(format!("  - {{ after: move, holds: \"({f}) == to\" }}   # the moved item lands where it was dropped"));
+    lines.push(l("ports:"));
+    lines.push(l("  move: [0, 40]     # a machine's wire into the list"));
+    lines.push(l("  home: [330, 40]   # and out of it"));
     lines.push(l("scene:"));
     lines.push(l("  box: [0, 0, 330, 80]"));
     lines.push(l("  shapes:"));

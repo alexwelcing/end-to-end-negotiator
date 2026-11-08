@@ -196,6 +196,10 @@ Each ships in the lab and on the site the day it passes, with its numbers in thi
 - **Acceptance:** at every hand-off of 100 runs the ball's picture leaves one block at its exit port on
   tick t and appears at the next block's entry port on tick t+1 (checked from the rasters' element
   positions, not by eye).
+- **Status (2026-11-08): done; `docs/machine-room.md` has the engineering.** `ports:` live in the specs
+  (named after the events and actions wired to them), `place:` and the backdrop `scene:` in the machine
+  documents; the page composites the render networks' rasters where the document says, over the backdrop
+  the render oracle draws. Over 100 runs (300 hand-offs, the ball dropped at a random offset), the ball's picture left a rail at most 8.7 units short of its exit port (one tick of travel is 8) and appeared at most 1.3 units from the next rail's entry port, which is less than one raster pixel of the 192x32 picture (about 1.9 units).
 
 ### M7. The Most Complicated Way to Turn On a Light (R4, the script of §2)
 

@@ -104,6 +104,18 @@ for (const g of reorder.futures) {
 }
 console.log(`${reorder.futures.length} drags released${NATIVE ? " and compared" : ""}`);
 
+// Every machine that composes one scene has a backdrop the render oracle draws, and every wire between
+// placed blocks runs port to port.
+for (const m of machines.filter(m => m.picture_box)) {
+  const unrouted = m.wires.filter(w => !w.path).map(w => `${w.from}.${w.event}`);
+  if (unrouted.length) throw new Error(`${m.name}: wires without a path: ${unrouted.join(", ")}`);
+  if (m.scene) {
+    const b = await check(`${m.name} backdrop`, `/api/machine/${m.name}/backdrop`, undefined, x => ({ w: x.w, h: x.h, view: x.view }));
+    if (!(b.w > 0 && b.h > 0 && b.rgb)) throw new Error(`${m.name}: no backdrop raster`);
+  }
+}
+console.log(`${machines.filter(m => m.picture_box).length} machines drawn as one scene`);
+
 // The chain, by its networks, with the composed oracle agreeing at every tick; native and wasm in lockstep.
 let state = chain.initial;
 const advance = [{ block: "clock", action: "advance" }];

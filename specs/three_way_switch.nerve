@@ -29,6 +29,9 @@ ensures:
   - { after: set, holds: "not old.clockwise_only or name == old.name or name == ('b' if old.name == 'r' else 'g' if old.name == 'b' else 'r')" }
   - { after: set, holds: "clockwise_only == old.clockwise_only" }
   - { after: toggle_clockwise_only, holds: "clockwise_only != old.clockwise_only and name == old.name" }
+ports:
+  set: [40, 80]      # a machine's wire into the switch
+  home: [180, 80]    # and out of it
 scene:
   box: [40, 20, 180, 140]
   shapes:

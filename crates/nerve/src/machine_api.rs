@@ -14,6 +14,10 @@ use serde::Deserialize;
 use serde_json::{json, Value as J};
 use std::sync::Arc;
 
+/// The long side of a machine backdrop's raster: drawn once by the oracle, so it can be sharper than
+/// the render networks' pictures.
+const BACKDROP_MAX: usize = 768;
+
 /// A machine the lab serves, with its document for display.
 pub struct MachineEntry {
     pub spec: MachineSpec,
@@ -188,7 +192,13 @@ impl App {
                     "from": m.blocks[w.from_block].0, "event": w.event,
                     "to": m.blocks[w.to_block].0, "action": w.action,
                     "with": J::Object(w.params.iter().map(|(k, x)| (k.clone(), json!(x.source()))).collect()),
+                    // Where the wire runs in the machine's picture, port to port, when both ends are placed.
+                    "path": m.wire_path(w).map(|(a, b)| json!({"from": [a.0, a.1], "to": [b.0, b.1]})),
                 })).collect::<Vec<_>>(),
+                // One scene: each placed block's transform, the backdrop's box, and the picture's box.
+                "place": J::Object(m.blocks.iter().zip(&m.place).filter_map(|((inst, _, _), p)| p.map(|p| (inst.clone(), json!({"x": p.x, "y": p.y, "scale": p.scale})))).collect()),
+                "scene": m.scene.as_ref().map(|sc| json!({"box": [sc.x0, sc.y0, sc.x1, sc.y1]})),
+                "picture_box": m.picture_box().map(|(x0, y0, x1, y1)| json!([x0, y0, x1, y1])),
                 "derived": m.derived.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
                 "ensures": m.ensures.iter().map(|e| json!({
                     "after": e.after.as_ref().map(|(b, a)| format!("{}.{a}", m.blocks[*b].0)),
@@ -208,6 +218,17 @@ impl App {
         let s = state_from_json(&e.spec, state)?;
         let machine = Machine::oracle(&e.spec);
         Ok(json!({"positions": positions_json(&e.spec, &s)?, "derived": derived_json(&machine, &s)?}))
+    }
+
+    /// The machine's backdrop: its own scene, rasterised by the render oracle. It has no state behind
+    /// it, so there is nothing for a network to learn; the blocks' pictures are the networks' and sit
+    /// on top of it where `place:` says.
+    pub fn machine_backdrop(&self, name: &str) -> Result<J> {
+        let e = self.machine(name)?;
+        let sc = e.spec.scene.as_ref().with_context(|| format!("machine {name} has no scene"))?;
+        let (w, h) = sc.raster_size_up_to(BACKDROP_MAX);
+        let px = crate::render::rasterize_scene(sc, w, h)?;
+        Ok(json!({"w": w, "h": h, "view": crate::render::raster_view(sc, w, h), "rgb": crate::render::base64(&crate::render::to_rgb8(&px, w, h))}))
     }
 
     /// One tick of the machine by its networks, and the same tick by the composed oracle for comparison.

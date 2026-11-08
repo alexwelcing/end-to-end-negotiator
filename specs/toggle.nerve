@@ -7,6 +7,9 @@ actions:
   flip: {}
 transitions:
   flip: { status: "'on' if status == 'off' else 'off'", emits: { turned_on: "status == 'on'" } }   # the event a machine can wire
+ports:
+  flip: [0, 30]          # a machine's wire into the toggle
+  turned_on: [120, 30]   # and out of it
 scene:
   box: [0, 0, 120, 60]
   shapes:
