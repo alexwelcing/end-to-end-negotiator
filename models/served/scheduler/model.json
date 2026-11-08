@@ -1,0 +1,117 @@
+{
+  "spec": "scheduler",
+  "kind": "finite",
+  "candidates": "valid",
+  "jepa": {
+    "state_dim": 78,
+    "action_dim": 24,
+    "d": 64,
+    "hidden": 128,
+    "ema": 0.99,
+    "tau": 0.1,
+    "margin": 1.0,
+    "var_weight": 0.05,
+    "action_cont_dim": 0,
+    "ord_dim": 6,
+    "ord_weight": 1.0,
+    "fields": [
+      [
+        0,
+        2,
+        false
+      ],
+      [
+        2,
+        3,
+        true
+      ],
+      [
+        5,
+        3,
+        true
+      ],
+      [
+        8,
+        2,
+        false
+      ],
+      [
+        10,
+        3,
+        true
+      ],
+      [
+        13,
+        3,
+        true
+      ],
+      [
+        16,
+        2,
+        false
+      ],
+      [
+        18,
+        3,
+        true
+      ],
+      [
+        21,
+        3,
+        true
+      ]
+    ],
+    "fact_weight": 10.0
+  },
+  "train": {
+    "epochs": 300,
+    "batch": 128,
+    "lr": 0.003,
+    "d": 64,
+    "hidden": 128,
+    "ema": 0.99,
+    "tau": 0.1,
+    "holdout": 0.0,
+    "seed": 0,
+    "hole_weight": 20,
+    "negatives": 3,
+    "weight_decay": 0.05,
+    "ord_weight": 1.0,
+    "fact_weight": 10.0,
+    "holdout_salt": "nerve",
+    "log_every": 100,
+    "cont_pairs": 4000,
+    "cont_negatives": 16,
+    "eval_samples": 1000,
+    "candidates": "valid",
+    "holdout_rule": null
+  },
+  "eval": {
+    "all": {
+      "n": 41472,
+      "exact": 1.0,
+      "violation_rate": 0.0
+    },
+    "seen": {
+      "n": 41472,
+      "exact": 1.0,
+      "violation_rate": 0.0
+    },
+    "heldout": {
+      "n": 41472,
+      "exact": 1.0,
+      "violation_rate": 0.0
+    },
+    "learned_only": {
+      "n": 41472,
+      "exact": 1.0,
+      "violation_rate": 0.0
+    },
+    "score": 1.0,
+    "train_pairs": 41472,
+    "negatives": 124393,
+    "seconds": 3936.0,
+    "params": 165524,
+    "trained_on": "cuda"
+  }
+}

@@ -22,10 +22,9 @@ needs either a different inference (one descent per field, or the compiled core 
 coupling) or to be split into three blocks wired by events, which is the design \cref{sec:couplings}
 recommends anyway.
 
-\emph{The sweep is not finished.} \Cref{tab:round2} and \cref{fig:cost} are generated from a log that is
-still being appended to as this draft is written; the finite rows present are exact, and we make no claim about
-rows that are not yet there. Everything is one GPU, one configuration, and three seeds for the small
-interfaces and one for the two largest.
+\emph{One GPU, one configuration.} \Cref{tab:round2} and \cref{fig:cost} are one machine and one training
+recipe, with three seeds for the small interfaces and one for the two largest; the times are wall-clock with
+several runs sharing the GPU.
 
 \emph{Scale comparisons are approximate.} Qwenputer's figures are from its repository's README; qwenGPU's
 repository was not reachable when we checked, and its size is taken from Part I's citation. The comparison is

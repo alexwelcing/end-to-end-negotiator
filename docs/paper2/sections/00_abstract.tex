@@ -3,9 +3,7 @@ specification, and showed that it can, one interface at a time. This paper chang
 generalisation to exactness, reports the result, and plans the step from interfaces to machines. Trained on the
 whole of its spec, one network per interface is exact: of the \nPlanned{} interfaces we set out to train,
 \nNewDemos{} of them rebuilt from the demo set of declarative dragging (a sliding puzzle, Tower of Hanoi with a
-solver given only by example, a kanban board, Sokoban, a meeting scheduler), every finite network that has
-finished (\nExactSpecs{} of \nFiniteSpecs{} as this draft is built) reproduces every transition with no rule
-broken, on every seed, at \minParamsK--\maxParamsK k parameters and minutes to an hour on a local GPU;
+solver given only by example, a kanban board, Sokoban, a meeting scheduler), all \nFiniteSpecs{} finite networks reproduce every transition with no rule broken, on every seed, at \minParamsK--\maxParamsK k parameters and minutes to an hour on a local GPU;
 restricting a network's answers to the states the spec's invariants allow removes rule breaks without
 retraining. The recipe stops at an
 enumeration wall, and we propose to go around it rather than through it: machines wired from exact blocks. We

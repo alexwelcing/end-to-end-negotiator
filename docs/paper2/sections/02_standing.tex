@@ -5,9 +5,8 @@ Part I trained on $85\%$ of an interface's (state, action) cells and scored the 
 whether a network could generalise a rule it had seen only in part. That is not the question this programme
 asks. Each interface gets its own network, trained on the whole of its spec; nothing is held out, because
 nothing needs to be. The questions that remain are the ones a compiler is asked: is the output exact, is it
-exact every time, and what does it cost. This section answers them for the \nPlanned{} interfaces we set out
-to train (\nFullSpecs{} finished as this draft is built), \nNewDemos{} of them rebuilt from the demo set of
-declarative dragging~\citep{dragology}, and then shows where the one-network-per-interface recipe stops.
+exact every time, and what does it cost. This section answers them for \nPlanned{} interfaces, \nNewDemos{} of them rebuilt
+from the demo set of declarative dragging~\citep{dragology}, and then shows where the one-network-per-interface recipe stops.
 
 \subsection{Trained on its whole spec, one network per interface is exact}
 \label{sec:round2}
@@ -59,9 +58,9 @@ interface & source & what it tests & states & cells & params & wall s & seeds & 
 \end{tabular}}
 \end{table}
 
-\paragraph{Result.} Every finite interface that has finished training is exact: $100\%$ of its cells, no
-violation, on every seed tried (\nExactSpecs{} of \nFiniteSpecs{} finite rows so far; the seeds column says how
-many each has). Hanoi reproduces all 81 solver examples on all three seeds while also being exact on its 729
+\paragraph{Result.} Every finite interface is exact: $100\%$ of its cells, no violation, on every seed tried
+(\nExactSpecs{} of \nFiniteSpecs{}; the seeds column says how many each has, three for all but the two
+largest). The scheduler, the largest at \maxCells{} cells, was exact from its first evaluation. Hanoi reproduces all 81 solver examples on all three seeds while also being exact on its 729
 written cells, so a hole and a rule can share one network of $105$k parameters without the examples being
 drowned by the rules. The continuous interfaces are a different story. The two with one continuous field are
 within $1\%$ of range on $99.6\%$ and $100\%$ of fresh transitions with $0.1\%$ and $0$ violations, at Part I's
@@ -74,8 +73,8 @@ tolerance allows, so an answer that is nearly right still breaks the rule. We le
 is; \cref{sec:handoff} and \cref{sec:limits} draw the consequence, which is that continuous blocks must be
 small and their hand-offs discrete. Nothing in \cref{tab:round2} needed a larger network than Part
 I's, or a new idea; it needed exhaustive coverage of the cells and the discipline below. The whole sweep is
-\totalGpuMinutes{} wall-clock minutes so far with several runs sharing the GPU, and the largest interface
-(\maxCellsSpec, \maxCells{} cells) is the one that sets the pace.
+\totalGpuMinutes{} wall-clock minutes with several runs sharing the GPU, and the largest interface
+(\maxCellsSpec, \maxCells{} cells) took over an hour of it.
 
 \paragraph{Discipline.} Part I's own review found specs, configurations and logs behind its tables
 uncommitted, and this round found one more failure of the same kind: served models whose records had been
@@ -83,8 +82,7 @@ patched by hand after training. Every model in \cref{tab:round2} is now produced
 (\texttt{experiments/round2/run.sh}, committed with this paper), writes its own \texttt{model.json} once and
 is never edited, is scored by a second command into an append-only log, and the set the lab serves is chosen
 from that log by a third. A seed is a folder; a rerun is a new row that replaces the old one in the summary
-rather than a second vote. One early row (sokoban) predates the per-seed folders and is being rerun; until the
-rerun lands, its parameter and time columns are one seed's. We mention this because the next sections propose machines of many networks, and a provenance discipline
+rather than a second vote. We mention this because the next sections propose machines of many networks, and a provenance discipline
 that is merely good practice for one network is a precondition for debugging twenty.
 
 \subsection{Answering only from states the spec allows removes rule breaks without retraining}

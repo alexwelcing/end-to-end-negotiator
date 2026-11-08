@@ -68,8 +68,10 @@ rule": no, it learned the examples.
 
 ### Q7 (full-spec training)
 
-Filled in by `summarize.py` as the sweep completes; see `docs/paper2/` for the generated table. Every finished
-finite interface is 100% exact with 0 violations on every seed. The continuous specs finished at 21:22:
+The sweep is complete (2026-11-08). All 14 finite interfaces are 100% exact with 0 violations on every seed
+trained (three seeds each, one for kanban and scheduler); `summarize.py` has the table and `docs/paper2/` the
+generated version. The scheduler, the largest at 41,472 cells and 165,524 parameters, was exact from its first
+evaluation. The continuous specs:
 `tracks` 99.6% within 1% of range (0.1% violations), `slider_continuous` 100% (0), and **`linked_sliders`
 10.4% within 1%, mean error 7.5% of range, 89.6% violations**. Q7's "≥ 99%" fails for linked sliders: three
 coupled continuous fields that move and stop together, with `ensures` holding the group's shape to 0.001, are

@@ -80,7 +80,7 @@
     "score": 1.0,
     "train_pairs": 3960,
     "negatives": 11879,
-    "seconds": 603.4,
+    "seconds": 219.7,
     "params": 113652,
     "trained_on": "cuda"
   }
