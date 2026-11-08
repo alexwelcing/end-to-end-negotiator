@@ -363,8 +363,8 @@ initial: {status: off}
         pic.save(&dir, &cfg, &report)?;
         let back = Picture::load(spec.clone(), &dir, &Device::Cpu)?;
         assert_eq!(back.draw(&states[0])?, a);
-        let meta = std::fs::read_to_string(dir.join(META_FILE))?;
-        let bytes = std::fs::read(dir.join(WEIGHTS_FILE))?;
+        let meta = std::fs::read_to_string(dir.join(META_FILE)).with_context(|| format!("reading {}", dir.join(META_FILE).display()))?;
+        let bytes = std::fs::read(dir.join(WEIGHTS_FILE)).with_context(|| format!("reading {}", dir.join(WEIGHTS_FILE).display()))?;
         assert_eq!(Picture::from_bytes(spec, &meta, &bytes, &Device::Cpu)?.draw(&states[1])?, b);
         std::fs::remove_dir_all(&dir).ok();
         Ok(())

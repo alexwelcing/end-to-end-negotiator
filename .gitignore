@@ -16,8 +16,9 @@ docs/paper2/main.bbl
 docs/paper2/numbers.tex
 docs/paper2/table_round2_rows.tex
 docs/paper2/fig_cost.tex
-# the lab's served networks are committed: a fresh clone runs without training
+# the lab's served networks and render networks are committed: a fresh clone runs without training
 !models/served/**/*.safetensors
+!models/pictures/**/*.safetensors
 /target-cuda/
 /site/dist/
 /target-cuda2/
