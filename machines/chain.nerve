@@ -1,0 +1,29 @@
+# A machine that runs itself (paper 2 §6.2): a clock drives a chain of finite blocks through five wires.
+# The toggle flips on every tick; turning on increments the digit; the digit wrapping rotates the list
+# (its first item goes to the end); the list coming home turns the switch one place clockwise; the switch
+# coming back to r resets the digit. Four of the five networks are round 2's, unchanged; nothing here is code.
+# `nerve check machines/chain.nerve` samples random walks: the product has 144,000 states.
+nerve: 1
+machine: chain
+blocks:
+  clock: clock
+  toggle: toggle
+  digit: digit
+  list: reorder
+  switch: three_way_switch
+# What the outside world may do: advance the clock, or grab a list item or the switch's knob (a drop is a move or a set).
+inputs: [clock.advance, list.move, switch.set]
+wires:
+  - { on: clock.tick, do: toggle.flip }
+  - { on: toggle.turned_on, do: digit.inc }
+  # A wire's `with:` is evaluated when the event is raised, over the whole machine at that moment:
+  # here the list's own state picks the item at the front, which goes to the back.
+  - { on: digit.wrap, do: list.move, with: { item: "'a' if list.pa == 0 else 'b' if list.pb == 0 else 'c' if list.pc == 0 else 'd' if list.pd == 0 else 'e'", to: 4 } }
+  - { on: list.home, do: switch.set, with: { to: "'b' if switch.name == 'r' else 'g' if switch.name == 'b' else 'r'" } }
+  - { on: switch.home, do: digit.reset }
+derived:
+  home: "list.pa == 0 and list.pb == 1 and list.pc == 2 and list.pd == 3 and list.pe == 4"
+  count: "digit.d"
+ensures:
+  # Every clock tick reaches the toggle (checked on quiescent ticks: nothing grabbed, nothing queued).
+  - { after: clock.advance, holds: "toggle.status != old.toggle.status" }

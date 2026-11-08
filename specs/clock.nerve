@@ -1,0 +1,16 @@
+# The machine's clock: a block like any other, with one action (docs/machine-room.md, paper 2 §5.1).
+# `advance` moves the hand one place and emits `tick`; a machine wires that event to whatever it drives,
+# and the lab calls `advance` at a chosen rate. Ten phases so the hand is something to watch.
+nerve: 1
+name: clock
+state:
+  phase: {type: int, range: [0, 9]}
+actions:
+  advance: {}
+transitions:
+  advance: { phase: "(phase + 1) % 10", emits: { tick: "True" } }
+ensures:
+  - { after: advance, holds: "phase == (old.phase + 1) % 10" }
+render:
+  hand: { x: "24 + 16 * phase", y: 30 }
+initial: {phase: 0}

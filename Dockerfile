@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 COPY --from=build /src/target/release/nerve /usr/local/bin/nerve
 COPY specs ./specs
+COPY machines ./machines
 COPY models/served ./models/served
 USER nerve
 EXPOSE 7860

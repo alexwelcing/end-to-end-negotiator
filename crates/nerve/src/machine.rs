@@ -1,14 +1,15 @@
-//! Machines: blocks wired by events (paper 2 §3; docs/machine-room.md).
+//! Machines: blocks wired by events (paper 2 §3 and §5; docs/machine-room.md).
 //!
-//! A `machine:` document names block instances (each a spec with its own network), the
-//! external actions the outside world may apply (`inputs`), wires from one block's events to
-//! another's actions, `derived` values over all blocks, and machine-level `ensures`. A tick
-//! applies a list of external actions; after each, the event queue drains in order, every
-//! delivery stepping its target block in the machine state current at that moment. Events are
-//! evaluated from the specs' `emits` clauses, never produced by a network.
+//! A `machine:` document names block instances (each a spec with its own network), the external
+//! actions the outside world may apply (`inputs`), wires from one block's events to another's
+//! actions, `derived` values over all blocks, and machine-level `ensures`. A tick applies a list of
+//! external actions; after each, the event queue drains in order, every delivery stepping its
+//! target block in the machine state current at that moment. Events are evaluated from the specs'
+//! `emits` clauses, never produced by a network. A block a pointer holds is *detached*: deliveries
+//! addressed to it are held and returned, to be delivered first on a later tick.
 
 use crate::expr::{Expr, Scope};
-use crate::oracle::{Oracle, StateScope};
+use crate::oracle::Oracle;
 use crate::spec::{ActionInst, Spec, State};
 use crate::value::Value;
 use anyhow::{bail, ensure, Context, Result};
@@ -22,8 +23,9 @@ use std::path::Path;
 pub const EXHAUSTIVE_LIMIT: usize = 10_000;
 const DEFAULT_MAX_EVENTS: usize = 64;
 
-/// One wire: an event of a source block delivered as an action to a target block, with the
-/// action's parameters computed from the source block's old and new state.
+/// One wire: an event of a source block delivered as an action to a target block. The action's
+/// parameters are expressions over the whole machine (`inst.field`, `old.inst.field`, derived
+/// names), evaluated when the event is raised, in the action's declared parameter order.
 #[derive(Debug, Clone)]
 pub struct Wire {
     pub from_block: usize,
@@ -58,8 +60,33 @@ pub struct MachineSpec {
 /// The machine's state: one state per block, in block order.
 pub type MachineState = Vec<State>;
 
-/// A pending block step inside a tick: `(block, action, wire that delivered it)`.
-type Delivery = (usize, ActionInst, Option<(usize, String)>);
+/// A pending block step: an event's delivery, or an external action.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Delivery {
+    pub block: usize,
+    pub action: ActionInst,
+    /// The wire that raised it, as `(source block, event)`; `None` for an external action.
+    pub via: Option<(usize, String)>,
+}
+
+/// What one tick is asked to do.
+#[derive(Debug, Clone, Default)]
+pub struct TickInput<'i> {
+    /// External actions, applied in order, each followed by its event cascade.
+    pub external: &'i [(usize, ActionInst)],
+    /// Deliveries held over from earlier ticks (their blocks were detached), delivered first.
+    pub pending: Vec<Delivery>,
+    /// Blocks a pointer holds this tick: deliveries to them are held, not applied.
+    pub detached: &'i [usize],
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TickOutput {
+    pub state: MachineState,
+    pub trace: TickTrace,
+    /// Deliveries held for detached blocks, in order; pass them as the next tick's `pending`.
+    pub pending: Vec<Delivery>,
+}
 
 /// What `MachineSpec::check` found and how far it looked.
 #[derive(Debug, Clone, Default)]
@@ -115,7 +142,8 @@ impl MachineSpec {
             blocks.push((inst, ty, spec));
         }
         ensure!(!blocks.is_empty(), "machine {name} has no blocks");
-        let block_idx = |inst: &str| blocks.iter().position(|(n, _, _)| n == inst);
+        let names: Vec<&str> = blocks.iter().map(|(n, _, _)| n.as_str()).collect();
+        let block_idx = |inst: &str| names.iter().position(|n| *n == inst);
         let split = |s: &str| -> Result<(usize, String)> {
             let (inst, rest) = s.split_once('.').with_context(|| format!("{s:?} must be `block.name`"))?;
             Ok((block_idx(inst).with_context(|| format!("{s:?}: unknown block {inst:?}"))?, rest.to_string()))
@@ -132,7 +160,7 @@ impl MachineSpec {
                 for it in items {
                     let (b, action) = split(&as_str(it)?)?;
                     let spec = &blocks[b].2;
-                    let act = spec.action(&action).with_context(|| format!("input {}.{action}: no such action", blocks[b].0))?;
+                    let act = spec.action(&action).with_context(|| format!("input {}.{action}: no such action", names[b]))?;
                     inputs.extend(act.instances()?.into_iter().map(|a| (b, a)));
                 }
             }
@@ -145,23 +173,26 @@ impl MachineSpec {
             let (from_block, event) = split(&as_str(get(wm, "on").context("wire needs `on: block.event`")?)?)?;
             let (to_block, action) = split(&as_str(get(wm, "do").context("wire needs `do: block.action`")?)?)?;
             let src = &blocks[from_block].2;
-            ensure!(src.events().contains(&event.as_str()), "wire on {}.{event}: block {} emits no such event", blocks[from_block].0, blocks[from_block].0);
-            let dst = &blocks[to_block].2;
-            let act = dst.action(&action).with_context(|| format!("wire do {}.{action}: no such action", blocks[to_block].0))?;
-            let mut params = Vec::new();
-            for (k, v) in entries(get(wm, "with"))? {
-                ensure!(act.param(&k).is_some(), "wire do {}.{action}: no parameter {k:?}", blocks[to_block].0);
-                params.push((k, Expr::compile(&expr_src(&v)?)?));
+            ensure!(src.events().contains(&event.as_str()), "wire on {}.{event}: block {} emits no such event", names[from_block], names[from_block]);
+            let act = blocks[to_block].2.action(&action).with_context(|| format!("wire do {}.{action}: no such action", names[to_block]))?;
+            let given = entries(get(wm, "with"))?;
+            for (k, _) in &given {
+                ensure!(act.param(k).is_some(), "wire do {}.{action}: no parameter {k:?}", names[to_block]);
             }
+            // In the action's declared order, so a delivery is an ordinary action instance.
+            let mut params = Vec::new();
             for p in &act.params {
-                ensure!(params.iter().any(|(k, _)| *k == p.name), "wire do {}.{action}: parameter {} needs a `with:` expression", blocks[to_block].0, p.name);
+                let (_, v) = given.iter().find(|(k, _)| *k == p.name).with_context(|| {
+                    format!("wire do {}.{action}: parameter {} needs a `with:` expression", names[to_block], p.name)
+                })?;
+                params.push((p.name.clone(), Expr::compile(&flatten(&expr_src(v)?, &names))?));
             }
             wires.push(Wire { from_block, event, to_block, action, params });
         }
 
-        let names: Vec<&str> = blocks.iter().map(|(n, _, _)| n.as_str()).collect();
         let mut derived = Vec::new();
         for (k, v) in entries(get(&doc, "derived"))? {
+            ensure!(block_idx(&k).is_none(), "derived {k:?} has the name of a block");
             derived.push((k, Expr::compile(&flatten(&expr_src(&v)?, &names))?));
         }
         let mut ensures = Vec::new();
@@ -171,7 +202,7 @@ impl MachineSpec {
                 None | Some(Yaml::Null) => None,
                 Some(a) => {
                     let (b, action) = split(&as_str(a)?)?;
-                    ensure!(blocks[b].2.action(&action).is_some(), "ensures after {}.{action}: no such action", blocks[b].0);
+                    ensure!(blocks[b].2.action(&action).is_some(), "ensures after {}.{action}: no such action", names[b]);
                     Some((b, action))
                 }
             };
@@ -207,31 +238,29 @@ impl MachineSpec {
         let m = Machine::oracle(self);
         let mut problems = Vec::new();
         let mut ticks = 0usize;
+        let mut note = |b: usize, a: &ActionInst, s: &MachineState, trace: &TickTrace| {
+            for v in &trace.violations {
+                if problems.len() < 50 {
+                    problems.push(format!("{}.{} from {}: {v}", self.blocks[b].0, a.name, self.state_key(s)));
+                }
+            }
+        };
         let mut seen: HashSet<String> = HashSet::new();
         let mut queue = VecDeque::from([self.initial()]);
         seen.insert(self.state_key(&self.initial()));
         let mut exhaustive = true;
-        while let Some(s) = queue.pop_front() {
+        'bfs: while let Some(s) = queue.pop_front() {
             for (b, a) in &self.inputs {
-                let (next, trace) = m.tick(&s, &[(*b, a.clone())])?;
+                let (next, trace) = m.tick(&s, std::slice::from_ref(&(*b, a.clone())))?;
                 ticks += 1;
-                for v in &trace.violations {
-                    let p = format!("{}.{} from {}: {v}", self.blocks[*b].0, a.name, self.state_key(&s));
-                    if problems.len() < 50 {
-                        problems.push(p);
-                    }
-                }
-                let k = self.state_key(&next);
-                if seen.insert(k) {
+                note(*b, a, &s, &trace);
+                if seen.insert(self.state_key(&next)) {
                     if seen.len() > EXHAUSTIVE_LIMIT {
                         exhaustive = false;
-                        break;
+                        break 'bfs;
                     }
                     queue.push_back(next);
                 }
-            }
-            if !exhaustive {
-                break;
             }
         }
         if !exhaustive {
@@ -240,13 +269,9 @@ impl MachineSpec {
                 let mut s = self.initial();
                 for _ in 0..horizon {
                     let (b, a) = self.inputs.choose(&mut rng).context("machine has no inputs")?;
-                    let (next, trace) = m.tick(&s, &[(*b, a.clone())])?;
+                    let (next, trace) = m.tick(&s, std::slice::from_ref(&(*b, a.clone())))?;
                     ticks += 1;
-                    for v in &trace.violations {
-                        if problems.len() < 50 {
-                            problems.push(format!("{}.{} from {}: {v}", self.blocks[*b].0, a.name, self.state_key(&s)));
-                        }
-                    }
+                    note(*b, a, &s, &trace);
                     s = next;
                 }
             }
@@ -275,6 +300,18 @@ impl BlockStep for crate::train::Model {
 impl BlockStep for crate::continuous::ContinuousModel {
     fn step(&self, s: &State, a: &ActionInst) -> Result<State> {
         crate::continuous::ContinuousModel::step(self, s, a)
+    }
+}
+
+impl<T: BlockStep + ?Sized> BlockStep for &T {
+    fn step(&self, s: &State, a: &ActionInst) -> Result<State> {
+        (**self).step(s, a)
+    }
+}
+
+impl<T: BlockStep + ?Sized> BlockStep for std::sync::Arc<T> {
+    fn step(&self, s: &State, a: &ActionInst) -> Result<State> {
+        (**self).step(s, a)
     }
 }
 
@@ -319,58 +356,87 @@ impl<'a> Machine<'a> {
         Self { spec, steppers, oracles }
     }
 
-    /// One tick: the external actions in order, each followed by its event cascade.
+    /// One quiescent tick: the external actions in order, each followed by its event cascade.
     pub fn tick(&self, state: &MachineState, external: &[(usize, ActionInst)]) -> Result<(MachineState, TickTrace)> {
+        let out = self.tick_with(state, TickInput { external, pending: Vec::new(), detached: &[] })?;
+        Ok((out.state, out.trace))
+    }
+
+    /// One tick: held deliveries first, then the external actions in order, each delivery followed
+    /// by its cascade. Deliveries to detached blocks are held and returned. Machine `ensures` with an
+    /// `after:` are checked only on quiescent ticks (nothing detached, nothing pending), with `old`
+    /// the state before the tick; the others are checked every tick.
+    pub fn tick_with(&self, state: &MachineState, input: TickInput<'_>) -> Result<TickOutput> {
         let spec = self.spec;
         let mut cur = state.clone();
         let mut trace = TickTrace::default();
+        let mut held = Vec::new();
         let mut processed = 0usize;
-        for (b, a) in external {
-            let mut queue: VecDeque<Delivery> = VecDeque::from([(*b, a.clone(), None)]);
-            while let Some((block, action, via)) = queue.pop_front() {
-                processed += 1;
-                ensure!(processed <= spec.max_events, "tick exceeded {} deliveries: the wiring does not terminate", spec.max_events);
-                let before = cur[block].clone();
-                let after = self.steppers[block].step(&before, &action)?;
-                let events = self.oracles[block].events(&before, &action, &after)?;
-                let violations: Vec<String> = self.oracles[block].violations(&before, Some(&action), &after, 0.01)
-                    .into_iter()
-                    .map(|v| format!("{}: {v}", spec.blocks[block].0))
-                    .collect();
-                trace.violations.extend(violations.iter().cloned());
-                cur[block] = after.clone();
-                for e in &events {
-                    for w in spec.wires.iter().filter(|w| w.from_block == block && w.event == *e) {
-                        let scope = StateScope { spec: &spec.blocks[block].2, cur: &after, params: &action.params, old: Some(&before) };
-                        let params = w
-                            .params
-                            .iter()
-                            .map(|(k, x)| Ok((k.clone(), x.eval(&scope).with_context(|| format!("wire {}.{e} with {k}", spec.blocks[block].0))?)))
-                            .collect::<Result<Vec<_>>>()?;
-                        queue.push_back((w.to_block, ActionInst { name: w.action.clone(), params }, Some((block, e.clone()))));
-                    }
-                }
-                trace.steps.push(StepRecord { block, action, via, before, after, events, violations });
+        let quiescent = input.detached.is_empty() && input.pending.is_empty();
+        let mut queue: VecDeque<Delivery> = input.pending.into_iter().collect();
+        let mut external = input.external.iter();
+        loop {
+            let Some(d) = queue.pop_front().or_else(|| external.next().map(|(b, a)| Delivery { block: *b, action: a.clone(), via: None })) else {
+                break;
+            };
+            if input.detached.contains(&d.block) {
+                held.push(d);
+                continue;
             }
+            processed += 1;
+            ensure!(processed <= spec.max_events, "tick exceeded {} deliveries: the wiring does not terminate", spec.max_events);
+            let Delivery { block, action, via } = d;
+            let before = cur[block].clone();
+            let after = self.steppers[block].step(&before, &action)?;
+            let events = self.oracles[block].events(&before, &action, &after)?;
+            let violations: Vec<String> =
+                self.oracles[block].violations(&before, Some(&action), &after, 0.01).into_iter().map(|v| format!("{}: {v}", spec.blocks[block].0)).collect();
+            trace.violations.extend(violations.iter().cloned());
+            let prev = cur.clone();
+            cur[block] = after.clone();
+            for e in &events {
+                for w in spec.wires.iter().filter(|w| w.from_block == block && w.event == *e) {
+                    let scope = MachineScope { spec, cur: &cur, old: Some(&prev) };
+                    let params = w
+                        .params
+                        .iter()
+                        .map(|(k, x)| {
+                            let v = x.eval(&scope).with_context(|| format!("wire {}.{e} with {k}", spec.blocks[block].0))?;
+                            let p = spec.blocks[w.to_block].2.action(&w.action).and_then(|a| a.param(k)).context("wire parameter vanished")?;
+                            if let Ok(domain) = p.domain() {
+                                ensure!(domain.contains(&v), "wire {}.{e} with {k}: {v:?} is not a value of {}.{}'s {k}", spec.blocks[block].0, spec.blocks[w.to_block].0, w.action);
+                            }
+                            Ok((k.clone(), v))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    queue.push_back(Delivery { block: w.to_block, action: ActionInst { name: w.action.clone(), params }, via: Some((block, e.clone())) });
+                }
+            }
+            trace.steps.push(StepRecord { block, action, via, before, after, events, violations });
         }
-        // Machine-level properties, after the whole tick, with `old` the state before it.
         let scope = MachineScope { spec, cur: &cur, old: Some(state) };
         for e in &spec.ensures {
             let applies = match &e.after {
                 None => true,
-                Some((b, name)) => external.iter().any(|(xb, xa)| xb == b && xa.name == *name),
+                Some((b, name)) => quiescent && input.external.iter().any(|(xb, xa)| xb == b && xa.name == *name),
             };
             if applies && !e.holds.eval(&scope).with_context(|| format!("machine ensures {}", e.holds.source()))?.truthy() {
                 trace.violations.push(format!("machine ensures: {}", e.holds.source()));
             }
         }
-        Ok((cur, trace))
+        Ok(TickOutput { state: cur, trace, pending: held })
     }
 
     /// A derived value of the machine in `state`.
     pub fn derived(&self, state: &MachineState, name: &str) -> Result<Option<Value>> {
         let scope = MachineScope { spec: self.spec, cur: state, old: None };
         Ok(scope.get(name))
+    }
+
+    /// Every derived value in `state`, in declaration order.
+    pub fn derived_all(&self, state: &MachineState) -> Result<Vec<(String, Value)>> {
+        let scope = MachineScope { spec: self.spec, cur: state, old: None };
+        self.spec.derived.iter().map(|(n, e)| Ok((n.clone(), e.eval(&scope).with_context(|| format!("derived {n}"))?))).collect()
     }
 }
 
@@ -472,12 +538,23 @@ mod tests {
     use candle_core::Device;
     use rand::Rng;
 
+    fn machine(name: &str) -> MachineSpec {
+        MachineSpec::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../machines/{name}.nerve"))).unwrap()
+    }
+
     fn odometer() -> MachineSpec {
-        MachineSpec::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../machines/odometer.nerve")).unwrap()
+        machine("odometer")
     }
 
     fn value(m: &Machine, s: &MachineState) -> i64 {
         m.derived(s, "value").unwrap().unwrap().as_f64().unwrap() as i64
+    }
+
+    fn train_digit(spec: &Spec) -> crate::train::Model {
+        let cfg = TrainConfig { epochs: 80, d: 16, hidden: 32, holdout: 0.0, log_every: 1000, ..Default::default() };
+        let (net, report) = train(spec, &cfg, &Device::Cpu).unwrap();
+        assert_eq!(report["all"]["exact"], 1.0, "the digit block itself must be exact: {report}");
+        net
     }
 
     #[test]
@@ -521,7 +598,7 @@ mod tests {
         assert!(trace.steps[2].events.is_empty());
         // 999 wraps to 0 and the machine's own ensures (mod 1000) holds.
         let top: MachineState = vec![vec![Value::Int(9)]; 3];
-        let (zero, trace) = m.tick(&top, &[inc]).unwrap();
+        let (zero, trace) = m.tick(&top, std::slice::from_ref(&inc)).unwrap();
         assert_eq!((value(&m, &zero), trace.violations.len()), (0, 0));
     }
 
@@ -545,16 +622,13 @@ mod tests {
         // Paper 2, Prediction 1, second half: a million states is past the exhaustive limit, so the
         // check walks; the digit network, used six times, agrees with integer arithmetic on sampled
         // increments from random states.
-        let spec = MachineSpec::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../machines/odometer6.nerve"))?;
+        let spec = machine("odometer6");
         assert_eq!(spec.state_space_size()?, 1_000_000);
         let report = spec.check(20, 200)?;
         assert!(report.problems.is_empty(), "{:?}", report.problems);
         assert!(!report.exhaustive);
-        let digit = &spec.blocks[0].2;
-        let cfg = TrainConfig { epochs: 80, d: 16, hidden: 32, holdout: 0.0, log_every: 1000, ..Default::default() };
-        let (net, report) = train(digit, &cfg, &Device::Cpu)?;
-        assert_eq!(report["all"]["exact"], 1.0, "{report}");
-        let networks = Machine::with_steppers(&spec, (0..6).map(|_| Box::new(ModelRef(&net)) as Box<dyn BlockStep>).collect());
+        let net = train_digit(&spec.blocks[0].2);
+        let networks = Machine::with_steppers(&spec, (0..6).map(|_| Box::new(&net) as Box<dyn BlockStep>).collect());
         let samples: usize = std::env::var("NERVE_ODOMETER_SAMPLES").ok().and_then(|s| s.parse().ok()).unwrap_or(100_000);
         let mut rng = rand::rngs::StdRng::seed_from_u64(1);
         let inc = (0, ActionInst::new("inc"));
@@ -582,11 +656,8 @@ mod tests {
         // Paper 2, Prediction 1: one digit network trained on its whole spec, used three times,
         // equals integer arithmetic on all 1,000 states, with no violation anywhere.
         let spec = odometer();
-        let digit = &spec.blocks[0].2;
-        let cfg = TrainConfig { epochs: 80, d: 16, hidden: 32, holdout: 0.0, log_every: 1000, ..Default::default() };
-        let (net, report) = train(digit, &cfg, &Device::Cpu)?;
-        assert_eq!(report["all"]["exact"], 1.0, "the digit block itself must be exact: {report}");
-        let networks = Machine::with_steppers(&spec, (0..3).map(|_| Box::new(ModelRef(&net)) as Box<dyn BlockStep>).collect());
+        let net = train_digit(&spec.blocks[0].2);
+        let networks = Machine::with_steppers(&spec, (0..3).map(|_| Box::new(&net) as Box<dyn BlockStep>).collect());
         let oracle = Machine::oracle(&spec);
         let mut checked = 0;
         for a in 0..10 {
@@ -594,8 +665,8 @@ mod tests {
                 for c in 0..10 {
                     let s: MachineState = vec![vec![Value::Int(a)], vec![Value::Int(b)], vec![Value::Int(c)]];
                     for (blk, act) in &spec.inputs {
-                        let (n1, t1) = networks.tick(&s, &[(*blk, act.clone())])?;
-                        let (n2, _) = oracle.tick(&s, &[(*blk, act.clone())])?;
+                        let (n1, t1) = networks.tick(&s, std::slice::from_ref(&(*blk, act.clone())))?;
+                        let (n2, _) = oracle.tick(&s, std::slice::from_ref(&(*blk, act.clone())))?;
                         assert_eq!(n1, n2, "{} from {}", act.name, spec.state_key(&s));
                         assert!(t1.violations.is_empty(), "{:?}", t1.violations);
                         if *blk == 0 && act.name == "inc" {
@@ -610,12 +681,74 @@ mod tests {
         Ok(())
     }
 
-    /// Lets one trained network serve several block instances.
-    struct ModelRef<'m>(&'m crate::train::Model);
+    /// The chain at a moment where one tick runs the whole cascade: digit at 9, toggle off, list
+    /// one rotation from home with the switch on b, so the clock's advance flips the toggle on,
+    /// increments the digit to 0 (wrap), rotates the list home, turns the switch to g, and nothing more.
+    fn chain_on_the_brink(spec: &MachineSpec) -> MachineState {
+        let mut s = spec.initial();
+        let at = |n: &str| spec.block_index(n).unwrap();
+        s[at("digit")] = vec![Value::Int(9)];
+        // list: e at the front, then a b c d (one rotation moves e to the back: home)
+        s[at("list")] = spec.blocks[at("list")].2.state_from_json(&serde_json::json!({"pa": 1, "pb": 2, "pc": 3, "pd": 4, "pe": 0})).unwrap();
+        s[at("switch")] = spec.blocks[at("switch")].2.state_from_json(&serde_json::json!({"name": "b", "clockwise_only": false})).unwrap();
+        s
+    }
 
-    impl BlockStep for ModelRef<'_> {
-        fn step(&self, s: &State, a: &ActionInst) -> Result<State> {
-            self.0.step(s, a)
-        }
+    #[test]
+    fn wire_parameters_are_computed_over_the_machine_when_the_event_is_raised() -> Result<()> {
+        let spec = machine("chain");
+        let m = Machine::oracle(&spec);
+        let s = chain_on_the_brink(&spec);
+        let advance = (spec.block_index("clock").unwrap(), ActionInst::new("advance"));
+        let (next, trace) = m.tick(&s, std::slice::from_ref(&advance))?;
+        assert!(trace.violations.is_empty(), "{:?}", trace.violations);
+        let names: Vec<String> = trace.steps.iter().map(|r| format!("{}.{}", spec.blocks[r.block].0, r.action.name)).collect();
+        assert_eq!(names, vec!["clock.advance", "toggle.flip", "digit.inc", "list.move", "switch.set"]);
+        // The list's wire chose the item at the front (e) and sent it to the back.
+        let mv = &trace.steps[3].action;
+        assert_eq!((mv.param("item"), mv.param("to")), (Some(&Value::Str("e".into())), Some(&Value::Int(4))));
+        assert_eq!(m.derived(&next, "home")?, Some(Value::Bool(true)));
+        // The switch's wire turned it one place clockwise, b -> g, so it did not come home: no reset.
+        assert_eq!(trace.steps[4].action.param("to"), Some(&Value::Str("g".into())));
+        assert!(trace.steps[4].events.is_empty());
+        assert_eq!(m.derived(&next, "count")?, Some(Value::Int(0)));
+        Ok(())
+    }
+
+    #[test]
+    fn detached_blocks_hold_their_deliveries_until_they_are_back() -> Result<()> {
+        let spec = machine("chain");
+        let m = Machine::oracle(&spec);
+        let s = chain_on_the_brink(&spec);
+        let list = spec.block_index("list").unwrap();
+        let advance = [(spec.block_index("clock").unwrap(), ActionInst::new("advance"))];
+        // With the list grabbed, the cascade stops at its door: the move is held, the switch does not turn.
+        let out = m.tick_with(&s, TickInput { external: &advance, pending: Vec::new(), detached: &[list] })?;
+        assert_eq!(out.trace.steps.len(), 3);
+        assert_eq!(out.state[list], s[list]);
+        assert_eq!(out.pending.len(), 1);
+        assert_eq!((out.pending[0].block, out.pending[0].action.name.as_str()), (list, "move"));
+        assert_eq!(out.pending[0].via, Some((spec.block_index("digit").unwrap(), "wrap".to_string())));
+        assert!(out.trace.violations.is_empty(), "{:?}", out.trace.violations);
+        // Released: the held move is delivered first and its own cascade (list home -> switch) resumes.
+        let resumed = m.tick_with(&out.state, TickInput { external: &[], pending: out.pending, detached: &[] })?;
+        assert_eq!(resumed.trace.steps.iter().map(|r| spec.blocks[r.block].0.clone()).collect::<Vec<_>>(), vec!["list", "switch"]);
+        assert!(resumed.pending.is_empty());
+        assert_eq!(m.derived(&resumed.state, "home")?, Some(Value::Bool(true)));
+        // The same two ticks, un-grabbed, land on the same machine state.
+        let (direct, _) = m.tick(&s, &advance)?;
+        assert_eq!(resumed.state, direct);
+        Ok(())
+    }
+
+    #[test]
+    fn the_chain_checks_itself_by_sampling() -> Result<()> {
+        let spec = machine("chain");
+        assert_eq!(spec.state_space_size()?, 10 * 2 * 10 * 3125 * 6);
+        assert_eq!(spec.inputs.len(), 1 + 25 + 3);
+        let report = spec.check(30, 300)?;
+        assert!(report.problems.is_empty(), "{:?}", report.problems);
+        assert!(!report.exhaustive);
+        Ok(())
     }
 }

@@ -58,6 +58,9 @@ enum Cmd {
         /// Run loaded models on the GPU (needs a `--features cuda` build).
         #[arg(long)]
         cuda: bool,
+        /// Directory of `machine:` documents, served at /machine with each block stepped by its type's network.
+        #[arg(long, default_value = "machines")]
+        machines: PathBuf,
     },
     /// Train the JEPA energy for a finite spec and save it to `<out>/<spec name>/`.
     Train {
@@ -110,7 +113,7 @@ fn device(cuda: bool) -> Result<candle_core::Device> {
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
-        Cmd::Serve { specs, addr, lambda, models, cuda } => serve(&specs, &addr, lambda, models.as_deref(), &device(cuda)?)?,
+        Cmd::Serve { specs, addr, lambda, models, cuda, machines } => serve(&specs, &addr, lambda, models.as_deref(), &machines, &device(cuda)?)?,
         Cmd::Train { spec, out, epochs, batch, lr, seed, holdout, weight_decay, pairs, log_every, fact_weight, all_states, salt, holdout_rule, cuda } => {
             let s = Spec::load(&spec)?;
             let cfg = nerve::train::TrainConfig { epochs, batch, lr, seed, holdout, weight_decay, cont_pairs: pairs, log_every, fact_weight, candidates: if all_states { nerve::train::Candidates::All } else { nerve::train::Candidates::Valid }, holdout_salt: salt, holdout_rule, ..Default::default() };
@@ -249,7 +252,7 @@ fn check_machine(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::path::Path>, dev: &candle_core::Device) -> Result<()> {
+fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::path::Path>, machines_dir: &std::path::Path, dev: &candle_core::Device) -> Result<()> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "nerve"))
@@ -266,7 +269,18 @@ fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::pa
         println!("  {:<22} {} futures{}", spec.name, spec.futures.len(), if model.is_some() { ", trained model" } else { "" });
         entries.push(nerve::serve::Entry { spec, model, source });
     }
-    let app = std::sync::Arc::new(nerve::serve::App::new(entries, lambda));
+    let mut machines = Vec::new();
+    if machines_dir.is_dir() {
+        let mut mpaths: Vec<PathBuf> = std::fs::read_dir(machines_dir)?.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "nerve")).collect();
+        mpaths.sort();
+        for p in mpaths {
+            let source = std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
+            let spec = nerve::machine::MachineSpec::load(&p)?;
+            println!("  machine {:<14} {} blocks, {} wires", spec.name, spec.blocks.len(), spec.wires.len());
+            machines.push(nerve::machine_api::MachineEntry { spec, source });
+        }
+    }
+    let app = std::sync::Arc::new(nerve::serve::App::new(entries, lambda).with_machines(machines));
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let listener = tokio::net::TcpListener::bind(addr).await?;

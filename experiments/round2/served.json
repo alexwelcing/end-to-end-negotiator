@@ -1,10 +1,24 @@
 {
+  "clock": {
+    "model": "runs\\round2\\clock\\full-s0\\clock",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 10
+  },
   "counter": {
     "model": "runs\\round2\\counter\\full-s0\\counter",
     "seed": 0,
     "exact": 1.0,
     "violation_rate": 0.0,
     "cells": 260
+  },
+  "digit": {
+    "model": "runs\\round2\\digit\\full-s0\\digit",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 20
   },
   "fifteen": {
     "model": "runs\\round2\\fifteen\\full-s0\\fifteen",

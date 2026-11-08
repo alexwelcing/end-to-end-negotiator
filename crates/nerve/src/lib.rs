@@ -7,6 +7,7 @@ pub mod encode;
 pub mod expr;
 pub mod jepa;
 pub mod machine;
+pub mod machine_api;
 pub mod oracle;
 pub mod serve;
 pub mod spec;

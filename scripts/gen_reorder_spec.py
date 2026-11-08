@@ -35,6 +35,9 @@ lines = [
     "transitions:",
     "  move:",
     *[f"    {P[x]}: \"{update(x)}\"" for x in ITEMS],
+    # The event a machine can wire: the list came back to its initial order (and was not there before).
+    "    emits: { home: \"" + " and ".join(f"{P[x]} == {i}" for i, x in enumerate(ITEMS))
+    + " and not (" + " and ".join(f"old.{P[x]} == {i}" for i, x in enumerate(ITEMS)) + ")\" }",
     "invariants:",
     "  - \"" + " and ".join(f"{P[x]} != {P[y]}" for x, y in combinations(ITEMS, 2)) + "\"",
     "ensures:",

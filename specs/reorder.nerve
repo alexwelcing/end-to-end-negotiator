@@ -20,6 +20,7 @@ transitions:
     pc: "to if item == 'c' else (pc - 1 if (pa if item == 'a' else pb if item == 'b' else pc if item == 'c' else pd if item == 'd' else pe) < pc <= to else (pc + 1 if to <= pc < (pa if item == 'a' else pb if item == 'b' else pc if item == 'c' else pd if item == 'd' else pe) else pc))"
     pd: "to if item == 'd' else (pd - 1 if (pa if item == 'a' else pb if item == 'b' else pc if item == 'c' else pd if item == 'd' else pe) < pd <= to else (pd + 1 if to <= pd < (pa if item == 'a' else pb if item == 'b' else pc if item == 'c' else pd if item == 'd' else pe) else pd))"
     pe: "to if item == 'e' else (pe - 1 if (pa if item == 'a' else pb if item == 'b' else pc if item == 'c' else pd if item == 'd' else pe) < pe <= to else (pe + 1 if to <= pe < (pa if item == 'a' else pb if item == 'b' else pc if item == 'c' else pd if item == 'd' else pe) else pe))"
+    emits: { home: "pa == 0 and pb == 1 and pc == 2 and pd == 3 and pe == 4 and not (old.pa == 0 and old.pb == 1 and old.pc == 2 and old.pd == 3 and old.pe == 4)" }
 invariants:
   - "pa != pb and pa != pc and pa != pd and pa != pe and pb != pc and pb != pd and pb != pe and pc != pd and pc != pe and pd != pe"
 ensures:

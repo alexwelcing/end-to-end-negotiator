@@ -61,7 +61,8 @@ regenerates the paper's numbers from that log; `make` in `docs/paper2` builds th
 
 | path | what |
 |---|---|
-| `specs/*.nerve` | the 17 interfaces, as specs; `scripts/gen_*_spec.py` generate the larger ones |
+| `specs/*.nerve` | the 19 interfaces, as specs (17 draggable ones, plus the digit and clock blocks machines are built from); `scripts/gen_*_spec.py` generate the larger ones |
+| `machines/*.nerve` | machines: blocks wired by events (odometer, odometer6, chain); the lab serves them at `/machine` |
 | `models/served/` | the trained network for each, chosen from the results log by `experiments/round2/serve_set.py` |
 | `crates/nerve/` | the Rust implementation: spec, oracle, encoder, energy model, drags, trainer, lab |
 | `crates/nerve/web/index.html` | the lab page |

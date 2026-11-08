@@ -6,7 +6,7 @@ state:
 actions:
   flip: {}
 transitions:
-  flip: { status: "'on' if status == 'off' else 'off'" }
+  flip: { status: "'on' if status == 'off' else 'off'", emits: { turned_on: "status == 'on'" } }   # the event a machine can wire
 render:                    # derived geometry, so a drag has a gap (docs/dragology.md)
   knob: { x: "90 if status == 'on' else 30", y: 30 }
 futures:

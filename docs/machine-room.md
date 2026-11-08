@@ -10,8 +10,11 @@ the machine re-plans. Each milestone is a demo on the day it passes.
 - `emits:` on a transition: `{ event: "predicate over old and new state" }`, evaluated by the runtime after the
   step (derived, never learned). `nerve check` type-checks the predicates.
 - `machine:` documents: `blocks: {instance: type}`, `wires: [{on: inst.event, do: inst.action, with: {param:
-  expr over the event's source state}}]`, `derived:` expressions over block fields, machine-level `ensures`, a
-  bound on events per tick. Instances of one block type share one network.
+  expr}}]`, `derived:` expressions over block fields, machine-level `ensures`, a bound on events per tick.
+  Instances of one block type share one network. A wire's `with:` expressions are evaluated when the event is
+  raised, over the whole machine at that moment (`inst.field`, `old.inst.field` for the state before the
+  emitting step, derived names), so a payload is fixed when the event is raised and the chain's list can pick
+  its own front item.
 - Composed oracle: a tick = an ordered list of external actions; after each, the event queue drains FIFO, each
   delivery stepping its target in the current machine state. `nerve check machines/odometer.nerve` runs the
   machine against its own `ensures` exhaustively when the reachable set is small (≤ 10⁴ states), by sampling
@@ -26,9 +29,8 @@ the machine re-plans. Each milestone is a demo on the day it passes.
   and `check` (BFS over `inputs`, exhaustive to 10⁴ reachable states, random walks beyond). `nerve check`
   dispatches on the `machine:` key. Tests in that file train the digit network on its full spec and run it as
   three blocks over all 1,000 states × 4 inputs (exact, zero violations) and as six blocks over 10⁵ sampled
-  increments biased towards carries (exact, zero violations), so Prediction 1 holds. Not yet: wires with
-  `with:` parameters are parsed and evaluated but no machine in the repository uses one; networks stepping
-  continuous blocks inside a machine are untested.
+  increments biased towards carries (exact, zero violations), so Prediction 1 holds. Not yet: networks
+  stepping continuous blocks inside a machine are untested.
 
 ## M2. A clock, a chain, and a machine view in the lab
 
@@ -40,6 +42,24 @@ the machine re-plans. Each milestone is a demo on the day it passes.
   from the clock and resume the cascade on release (§5.4).
 - **Acceptance (Predictions 2 and 3):** 10⁴ ticks, zero violations, zero disagreement with the composed oracle,
   under 16 ms per tick; 1,000 scripted mid-run grabs agree with the composed oracle at k = 1, 10, 100 ticks.
+- **Status (2026-11-08): done.** `specs/clock.nerve` (ten phases, `advance` emits `tick`); `emits` added to the
+  toggle (`turned_on`), the reorder list (`home`: back to its initial order; the generator script emits it) and
+  the three-way switch (`home`: back to r); `machines/chain.nerve` with the five wires of paper 2 §6.2, the
+  list's wire choosing its front item through `with:`. Digit and clock trained through the round-2 pipeline
+  (three seeds each, all exact; `experiments/round2/results.jsonl`) and added to `models/served`, now 19
+  networks. Runtime: `Machine::tick_with` takes held deliveries and detached blocks; deliveries to a detached
+  block are held and returned, delivered first on a later tick; `after:` ensures are checked only on quiescent
+  ticks. `crates/nerve/src/machine_api.rs` serves `/api/machines`, `/api/machine/<name>/view` and `/tick`
+  (networks and oracle on the same input, per-step agreement, held deliveries, derived values, tick time) and
+  the page at `/machine` (`crates/nerve/web/machine.html`): panels per block in rows, wires lit as they fire,
+  a check light per block per tick, run/step/reset and a rate, a trace, and grabs through the per-interface
+  drag API that detach the block until release. The machine stops on the first violation or disagreement and
+  shows the transition. `crates/nerve/tests/machine_chain.rs` runs the served networks: Prediction 2, 10⁴
+  ticks, 25,633 block steps, all five wires fired, zero violations, zero disagreement, 0.023 ms per tick over
+  the first 300 ticks (energies uncached) and 0.009 ms after; Prediction 3, 1,000 grabs with up to 24 ticks
+  held (290 deliveries held in all), agreement with the composed oracle at k = 1, 10 and 100 on every grab.
+  Both predictions hold. Not yet: the ball and the board (§6.4, §6.3) need continuous blocks in machines and
+  bindings; the machine view has no decision-field or energy bars, which the single-interface lab has.
 
 ## M3. The core in WebAssembly, and a Pages site
 

@@ -35,6 +35,17 @@ jobs:
           curl -sf -X POST -H "content-type: application/json" http://127.0.0.1:8787/api/hanoi/step \
             -d '{"state":{"d1":0,"d2":0,"d3":0,"d4":0},"action":"move","params":{"src":0,"dst":2}}' \
             | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["verdict"], r["network"]); assert r["verdict"]=="agrees"'
+      - name: The machine room ticks the chain by its networks
+        run: |
+          curl -sf http://127.0.0.1:8787/api/machines | python3 -c '
+          import json, sys
+          ms = {m["name"]: m for m in json.load(sys.stdin)}
+          chain = ms["chain"]
+          print(", ".join(f"{b[\"instance\"]}:{b[\"type\"]}{\"\" if b[\"network\"] else \" (spec only)\"}" for b in chain["blocks"]))
+          assert all(b["network"] for b in chain["blocks"]), "a chain block has no network"
+          json.dump({"state": chain["initial"], "external": [{"block": "clock", "action": "advance"}]}, open("tick.json", "w"))'
+          curl -sf -X POST -H "content-type: application/json" http://127.0.0.1:8787/api/machine/chain/tick -d @tick.json \
+            | python3 -c 'import json,sys; r=json.load(sys.stdin); print([s["block"] + "." + s["action"] for s in r["steps"]], "agrees" if r["agrees"] else "DISAGREES", f"{r[\"ms\"]:.2f} ms"); assert r["agrees"] and not r["violations"]'
 
   docker:
     name: lab image builds

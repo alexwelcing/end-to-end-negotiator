@@ -196,6 +196,16 @@ has a million and is checked by random walks. The tests in `crates/nerve/src/mac
 network on its whole spec and run it as the three blocks (exact on every state and input, zero violations) and
 as six (exact on 10⁵ sampled increments), which is paper 2's Prediction 1.
 
+`machines/chain.nerve` is the machine that runs itself (paper 2 §6.2): a clock drives a toggle, the toggle
+drives a digit, the digit's wrap rotates a reorder list, the list coming home turns a three-way switch, and
+the switch coming back to r resets the digit. Five blocks, five networks (four of them round 2's, unchanged),
+five wires. The lab serves it at **`/machine`**, the machine room: every block that steps is checked against
+its spec each tick and the whole machine against the composed oracle, and you can grab a list item or the
+switch's knob while it runs; the grabbed block is held, its deliveries queue, and the cascade resumes when you
+let go. `crates/nerve/tests/machine_chain.rs` runs the served networks for 10⁴ ticks (zero violations, zero
+disagreement, about 0.02 ms per tick) and through 1,000 scripted mid-run grabs (agreement with the composed
+oracle 1, 10 and 100 ticks after every release): paper 2's Predictions 2 and 3.
+
 ## Paper
 
 `docs/paper/` holds the manuscript (NeurIPS format, 9 pages + appendix), its sources, the CPU sweep that re-derives

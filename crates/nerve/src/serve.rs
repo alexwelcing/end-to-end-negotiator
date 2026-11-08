@@ -57,13 +57,14 @@ struct Session {
 
 pub struct App {
     specs: Vec<Entry>,
+    machines: Vec<crate::machine_api::MachineEntry>,
     sessions: Mutex<HashMap<String, Session>>,
     counter: Mutex<u64>,
     /// Weight of the learned term relative to the pixel gap.
     pub lambda: f64,
 }
 
-struct ApiError(anyhow::Error);
+pub struct ApiError(anyhow::Error);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -77,15 +78,29 @@ impl<E: Into<anyhow::Error>> From<E> for ApiError {
     }
 }
 
-type ApiResult = std::result::Result<Json<J>, ApiError>;
+pub type ApiResult = std::result::Result<Json<J>, ApiError>;
 
 impl App {
     pub fn new(specs: Vec<Entry>, lambda: f64) -> Self {
-        Self { specs, sessions: Mutex::new(HashMap::new()), counter: Mutex::new(0), lambda }
+        Self { specs, machines: Vec::new(), sessions: Mutex::new(HashMap::new()), counter: Mutex::new(0), lambda }
     }
 
-    fn entry(&self, name: &str) -> Result<&Entry> {
+    /// The machines the lab serves alongside the single interfaces (see `machine_api`).
+    pub fn with_machines(mut self, machines: Vec<crate::machine_api::MachineEntry>) -> Self {
+        self.machines = machines;
+        self
+    }
+
+    pub fn entry(&self, name: &str) -> Result<&Entry> {
         self.specs.iter().find(|e| e.spec.name == name).with_context(|| format!("unknown spec {name:?}"))
+    }
+
+    pub fn machines(&self) -> &[crate::machine_api::MachineEntry] {
+        &self.machines
+    }
+
+    pub fn machine(&self, name: &str) -> Result<&crate::machine_api::MachineEntry> {
+        self.machines.iter().find(|m| m.spec.name == name).with_context(|| format!("unknown machine {name:?}"))
     }
 
     fn energy_fn(&self, entry: &Entry) -> Option<Box<dyn Fn(&State, Option<&ActionInst>, &State) -> Result<f64> + '_>> {
@@ -94,7 +109,7 @@ impl App {
         Some(Box::new(move |s, a, c| Ok(lambda * model.energy(s, a, c)?)))
     }
 
-    fn positions(spec: &Spec, s: &State) -> Result<J> {
+    pub fn positions(spec: &Spec, s: &State) -> Result<J> {
         let mut out = serde_json::Map::new();
         for r in &spec.render {
             let (x, y) = element_position(spec, &r.name, s)?;
@@ -114,12 +129,17 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/api/{spec}/drag", post(drag_start))
         .route("/api/drag/{sid}/frame", post(drag_frame))
         .route("/api/drag/{sid}/release", post(drag_release))
+        .merge(crate::machine_api::routes())
         .with_state(app)
 }
 
 async fn list_specs(AxState(app): AxState<Arc<App>>) -> ApiResult {
-    let mut out = Vec::new();
-    for e in &app.specs {
+    Ok(Json(J::Array(app.specs.iter().map(spec_summary).collect())))
+}
+
+/// One interface as the lab lists it: fields, gestures, actions, size, its network's record, its source.
+pub fn spec_summary(e: &Entry) -> J {
+    {
         let sp = &e.spec;
         let futures: Vec<J> = sp
             .futures
@@ -160,7 +180,7 @@ async fn list_specs(AxState(app): AxState<Arc<App>>) -> ApiResult {
                 json!({"name": a.name, "params": params})
             })
             .collect();
-        out.push(json!({
+        json!({
             "name": sp.name,
             "fields": sp.fields.iter().map(|f| json!({"name": f.name, "kind": format!("{:?}", f.kind).to_lowercase()})).collect::<Vec<_>>(),
             "initial": sp.state_json(&sp.initial),
@@ -174,9 +194,8 @@ async fn list_specs(AxState(app): AxState<Arc<App>>) -> ApiResult {
             "model": e.model.as_ref().map(|m| m.describe()),
             "source": e.source,
             "holes": sp.holes.iter().map(|h| json!({"name": h.name, "action": h.action, "examples": h.examples.len()})).collect::<Vec<_>>(),
-        }));
+        })
     }
-    Ok(Json(J::Array(out)))
 }
 
 #[derive(Deserialize)]
