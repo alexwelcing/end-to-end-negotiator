@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn every_hole_example_obeys_the_spec_that_bounds_it() {
         // A `learn` hole is behaviour the spec shows but cannot write; its examples must still keep the rules.
-        for name in ["counter", "hanoi"] {
+        for name in ["counter", "hanoi", "negotiate"] {
             let s = spec(name);
             let o = Oracle::new(&s);
             for h in &s.holes {

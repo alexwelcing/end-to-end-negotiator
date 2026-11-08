@@ -82,7 +82,7 @@ holds `site/dist` as static assets (`site/wrangler.toml`). By hand, after `wrang
 
 | path | what |
 |---|---|
-| `specs/*.nerve` | the 20 interfaces, as specs (18 draggable ones, plus the digit and clock blocks machines are built from); `nerve gen` writes the ten generated ones from `crates/nerve/src/gen/` |
+| `specs/*.nerve` | the 20 interfaces, as specs (18 draggable ones, plus the digit and clock blocks machines are built from); `nerve gen` writes the eleven generated ones from `crates/nerve/src/gen/` |
 | `machines/*.nerve` | machines: blocks wired by events (odometer, odometer6, chain, ball, ball_drift); the lab serves them at `/machine` |
 | `models/served/` | the trained network for each, chosen from the results log by `nerve serve-set` |
 | `models/pictures/` | the render network for each (`nerve train-picture`): what the interface looks like, as weights |

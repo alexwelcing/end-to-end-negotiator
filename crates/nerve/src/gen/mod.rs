@@ -1,14 +1,16 @@
 //! The generated specs, written by `nerve gen`: the interfaces whose rules repeat per item, card, car
 //! or disc are produced by code so the repeated clauses stay identical, and so the counts in their
-//! header comments are computed, not typed. Each generator is one file here, returning the spec text;
-//! `specs/<name>.nerve` is its output and must not be edited by hand (a test regenerates every one
-//! and compares).
+//! header comments are computed, not typed. The negotiation is generated for its `learn` examples:
+//! one per state, computed from the policy they show. Each generator is one file here, returning the
+//! spec text; `specs/<name>.nerve` is its output and must not be edited by hand (a test regenerates
+//! every one and compares).
 
 mod fifteen;
 mod hanoi;
 mod insert_remove;
 mod kanban;
 mod linked_sliders;
+mod negotiate;
 mod reorder;
 mod rush_hour;
 mod scheduler;
@@ -19,7 +21,7 @@ use anyhow::{bail, Result};
 use std::path::Path;
 
 /// Every generated spec, in alphabetical order.
-pub const ALL: [&str; 10] = ["fifteen", "hanoi", "insert_remove", "kanban", "linked_sliders", "reorder", "rush_hour", "scheduler", "sokoban", "todo"];
+pub const ALL: [&str; 11] = ["fifteen", "hanoi", "insert_remove", "kanban", "linked_sliders", "negotiate", "reorder", "rush_hour", "scheduler", "sokoban", "todo"];
 
 /// The spec text of one generated interface.
 pub fn generate(name: &str) -> Result<String> {
@@ -29,6 +31,7 @@ pub fn generate(name: &str) -> Result<String> {
         "insert_remove" => insert_remove::spec(),
         "kanban" => kanban::spec(),
         "linked_sliders" => linked_sliders::spec(),
+        "negotiate" => negotiate::spec(),
         "reorder" => reorder::spec(),
         "rush_hour" => rush_hour::spec(),
         "scheduler" => scheduler::spec(),

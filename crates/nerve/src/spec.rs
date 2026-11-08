@@ -731,7 +731,8 @@ mod tests {
         assert_eq!(c.future("drag_dial").unwrap().stickiness, 4.0);
         let n = Spec::parse(NEGOTIATE).unwrap();
         assert_eq!(n.state_space().unwrap().len(), 216);
-        assert_eq!(n.action_instances().unwrap().len(), 11);
+        assert_eq!(n.action_instances().unwrap().len(), 12);
+        assert_eq!(n.holes[0].examples.len(), 216); // `play` shows the policy on every state
     }
 
     #[test]
