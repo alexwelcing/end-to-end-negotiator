@@ -30,10 +30,21 @@ jobs:
           from huggingface_hub import HfApi
           api = HfApi(token=os.environ["HF_TOKEN"])
           space = os.environ["HF_SPACE"]
-          roots = ["crates/**", "specs/**", "models/served/**"]
+          roots = ["crates/**", "specs/**", "machines/**", "models/served/**"]
+          allow = ["README.md", "Dockerfile", "Cargo.toml", "Cargo.lock", "docs/QUICKSTART.md", *roots]
+          # Everything the Dockerfile copies must be uploaded, or the Space's build fails after the deploy succeeds.
+          import fnmatch, pathlib, re
+          for line in pathlib.Path("Dockerfile").read_text().splitlines():
+              m = re.match(r"\s*COPY\s+(?!--from)(.+)", line)
+              if not m:
+                  continue
+              for src in m.group(1).split()[:-1]:
+                  src = src.rstrip("/")
+                  assert pathlib.Path(src).exists(), f"Dockerfile copies {src!r}, which does not exist"
+                  assert any(fnmatch.fnmatch(src, a) or fnmatch.fnmatch(src + "/x", a) for a in allow), f"Dockerfile copies {src!r} but the deploy does not upload it"
           r = api.upload_folder(
               folder_path=".", repo_id=space, repo_type="space",
-              allow_patterns=["README.md", "Dockerfile", "Cargo.toml", "Cargo.lock", "docs/QUICKSTART.md", *roots],
+              allow_patterns=allow,
               ignore_patterns=["**/target/**", "**/__pycache__/**"],
               delete_patterns=roots,          # drop files under these roots that the branch no longer has
               commit_message=f"deploy {os.environ.get('GITHUB_SHA', '')[:7]} from {os.environ.get('GITHUB_REF_NAME', '')}",
