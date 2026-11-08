@@ -763,8 +763,9 @@ mod tests {
 
     #[test]
     fn each_nests_a_vary_under_closest() {
-        let tracks = include_str!("../../../specs/tracks.nerve");
-        let t = Spec::parse(tracks).unwrap();
+        // Read with LF endings, so the line edits below match on a CRLF checkout too.
+        let tracks = include_str!("../../../specs/tracks.nerve").replace("\r\n", "\n");
+        let t = Spec::parse(&tracks).unwrap();
         let f = t.future("drag_block").unwrap();
         assert!(f.floating);
         let inner = f.each.as_deref().unwrap();
