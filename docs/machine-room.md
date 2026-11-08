@@ -126,6 +126,29 @@ the machine re-plans. Each milestone is a demo on the day it passes.
   corrupted weight set) and the local prediction between server ticks, which a machine at 6 ticks a second
   does not need.
 
+## Pictures from weights (2026-11-08)
+
+Rendering, which paper 1 left out of scope and the lab had been doing in JavaScript, is now part of the model.
+A spec's `scene:` and its elements' `shape`/`shapes` declare what the interface looks like (rectangles,
+circles, lines and text in a small bitmap font, in the lab's named colours, with `when` predicates and
+state expressions for geometry), `render.rs` rasterises a state exactly (the render oracle), and `picture.rs`
+trains a decoder per interface from the state encoding to a raster of at most 192 pixels on the long side:
+two linear layers to a coarse grid, five nearest-upsample-and-convolve stages, a linear output clamped to
+0..1 when drawn (a sigmoid output saturated on the mostly-background targets and stopped learning). The
+convolutions are nine shifted matrix products rather than candle's `conv2d`, whose CUDA input gradient was
+found to be wrong (bias gradients matched the CPU, kernel gradients did not); with that, CPU and GPU
+gradients agree to four digits. The pages show the render network's picture under the landing spots and
+regions, report its mean pixel error against the oracle's drawing for the state on show, and keep only
+invisible hit targets where the elements are; "spec picture" shows the oracle's drawing instead. The ten
+generated specs moved from Python scripts to `nerve gen` (Rust), `nerve site` replaced `build_site.py` and
+`nerve smoke` replaced `ci_smoke.py`, so the toolchain is Rust end to end (the pages and the Node parity
+check remain JavaScript, which is what a browser runs).
+
+## Next: the Rube Goldberg machine
+
+The plan for a contraption that runs at frame rate, is drawn as one scene and takes hands and keys,
+with milestones M5–M8 and Predictions 4–6, is `docs/rube-goldberg.md`.
+
 ## Later, on the same foundation
 
 Spec in, app out (edit a spec, check it live, train small ones in the browser, queue large ones to the foundry,
