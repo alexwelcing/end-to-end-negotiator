@@ -1,0 +1,32 @@
+\section{Evaluation protocol for machines}
+\label{sec:protocol}
+
+Part I's protocol scored one network on one interface: held-out cells, learned-only scoring, violation rate,
+scores from the weights that ship, runtime parity. A machine needs a protocol of its own, and round 2's review
+of our own practice added rules about evidence. We fix both here so the next paper is held to them.
+
+\paragraph{Conformance.} Exhaustive when the machine's reachable state set is at most about $10^4$: every
+reachable state, every external action, runtime against composed oracle. Sampled otherwise: random external
+action sequences from the initial state, with the sampler biased toward guards and range ends as Part I's
+adversary policy was. Both report exact match and violation rate, per block and for the machine.
+
+\paragraph{Rollouts, not steps.} A single step hides accumulated error; the unit of measurement is a
+$k$-step rollout, reported at $k\in\{1,10,100\}$, for discrete machines as agreement and for continuous ones as
+error against the composed oracle after $k$ hand-offs.
+
+\paragraph{Traces for interfaces with input.} A desktop interface is tested by replaying input traces, random
+and recorded, through the runtime and the composed oracle; the trace is the test case, is committed with its
+expected final state, and is replayed in CI.
+
+\paragraph{Two numbers, always.} Where the spec's invariants mask the network's answer
+(\cref{sec:valid}) we report the network on its own beside the network with the mask; they answer different
+questions and one must never stand in for the other.
+
+\paragraph{Seeds and evidence.} At least three seeds for any trained block in a table, the worst seed being the
+reported one; this binds from the next paper on (\cref{tab:round2} has one to three seeds per row, as its seeds
+column says, and its two largest interfaces were trained once). Every model is produced by a committed command, writes its record once, and is scored into an
+append-only log by a second committed command; served sets are chosen from the log by a third; no artifact is
+edited after the fact. Predictions are registered in the repository before a run, with the result that would
+falsify them, and results are reported next to the predictions whether they held or not. Round 2's first
+predictions did not hold: before the goal changed we predicted that a solver learned from examples would be
+right on $85\%$ of unseen positions and measured $13\%$, and \texttt{experiments/round2/README.md} records both.

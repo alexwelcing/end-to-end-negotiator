@@ -1,0 +1,110 @@
+\section{Runtime}
+\label{sec:runtime}
+
+A machine of blocks needs what a single interface did not: time, input richer than a click or a drag, and a
+loop that moves events between blocks while checking every step. This section specifies that loop and the input
+model, and fixes the one design rule that keeps continuous motion from wandering.
+
+\subsection{The tick}
+\label{sec:tick}
+
+The runtime is one loop. Each frame it collects inputs, turns them into actions through the bindings
+(\cref{sec:bindings}), applies each action to its block, drains the event queue through the wiring with each
+delivery stepping its target block, runs every stepped block's spec check, and renders. A tick is a pure
+function of the machine state and the frame's inputs, so a session is a log of inputs and can be replayed
+exactly, which is also how it is tested. Events emitted during a tick are processed within it, in a fixed order,
+to the bound the machine declares; the clock is a block like any other, whose only action is \texttt{advance} and
+whose event the machine wires to whatever it drives. This is the synchronous hypothesis of
+Esterel and Lustre~\citep{berry1992esterel,halbwachs1991lustre}: a reaction is instantaneous and deterministic,
+and causality is settled when the machine is checked, not when it runs. Harel's statecharts~\citep{harel1987statecharts}
+and the Elm architecture~\citep{czaplicki2013elm} are the same discipline for interfaces, and ours differs only
+in what steps a block.
+
+\subsection{Bindings: the input model}
+\label{sec:bindings}
+
+Desktop software is mostly keys, modifiers and selection, not drags. None of that is new state; it is a mapping
+from input events to actions, and it belongs in the spec rather than in code. A \texttt{bindings} section maps
+a key or mouse event, with modifiers, to an action whose parameters come from the pointer, the focused item or
+the selection (\cref{fig:bindings}). Modifiers change which action a gesture performs: Alt-drag performs
+\texttt{copy} where drag performs \texttt{move} (Dragology's \texttt{alt-to-copy} and \texttt{drag-to-copy});
+Shift-drag constrains a two-dimensional \texttt{vary} to one axis by fixing the other field; the wheel steps a
+field; a double-click opens an item; Esc leaves a mode. The runtime owns the mapping and the blocks never see a
+key, so the same machine runs under a different keyboard layout, or under a touch screen, by changing one
+section.
+
+\begin{figure}[t]
+\begin{lstlisting}
+bindings:
+  Tab:           focus.next
+  shift+Tab:     focus.prev
+  ArrowRight:    board.move(card: focus.id, dx: 1, dy: 0)
+  Delete:        board.remove(card: selection.items)
+  ctrl+a:        selection.all
+  Escape:        [selection.none, menu.close]
+  click(card):   selection.only(card)
+  ctrl+click:    selection.toggle(card)
+  shift+click:   selection.range(focus.id, card)
+  drag(card):    board.drag_card            # the gesture in `futures`
+  alt+drag:      board.drag_copy
+  shift+drag:    board.drag_card(axis: lock)
+  wheel(board):  board.scroll(by: delta)
+  rightclick:    menu.open(at: pointer, for: card)
+  ctrl+z:        undo                       # runtime, not a block
+\end{lstlisting}
+\caption{\textbf{Desktop input is state plus bindings.} The input model of the desktop board of
+\cref{sec:demos}: every key and mouse event names an action of some block, with parameters drawn from the
+pointer, the focused item or the selection. Blocks never see a key.}
+\label{fig:bindings}
+\end{figure}
+
+\subsection{Selection, focus, menus and undo}
+\label{sec:selection}
+
+Selection over $n$ items has $2^n$ states and would double the board's spec for every item; it is a block of its
+own, read-wired to the board only through the item ids it names, and the board's actions take an item set as a
+parameter. Focus is a block with one field. A context menu is a mode field with \texttt{open} and
+\texttt{close} and a guard on every other action while it is open. Undo is not a block at all: it is a runtime
+wrapper that keeps a history of machine states and restores one, which is exact by construction and costs
+nothing to learn; learning it would multiply every block's state space by the depth of the history. Marquee
+selection is a new kind of drag whose futures are selection sets: the candidates are the sets of items whose
+rendered positions fall inside the rectangle swept so far, derived from the render block as other futures are
+derived from the oracle, and it is the one piece of the desktop model that none of the Dragology demos we
+catalogued contains. Text
+entry stays out until the spec language has a text type.
+
+\subsection{Drags inside a running machine}
+\label{sec:livedrag}
+
+A drag is a search over the futures the spec allows from the current state (\cref{sec:drags}). Inside a
+running machine the grabbed block is detached from the clock for the duration of the gesture: events addressed
+to it queue, the rest of the machine keeps running, and the pointer frame is minimised as before. On release
+the drop is an external action and the queued events are delivered, so the cascade resumes from the dropped
+state; the composed oracle says where the machine should be $k$ ticks later, and \cref{sec:demos} measures
+whether it gets there. The visible signature of the whole design is that every block's spec check runs every
+tick: a block that answered a legal transition lights green, one that did not lights red and the machine stops
+there, with the transition on screen. Code shows nothing when it is right; this runtime shows its checks.
+
+\subsection{Continuous hand-offs}
+\label{sec:handoff}
+
+Continuous blocks with one continuous field are within $1\%$ of range on $99.6$--$100\%$ of transitions, which
+is not exact; one with three coupled fields (linked sliders, \cref{sec:round2}) is within tolerance on a tenth
+of them; and the error compounds across steps: on the continuous slider a value that should stay at $0$ drifted to $0.59$ and then
+$1.41$ over two clicks that the spec says do nothing (observed in the lab with the round-1 model;
+\texttt{docs/paper2/timings.md}). A chain of continuous blocks would wander. The design rule
+is that a hand-off is a discrete event: a continuous block emits an event only when a quantised condition holds
+(the ball reached the end of the track), the event's payload is the spec's canonical value, and the receiving
+block starts from that value, not from the sender's float. Inside a block the motion is continuous and may
+carry its error for the length of one episode; across a hand-off the machine is exact again. The rolling-ball
+experiment of \cref{sec:demos} measures drift with and without the rule.
+
+\subsection{Rendering}
+\label{sec:render}
+
+The lab draws every element as a point, which was enough for a dial and a knob and is not enough for a
+machine anyone would watch. The render block grows the shapes Part I's roadmap lists: rectangles, lines,
+angles and z-order, each an expression over state, derived and never learned. The lab is the runtime: one page,
+one tick loop, every block a network served from one process, with the Worker export of Part I as the way to
+ship a machine once it runs. The networks are the behaviour; the picture is a function of the state, and we keep
+it that way so that a machine can be checked without being looked at.

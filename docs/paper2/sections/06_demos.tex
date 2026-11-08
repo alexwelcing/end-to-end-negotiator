@@ -1,0 +1,99 @@
+\section{The demos as experiments}
+\label{sec:demos}
+
+Each demo below is the acceptance test of one part of the plan. For each we fix, before building it, what we
+expect to measure and what result would make us drop or redesign that part; the predictions are numbered so
+that the next paper can report against them, as \texttt{experiments/round2/README.md} does for round 2. They
+are ordered by what each one depends on, and by cost: the first is days, the last is open.
+
+\subsection{An odometer of digit networks}
+\label{sec:demo-odometer}
+
+\emph{Setup.} The digit block and machine of \cref{fig:odometer-spec}, once compiled and once trained; three
+digits checked exhaustively over all $1{,}000$ states and both actions; six digits sampled over $10^5$ random
+increment sequences of length up to $10^4$ and compared with integer arithmetic.
+
+\begin{prediction}
+\label{pred:odometer}
+Both odometers are exact: no mismatch with the composed oracle and no violation on any of the $2{,}000$ cells
+of the three-digit machine or on any sampled sequence of the six-digit one, and the trained digit's network is
+the same $\sim80$k-parameter network for every instance.
+\end{prediction}
+\emph{Falsifier.} Any carry error. A carry error would mean \cref{thm:compose}'s premise failed in practice
+(a block exact on its cells is not exact when the action arrives as an event), and the wiring would need a
+different semantics before anything larger is built.
+
+\subsection{A machine that runs itself}
+\label{sec:demo-chain}
+
+\emph{Setup.} A clock block drives a chain of finite blocks: a toggle flips on every advance; its flip to
+\texttt{on} increments a digit (the odometer's block); the digit's wrap moves an item one place in a reorder
+list; the list returning to its initial order turns the three-way switch one place clockwise; the switch
+coming back to \texttt{r} resets the digit. Three networks from \cref{tab:round2}, the digit, and one clock,
+five wires, rendered as the machine it is, with every hand-off checked live. Continuous blocks join in
+\cref{sec:demo-ball}, not here, so that agreement with the composed oracle is exact rather than within a
+tolerance.
+
+\begin{prediction}
+\label{pred:chain}
+The chain runs for $10^4$ ticks with no violation at any block and no disagreement with the composed oracle,
+at under $16$\,ms per tick on a laptop CPU.
+\end{prediction}
+\emph{Falsifier.} A violation anywhere, or a tick that cannot fit the frame. The former says a hand-off delivered
+a state a block was not trained for (a gap in the composed spec's reachable set that the block's spec did not
+cover); the latter says the budgets of \cref{sec:budgets} are wrong.
+
+\subsection{Grab anything while it runs}
+\label{sec:demo-grab}
+
+\emph{Setup.} The same chain; at random ticks a scripted pointer grabs a list item or the switch's knob, drags
+it along a recorded path and releases; the machine's state $k$ ticks after release is compared with the
+composed oracle's prediction from the dropped state, for $k\in\{1,10,100\}$ over $1{,}000$ grabs.
+
+\begin{prediction}
+\label{pred:grab}
+Agreement is $100\%$ at every $k$: a drag mid-run is just another external action to the composed spec, and the
+blocks downstream re-plan from the dropped state exactly.
+\end{prediction}
+\emph{Falsifier.} Any disagreement, which would localise to either the detach-and-queue semantics of
+\cref{sec:livedrag} or to a drag future the runtime offered that the composed spec does not.
+
+\subsection{The desktop board}
+\label{sec:demo-board}
+
+\emph{Setup.} Cards on a grid; a board block, a selection block, a focus block, a menu block and the undo
+wrapper, under the bindings of \cref{fig:bindings}. Tests are replayed traces: $1{,}000$ random input sequences
+of length $50$ drawn from the binding table (keys with modifiers, clicks, drags, marquees), replayed through the
+runtime and through the composed oracle.
+
+\begin{prediction}
+\label{pred:board}
+Runtime and composed oracle agree on every trace, and the machine answers every input within the frame.
+Selection and focus as separate blocks keep the board's network no larger than kanban's.
+\end{prediction}
+\emph{Falsifier.} Any divergence (a bug in bindings, selection semantics or the menu's guards), or a board
+network that only reaches exactness when selection is folded into it, which would say the read-coupling
+through item sets is tighter than \cref{sec:couplings} assumes.
+
+\subsection{A ball along track blocks}
+\label{sec:demo-ball}
+
+\emph{Setup.} Three continuous track blocks in a chain; a ball's position is continuous within a block; the
+hand-off from one track to the next is an event with and without the snapping rule of \cref{sec:handoff}.
+Measure the error in position against the composed oracle after $1$, $10$ and $100$ hand-offs over $200$ runs.
+
+\begin{prediction}
+\label{pred:ball}
+Without snapping, error grows roughly linearly in the number of hand-offs and exceeds $1\%$ of range within
+ten; with snapping it is bounded by one block's within-episode error ($\le1\%$) at every count.
+\end{prediction}
+\emph{Falsifier.} Growth with snapping on, which would mean the error enters inside a block's episode faster
+than an episode ends, and the continuous block itself needs the compiled-core treatment of \cref{sec:compiled}
+or a shorter episode.
+
+\subsection{Order and cost}
+The odometer first, because it tests the theorem with the least machinery and needs only \texttt{emits},
+\texttt{machine} and the composed oracle. Then shapes in the render block and the chain, which is the first
+thing a viewer can watch; then grabbing, which needs nothing new beyond the clock detach; then the board, which
+needs bindings, the selection and focus blocks and the undo wrapper; then the ball, which needs more than one
+continuous field per block and the snapping rule. Each is a demo in the lab on the day it passes its test.

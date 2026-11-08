@@ -1,0 +1,53 @@
+\section{Introduction}
+\label{sec:intro}
+
+Software is a state machine, and Part I of this work~\citep{welcing2026nerve} asked what it takes to ship a small one as a network rather than as code: a network that takes the interface's
+state and a user's action and returns the next state, held to a behaviour specification the way code is held
+to types and tests. The answer was a spec language with a derived oracle, a compiler from the explicit part of
+a spec to exact weights, an energy model for the rest, and a protocol under which seven small finite interfaces were
+learned-only exact on cells they had never seen and a continuous slider was within $1\%$ of range. It was a result about one interface at a time, and its own
+limitations section said so: nothing composed, the largest interface had $404$ states, and the only inputs
+were a click and a drag.
+
+Two things have changed since. The first is the goal. An interface's network is trained on that interface, on
+the whole of its spec, so whether it would have generalised from part of the spec is beside the point; the
+questions are a compiler's: exact, every time, at what cost. The second is who else is compiling machines into
+weights. Qwenputer and qwenGPU~\citep{qwenputer,qwengpu} compile a 32-bit RISC-V CPU and a SIMT GPU into layers
+in front of a language model of two to four billion parameters, with the model's own recurrent state as the
+machine's memory, so that a general machine lives inside a model that drives it through its own tool calls.
+That is one road to programs in weights, and it is not ours. Our parts are four orders of magnitude smaller,
+cannot talk, and are exact by a check rather than by a construction; one of our steps is one network
+evaluation, where one word of a program's output from Qwenputer is tens of thousands of instruction tokens and
+tens of seconds. The question our parts raise is how they become something as large as a desktop application
+without becoming one large network, which the training cost forbids.
+
+This paper is in two halves. The first (\cref{sec:standing}) is measured: of the \nPlanned{} interfaces we set out to
+train, \nNewDemos{} of them rebuilt from the demo set of declarative dragging~\citep{dragology} because that
+library was built to show how much a drag can mean, one network per interface trained on its whole spec is
+exact on every finite interface that has finished (\nExactSpecs{} of \nFiniteSpecs{} as this draft is built),
+on every seed, with no rule broken, including a Tower of Hanoi whose solver the spec shows only by
+example; restricting answers to the states the invariants allow removes rule breaks on a starved network without
+retraining; and the recipe's cost grows with states times cells until it stops. The second half
+(\cref{sec:blocks,sec:arch,sec:runtime,sec:demos,sec:protocol}) is a plan, written as a paper so that it can be
+scored. We propose that large interactive systems be \emph{machines}: blocks that own their state and expose
+ports; three couplings, independent, event-wired and read-wired, each with a training cost; an argument that
+exactness composes under correct wiring; a block architecture whose heads are chosen by the types of a spec's
+fields and whose candidates come from a proposer when the state space is large; a runtime with a synchronous
+tick, bindings for keys, modifiers and the mouse, selection, focus and undo, drags inside a running machine, and
+a rule that keeps continuous motion exact across hand-offs; and five demos, from an odometer of digit networks
+to a desktop card board, each registered with a prediction and the result that would falsify it. The picture
+the plan is built toward is literal: a machine you can watch run through a series of separate networks, each
+hand-off checked against the spec as it happens, that you can reach into and drag while it runs.
+
+\paragraph{Contributions.}
+(1)~One network per interface, trained on its whole spec, is exact: \nPlanned{} interfaces, \nNewDemos{} from
+Dragology's demo set, with generated tables, scripted provenance, and a valid-candidate rule that removes rule
+breaks without retraining (\cref{sec:standing}).
+(2)~A calculus of blocks, ports and wiring with a cost model for three couplings and a proof sketch that
+exactness composes (\cref{sec:blocks}).
+(3)~A block architecture: heads by field type, a proposer for large spaces, a compiled core with trained holes,
+the energy as a port type, and explicit size and latency budgets (\cref{sec:arch}).
+(4)~A runtime: the synchronous tick, a declarative input model, selection, focus and undo, drags inside running
+machines, discrete hand-offs between continuous blocks, and derived rendering (\cref{sec:runtime}).
+(5)~Five demos registered as experiments with predictions and falsifiers, and an evaluation protocol for
+machines of networks (\cref{sec:demos,sec:protocol}).

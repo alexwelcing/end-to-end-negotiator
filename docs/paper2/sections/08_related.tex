@@ -1,0 +1,50 @@
+\section{Related work}
+\label{sec:related}
+
+\paragraph{Programs in weights.} Constructing automata in networks is classical~\citep{omlin1996constructing,siegelmann1995computational};
+Tracr compiles RASP programs into transformer weights~\citep{lindner2023tracr}, Cajal compiles a typed linear
+language to neurons with a correctness proof~\citep{cajal,cajalrec}, and ink's \texttt{emit-circuit} lowers
+functions over finite types to exact ReLU nets~\citep{inklang}; Part I's compiler is the table-sized member of
+this family. Qwenputer and qwenGPU go the other way in scale: a 32-bit RISC-V CPU, and a SIMT GPU, compiled into
+layers in front of a pretrained language model of two to four billion parameters, with the model's own recurrent
+state as RAM~\citep{qwenputer,qwengpu}. Those are general machines that a language model drives through its own tool calls and whose results it
+reads back; a Qwenputer instruction is a few trace tokens, and one generated word of a program's output costs
+tens of thousands of them and tens of seconds. Ours are specific machines built from exact parts of about $10^5$ parameters that step in
+milliseconds and cannot talk. The two meet at Part I's roadmap item 20, a \method block compiled into layers in
+front of a small Qwen, and nothing in this paper is in tension with it.
+
+\paragraph{Synchronous languages, statecharts, and the Elm architecture.} The tick of \cref{sec:tick} is the
+synchronous hypothesis of Esterel and Lustre~\citep{berry1992esterel,halbwachs1991lustre,benveniste2003synchronous}:
+a reaction is instantaneous, deterministic, and its causality is settled before it runs. Statecharts~\citep{harel1987statecharts}
+gave interfaces hierarchy and broadcast events; the Elm architecture~\citep{czaplicki2013elm} gave them a pure
+update function over messages. Our machines borrow all three ideas and change one thing: the update function of
+each component is a network held to a spec, so composition has to be argued (\cref{thm:compose}) rather than
+assumed.
+
+\paragraph{Declarative dragging.} Dragology~\citep{dragology} describes a drag by the set of states it may lead
+to and gives operators (\texttt{closest}, \texttt{between}, \texttt{vary}, \texttt{whenFar}, floating, chaining)
+whose semantics we restated as energy minimisation in Part I's note and implemented in round 2. Ten of its demos
+are now \method specs; what we add is that the futures are derived from the spec and checked, and what we lack
+is chaining, snap radii, text, and its drawing.
+
+\paragraph{Neural interfaces and world models.} NeuralOS~\citep{rivard2026neuralos}, GameNGen~\citep{valevski2024gamengen}
+and Genie~\citep{bruce2024genie} learn an interface or a game as pixels from pixels, and are impressive where
+rules are soft; they have no spec to be held to and no way to say which pixel is a violation. We learn the
+behaviour and derive the picture, and the question we ask of a network is a compiler's question.
+
+\paragraph{Energy-based inference, JEPA, and equivariance.} Scoring candidates and taking the minimum is
+energy-based learning~\citep{lecun2006tutorial}; the predictor-in-latent-space form is JEPA~\citep{lecun2022path,assran2023ijepa},
+trained here contrastively~\citep{oord2018cpc} with a variance floor~\citep{bardes2022vicreg}. The heads of
+\cref{sec:heads} are the standard constructions for sets and grids~\citep{zaheer2017deepsets,lee2019settransformer,cohen2016gcnn};
+what is new is letting a spec's field types choose among them.
+
+\paragraph{Modular networks.} Neural module networks assemble a network per question from reusable
+modules~\citep{andreas2016nmn}; mixtures of experts route among sub-networks~\citep{shazeer2017moe}. Both compose
+learned parts by learned routing. Our blocks compose by a wiring that is written, checked, and not learned, and
+each part is exact on its own contract before it is wired; the composition result follows from that and would
+not from routing.
+
+\paragraph{Specifications and checking.} TLA\textsuperscript{+}~\citep{lamport2002tla} and Alloy~\citep{jackson2012alloy}
+check machines against properties by exhaustive and bounded search; the composed oracle of \cref{sec:composed}
+is the same instrument pointed at a network. Typed holes~\citep{omar2019hazel} and sketching~\citep{solar2008sketch}
+are the ancestors of the \texttt{learn} holes that hanoi's solver fills.

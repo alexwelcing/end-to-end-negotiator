@@ -1,0 +1,19 @@
+Part I asked whether a small interactive program can be shipped as a neural network held to its behaviour
+specification, and showed that it can, one interface at a time. This paper changes the question from
+generalisation to exactness, reports the result, and plans the step from interfaces to machines. Trained on the
+whole of its spec, one network per interface is exact: of the \nPlanned{} interfaces we set out to train,
+\nNewDemos{} of them rebuilt from the demo set of declarative dragging (a sliding puzzle, Tower of Hanoi with a
+solver given only by example, a kanban board, Sokoban, a meeting scheduler), every finite network that has
+finished (\nExactSpecs{} of \nFiniteSpecs{} as this draft is built) reproduces every transition with no rule
+broken, on every seed, at \minParamsK--\maxParamsK k parameters and minutes to an hour on a local GPU;
+restricting a network's answers to the states the spec's invariants allow removes rule breaks without
+retraining. The recipe stops at an
+enumeration wall, and we propose to go around it rather than through it: machines wired from exact blocks. We
+define blocks with ports, three couplings (independent, event-wired, read-wired) with their training cost,
+argue, with a proof sketch, that exactness composes under correct wiring, and specify the block architecture (heads chosen by field
+type, a proposer for large state spaces, a compiled core with trained holes), the runtime (a synchronous tick,
+bindings for keyboard and mouse, selection and undo, drags inside a running machine, discrete hand-offs between
+continuous blocks) and an evaluation protocol for machines. Five demos are registered as experiments with
+predictions and falsifiers: an odometer of digit networks, a self-running chain checked at every hand-off, a
+machine you can grab mid-run, a desktop card board under keyboard and mouse, and a ball rolling across track
+blocks. Everything measured is generated from the scripts and logs committed with this paper.

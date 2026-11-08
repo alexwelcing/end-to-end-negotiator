@@ -1,0 +1,150 @@
+\section{Where we stand: one network per interface is exact}
+\label{sec:standing}
+
+Part I trained on $85\%$ of an interface's (state, action) cells and scored the rest, because the question was
+whether a network could generalise a rule it had seen only in part. That is not the question this programme
+asks. Each interface gets its own network, trained on the whole of its spec; nothing is held out, because
+nothing needs to be. The questions that remain are the ones a compiler is asked: is the output exact, is it
+exact every time, and what does it cost. This section answers them for the \nPlanned{} interfaces we set out
+to train (\nFullSpecs{} finished as this draft is built), \nNewDemos{} of them rebuilt from the demo set of
+declarative dragging~\citep{dragology}, and then shows where the one-network-per-interface recipe stops.
+
+\subsection{Trained on its whole spec, one network per interface is exact}
+\label{sec:round2}
+
+\paragraph{The interfaces.} \Cref{tab:round2} lists them. \nBefore{} were there before this round: Part I's
+five hand-written specs (toggle, counter, both sliders, negotiate; its three screenshot-derived specs were never
+committed and are not here) and two added since (\texttt{tracks}, a block on rails; \texttt{reorder},
+Dragology's permutation demo). \nNewDemos{} are Dragology demos chosen to test what Part I's specs did not: rules whose guard reads other fields
+(hanoi: only a top disk moves, never onto a smaller one); a two-dimensional reorder (kanban); a sliding puzzle
+(fifteen); cars that block each other (rush hour); a rule over three objects at once (sokoban: the player, the
+box ahead, the cell beyond); a list whose length changes (insert and remove); a reorder with a flag per item
+(todo); meetings whose ends move without crossing (scheduler); a three-way \texttt{between} with a mode that
+allows only the next place clockwise; and three continuous sliders that move together and stop together
+(linked sliders). Hanoi also carries a \texttt{learn} hole: \texttt{hint}, the optimal next move toward the
+goal peg, is given only by example, one per position, found by search when the spec is generated; the spec
+writes the rules of the puzzle and shows, but does not write, how to solve it.
+
+Each spec header records what was scaled down to fit enumeration (fifteen is $3\times2$, not $4\times4$;
+sokoban is the top of Dragology's level; rush hour is $5\times5$ with six cars) and what Dragology does that
+the spec language cannot yet say: drags that chain several snaps in one gesture, a snap radius, text, and
+drawing anything but points. The eight specs written by coding agents have integration tests
+(\texttt{crates/nerve/tests/demo\_*.rs}) showing that the drag futures the engine derives equal the list
+Dragology's demo writes by hand (\texttt{moveItem(items, i, j)} for every $j$, the four directions a Sokoban
+player may step, every stop a car can reach), from several starting states and, for fifteen, rush hour,
+sokoban, insert/remove and the switch, from every valid one; hanoi, kanban, reorder and tracks have unit tests
+of the same kind in \texttt{drag.rs}. The spec language has no list type, so a list is one position field per
+item and an invariant that no two share a place; kanban's 360 boards live among $20{,}736$ slot tuples, and
+\cref{sec:valid} is about that gap.
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Trained on its whole spec, one network per interface is exact.} Each row is one interface and
+its own network, trained on every (state, action) cell with the configuration of Part I (300 epochs, AdamW,
+weight decay $0.05$, factored head on) on a local RTX A4500; continuous specs train on $8{,}000$ sampled pairs
+for $1{,}000$ epochs and are scored on $1{,}000$ fresh ones. \emph{States} counts states the invariants allow;
+\emph{cells} counts legal (state, action) pairs; \emph{wall s} is wall-clock training time with several runs
+sharing the GPU (\texttt{docs/paper2/timings.md}); \emph{exact} is the worst seed and \emph{violations} the
+worst seed's rate of answers that break a rule. Rows are generated from \texttt{experiments/round2/results.jsonl}
+and fill in as the sweep completes.}
+\label{tab:round2}
+\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llp{4.6cm}rrrrrlr}
+\toprule
+interface & source & what it tests & states & cells & params & wall s & seeds & exact & viol. \\
+\midrule
+\input{table_round2_rows}% ends with \bottomrule
+\end{tabular}}
+\end{table}
+
+\paragraph{Result.} Every finite interface that has finished training is exact: $100\%$ of its cells, no
+violation, on every seed tried (\nExactSpecs{} of \nFiniteSpecs{} finite rows so far; the seeds column says how
+many each has). Hanoi reproduces all 81 solver examples on all three seeds while also being exact on its 729
+written cells, so a hole and a rule can share one network of $105$k parameters without the examples being
+drowned by the rules. The continuous interfaces are a different story. The two with one continuous field are
+within $1\%$ of range on $99.6\%$ and $100\%$ of fresh transitions with $0.1\%$ and $0$ violations, at Part I's
+tolerance under a longer recipe. The third, linked sliders, is the first interface in this programme that a
+network trained on its whole spec does \emph{not} reproduce: $10.4\%$ of fresh transitions within $1\%$ of
+range, a mean error of $7.5\%$ of range, and $89.6\%$ of answers breaking a rule. Its three continuous fields
+move together and stop together at a track end, so the step is a descent over three coupled dimensions from
+eleven seeds, and its \texttt{ensures} hold the group's shape to $0.001$, a thousandth of what the network's
+tolerance allows, so an answer that is nearly right still breaks the rule. We leave the row in the table as it
+is; \cref{sec:handoff} and \cref{sec:limits} draw the consequence, which is that continuous blocks must be
+small and their hand-offs discrete. Nothing in \cref{tab:round2} needed a larger network than Part
+I's, or a new idea; it needed exhaustive coverage of the cells and the discipline below. The whole sweep is
+\totalGpuMinutes{} wall-clock minutes so far with several runs sharing the GPU, and the largest interface
+(\maxCellsSpec, \maxCells{} cells) is the one that sets the pace.
+
+\paragraph{Discipline.} Part I's own review found specs, configurations and logs behind its tables
+uncommitted, and this round found one more failure of the same kind: served models whose records had been
+patched by hand after training. Every model in \cref{tab:round2} is now produced by one command
+(\texttt{experiments/round2/run.sh}, committed with this paper), writes its own \texttt{model.json} once and
+is never edited, is scored by a second command into an append-only log, and the set the lab serves is chosen
+from that log by a third. A seed is a folder; a rerun is a new row that replaces the old one in the summary
+rather than a second vote. One early row (sokoban) predates the per-seed folders and is being rerun; until the
+rerun lands, its parameter and time columns are one seed's. We mention this because the next sections propose machines of many networks, and a provenance discipline
+that is merely good practice for one network is a precondition for debugging twenty.
+
+\subsection{Answering only from states the spec allows removes rule breaks without retraining}
+\label{sec:valid}
+
+Reorder was the first interface whose network broke rules when data was scarce. Trained on $30\%$ of its
+cells it answered $61.7\%$ of the rest correctly and broke an invariant on $26.6\%$ of them: two items in one
+slot. The trainer scored every one of the $3{,}125$ position tuples as a candidate successor, and only $120$
+of them are orders. The spec knows which $120$; the network was never told.
+
+The fix is to restrict the argmin to the states the invariants allow and give every other state infinite
+energy. This is the candidate-set rule of our declarative-dragging note (a state outside the derived futures
+costs infinite energy), in the spirit of Part I's Theorem~1, applied to the learned term's own argmin; and it
+is the first wiring primitive of \cref{sec:blocks}: a block's output is typed by its invariant. On the same
+trained networks, with no retraining (every number here is from \texttt{experiments/round1b/}), reorder went from $61.7\%$
+to $95.3\%$ at $70\%$ held out and from $29.8\%$ to $68.7\%$ at $90\%$, with violations falling from $27\%$ and
+$63\%$ to $0.1\%$ and $5\%$ (the residue is an \texttt{ensures}, not an invariant: a legal order in which the
+moved item is not where it was dropped). Retraining over the $120$ orders added nothing ($95.2\%$ against
+$95.3\%$): the network already ranked real orders correctly, and impossible tuples were beating them at the
+argmin. Interfaces with no invalid states score identically either way, by construction. Valid candidates are
+the default from here on; \texttt{nerve eval --all-states} scores the network on its own when a paper needs
+that number, and we report both wherever they differ.
+
+\subsection{Drags are searches over futures the spec derives}
+\label{sec:drags}
+
+Every interface in \cref{tab:round2} is operated by dragging in the lab that serves it. A drag is one
+minimisation per pointer frame over the futures the spec allows from the current state: the pixel gap from
+the pointer to where the grabbed element would land, plus the network's energy as a tie-breaker (a candidate's
+energy less the minimum over that action's candidates, infinite outside the set), with
+Dragology's operators (\texttt{closest} with stickiness, \texttt{between}, \texttt{vary} through the spec's
+own clamps, \texttt{far} with hysteresis) and two added for the rails demo: \texttt{each}, a \texttt{closest}
+whose every branch is a \texttt{vary}, and \texttt{floating}. The futures are never listed; they are derived by
+asking the oracle which actions reach which values, so a drag cannot offer an illegal drop (a buried Hanoi disk
+has nowhere to go; a car stops at the first car in its way). Two facts matter for what follows. The network's
+term is exactly zero on every finite interface, because the network and the spec agree on every cell, and small
+on the continuous ones; in a drag the network's job is ties and holes, not geometry. And a drag is already a
+search that re-plans under the hand at every frame, which \cref{sec:runtime} will lean on when the thing being
+dragged is part of a running machine.
+
+\subsection{One network per interface hits an enumeration wall}
+\label{sec:wall}
+
+\begin{figure}[t]
+\centering
+\input{fig_cost}
+\caption{\textbf{One network per interface hits an enumeration wall.} Wall-clock seconds for 300 epochs
+against the number of (state, action) cells, finite interfaces of \cref{tab:round2}, with several runs sharing
+the GPU. Cost grows roughly with the number of cells; the full fifteen puzzle has about $10^{13}$ states and
+no cell count that fits on this axis.}
+\label{fig:cost}
+\end{figure}
+
+The trainer enumerates the state space and trains on every cell, and its wall-clock cost grows roughly with
+the number of cells (\cref{fig:cost}; the candidates' embeddings are encoded once per step, so the state count
+enters weakly): hanoi's 729 cells train in six minutes, kanban's $17{,}280$ in over an hour, with several runs
+sharing the GPU. The interfaces we scaled down to fit are the ones
+Dragology is proud of at full size: the $4\times4$ fifteen puzzle has $16!/2\approx10^{13}$ states, a real
+Sokoban level has millions, and anything with a list of lists has no fixed size at all. Two exits exist. One is
+engineering: score only a gesture's futures rather than every state, which turns the wall into a per-action
+cost and is on the plan (\cref{sec:futures}). The other is the subject of this paper: stop building one network
+per machine. A million-state odometer is six ten-state digits and five carry wires, and its network should be
+one ten-state network used six times.

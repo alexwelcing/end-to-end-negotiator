@@ -1,0 +1,106 @@
+\documentclass{article}
+
+% NeurIPS style: 9 pages of main text (plus references and appendix).
+% `preprint` shows author names; use \usepackage{neurips_2025} alone for an anonymous submission.
+\usepackage[preprint]{neurips_2025}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts,amsmath,amssymb,amsthm}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{multirow}
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,shapes.misc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage[capitalize,noabbrev]{cleveref}
+\usepackage{xspace}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\newtheorem{prediction}{Prediction}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+\lstdefinelanguage{nerve}{
+  morekeywords={nerve,name,state,actions,transitions,invariants,ensures,futures,learn,initial,when,type,range,values,params,kind,over,after,holds,fallback,examples,action,next,machine,blocks,wires,reads,emits,bindings,on,clock,uses},
+  sensitive=true, morecomment=[l]{\#}, morestring=[b]", morestring=[b]'
+}
+\lstset{language=nerve,basicstyle=\ttfamily\scriptsize,keywordstyle=\bfseries,commentstyle=\color{gray},
+  columns=fullflexible,keepspaces=true,breaklines=true,frame=single,framerule=0.3pt,xleftmargin=4pt,xrightmargin=4pt,aboveskip=4pt,belowskip=4pt}
+
+\newcommand{\method}{\textsc{Nerve}\xspace}
+\newcommand{\Sset}{\mathcal{S}}
+\newcommand{\Aset}{\mathcal{A}}
+\newcommand{\Eset}{\mathcal{E}}
+\newcommand{\relu}{\operatorname{relu}}
+\newcommand{\Ec}{E_{\mathrm{c}}}
+\newcommand{\Ej}{E_{\mathrm{J}}}
+\newcommand{\Ef}{E_{\mathrm{F}}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\bz}{\mathbf{z}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\ind}[1]{\mathbb{1}[#1]}
+\newcommand{\step}{\mathsf{step}}
+\newcommand{\have}{\textcolor{blue!50!black}{\textsf{[have]}}\xspace}
+\newcommand{\plan}{\textcolor{red!50!black}{\textsf{[plan]}}\xspace}
+
+\input{numbers}
+
+\title{Machines Without Code\\
+\large Wiring Exact Networks into Interactive Systems (\method, Part II)}
+
+\author{%
+  Alex Welcing\\
+  Lupine Science, Inc.\\
+  \texttt{alexwelcing@gmail.com}\\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\input{sections/01_intro}
+\input{sections/02_standing}
+\input{sections/03_blocks}
+\input{sections/04_architecture}
+\input{sections/05_runtime}
+\input{sections/06_demos}
+\input{sections/07_protocol}
+\input{sections/08_related}
+\input{sections/09_limits}
+\input{sections/10_conclusion}
+
+\paragraph{Reproducibility.} Every number in \cref{sec:standing} is generated from
+\texttt{experiments/round2/results.jsonl} by \texttt{docs/paper2/make\_tables.py}; the training commands are the
+committed scripts in \texttt{experiments/round2/}, and the served models are built from the same log by
+\texttt{serve\_set.py}. Each spec in \cref{tab:round2} has tests in \texttt{crates/nerve/tests/} showing its drag
+futures equal the Dragology rule it was taken from, computed independently.
+
+\paragraph{Use of language models.} As in Part I, the branch and this manuscript were written by Claude (Anthropic)
+acting as a coding agent under the author's direction, and the method itself uses coding agents for intake and
+for the spec-writing step of \cref{sec:standing}. The author set the questions, the goal change recorded in
+\cref{sec:standing}, and the plan in \cref{sec:blocks,sec:arch,sec:runtime,sec:demos}, and reviewed every claim.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

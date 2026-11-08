@@ -1,0 +1,147 @@
+\section{Machines from blocks}
+\label{sec:blocks}
+
+From here to \cref{sec:demos} the paper is a plan. Nothing in \cref{sec:blocks,sec:arch,sec:runtime} is built;
+\cref{sec:demos} registers, for each piece, what we expect to measure and what result would make us abandon it.
+We write the plan as a paper because the design decisions are the research: once the calculus below is fixed,
+building it is engineering, and if the calculus is wrong no amount of training will rescue it.
+
+\subsection{Blocks and ports}
+\label{sec:ports}
+
+A \emph{block} is a spec, its network, its owned fields and three kinds of port. It \emph{owns} its state
+fields: no other block writes them. It \emph{accepts} actions, which are its input ports; some arrive from a
+user, some from other blocks. It \emph{emits} events, declared in the spec as a new clause on a transition
+(\texttt{emits: \{ wrap: "old.d == 9" \}}, a predicate over the old and new state that the runtime evaluates
+on the step the block just took), which are its output ports. And it may \emph{read} fields of other blocks, named in the spec as
+\texttt{reads:}; a read field is part of the block's local state for every purpose except ownership. A block's
+\emph{cells} are the pairs (local state, action) over its own fields, its read fields, and its accepted actions.
+
+A block is \emph{exact} when its network's step equals its oracle's step on every cell and breaks no invariant
+of the block. That is \cref{tab:round2}'s result, restated per block. Its \emph{contract} is its invariant and
+its \texttt{ensures}; with valid candidates (\cref{sec:valid}) the invariant half holds by construction at the
+network's output, whatever the weights, and the \texttt{ensures} half is what training is held to.
+
+\subsection{Three couplings and what each costs}
+\label{sec:couplings}
+
+How two blocks are joined decides what each one's network has to learn.
+
+\paragraph{Independent.} The blocks share nothing. Their energies add, so the machine's argmin splits into one
+argmin per block, and the machine's cost is the sum of the blocks' costs. The scheduler of \cref{tab:round2} is
+three copies of a twelve-state meeting block that happen to be trained as one $1{,}728$-state network; as a
+machine it is one network of twelve states, used three times.
+
+\paragraph{Event-wired.} A step of block $A$ emits an event that the wiring delivers as an action to block $B$.
+$B$'s cells do not mention $A$; $B$ learns \texttt{inc}, not \emph{why} it was incremented. The machine's state
+space is the product of the blocks' spaces, but nothing ever enumerates it: a six-digit odometer has $10^6$
+states and six copies of a ten-state block. Cost is again the sum. This is the coupling hardware is built from,
+a register and a carry line, and it is the one we expect to carry most of the weight.
+
+\paragraph{Read-wired.} $B$'s rule reads $A$'s fields. $B$'s cells are now its own states times the read
+fields' domains times its actions, so the cost grows with the coupling: Sokoban's box reads the player's cell
+and the cell beyond, which is still small; kanban's every card reads every other card, so the board does not
+split at all and its one network is the right design. The rule for a designer is the rule for a hardware
+designer: keep read ports few and narrow, and move coupling into events wherever a read can be replaced by a
+message. We expect that most interfaces people actually use are closer to the odometer than to kanban.
+
+\subsection{Exactness composes}
+\label{sec:theorem}
+
+\begin{definition}[Machine]
+A machine is a finite set of blocks $B_1,\dots,B_n$ with specs $S_i$, a wiring $W$ that maps each emitted
+event $(i,e)$ to a finite list of deliveries $(j,a_j)$ with $a_j$ an action of $S_j$ whose parameters are
+computed from $e$'s payload, and a read relation giving each block the fields it reads. A \emph{tick} applies
+a finite ordered list of external actions, each to its block, and after each one processes the resulting event
+queue in a fixed order, each delivery stepping its target block in the machine state current at that moment,
+until the queue is empty. Emitted events are computed by the runtime from the spec's \texttt{emits} clauses on
+the block's old and new states; they are derived, not learned. The
+\emph{composed spec} $S_M$ is this procedure with every block stepped by its oracle; the \emph{composed
+network} $N_M$ is the same procedure with every block stepped by its network.
+\end{definition}
+
+\begin{theorem}[Exactness composes]
+\label{thm:compose}
+If every block is exact on its cells and every tick's event cascade terminates, then $N_M(s,a) = S_M(s,a)$ for
+every reachable machine state $s$ and external action $a$, and no invariant of any block is broken after any
+tick.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+By induction on the cascade, one external action at a time. The action steps block $i$ from a local state
+(its own fields and its read fields) that is identical under $N_M$ and $S_M$ before it; exactness gives the
+same successor, and the same successor gives the same emitted events, because events are evaluated from the
+spec on the states and not produced by the network. Each delivery then steps its target in a machine state that, by the inductive
+hypothesis, is identical under both, with the same action and parameters, so again the same successor and the
+same events; the queues stay equal, and termination makes the induction finite. Invariants: every block step is
+a transition of that block's oracle, which preserves its invariant, and with valid candidates the network
+cannot leave the invariant's set even where it is wrong.
+\end{proof}
+
+\begin{remark}
+The theorem is about equality with the composed spec, not about the composed spec being right. Wiring is code
+again, and a wiring bug is a bug; the composed oracle catches it only in the sense that a test suite catches
+bugs, by running the machine against its own invariants and against properties that span blocks (\texttt{the
+odometer's value equals the number of increments}), exhaustively when the reachable set is small and by
+sampling when it is not. Liveness and other temporal properties are outside the theorem and belong to the
+bounded-LTL checker that Part I's roadmap already lists.
+\end{remark}
+
+\begin{remark}
+Termination is a property of the wiring graph. An acyclic event graph terminates trivially; a cycle (two
+blocks that notify each other) needs a bound per tick, and we propose that the spec declares one and the
+checker enforces it, as synchronous languages require causality to be resolved at compile time~\citep{berry1992esterel,benveniste2003synchronous}.
+\end{remark}
+
+\subsection{The composed spec}
+\label{sec:composed}
+
+The spec language gains a \texttt{machine} document that names block types, instances, wires and reads.
+\Cref{fig:odometer-spec} writes the odometer. Instances of one block type share one network; the composed
+oracle is derived from the block oracles and the wiring, like every oracle in \method, and \texttt{nerve check}
+runs the machine against itself before anything is trained.
+
+\begin{figure}[t]
+\begin{minipage}[t]{0.47\textwidth}
+\begin{lstlisting}
+nerve: 1
+name: digit
+state:
+  d: {type: int, range: [0, 9]}
+actions:
+  inc: {}
+  reset: {}
+transitions:
+  inc:   { d: "(d + 1) % 10",
+           emits: { wrap: "old.d == 9" } }
+  reset: { d: "0" }
+ensures:
+  - { after: inc, holds: "d == (old.d + 1) % 10" }
+\end{lstlisting}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.47\textwidth}
+\begin{lstlisting}
+nerve: 1
+machine: odometer
+blocks:
+  d0: digit
+  d1: digit
+  d2: digit
+wires:
+  - on: d0.wrap
+    do: d1.inc
+  - on: d1.wrap
+    do: d2.inc
+ensures:                 # spans blocks
+  - { after: d0.inc,
+      holds: "value == (old.value + 1) % 1000" }
+derived:
+  value: "d0.d + 10*d1.d + 100*d2.d"
+\end{lstlisting}
+\end{minipage}
+\caption{\textbf{A machine is blocks plus wiring.} Left: a ten-state digit block that emits \texttt{wrap} when
+it rolls over. Right: three instances and two carry wires make a thousand-state odometer whose network is the
+digit's, used three times. The machine's own \texttt{ensures} is checked by the composed oracle, exhaustively
+at this size.}
+\label{fig:odometer-spec}
+\end{figure}

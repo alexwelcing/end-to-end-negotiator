@@ -1,0 +1,15 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+One network per interface, trained on the whole of its spec, is exact at about $10^5$ parameters and minutes
+to an hour on a local GPU, on every finite interface that has finished, including ten from a library built to show how rich dragging can
+be. That result closes the question Part I opened and opens the one this paper is about: what a large
+interactive system made of such networks should look like. Our answer is a machine, not a model: small exact
+blocks that own their state, wired by events and few reads, driven by a synchronous tick, operated through
+bindings, checked at every step and shown being checked. Exactness composes under that discipline by a short
+argument, and the cost of a machine is the sum of its parts. The demos of \cref{sec:demos} are how we will find
+out whether the argument survives contact with a clock, a pointer and a keyboard; their predictions are
+written down, and the next paper reports against them. If they hold, the way to ship a complex interface as
+weights is not a larger network but a netlist of small exact ones, and the picture we are building toward, a
+machine you can watch run through a series of separate networks and reach into while it runs, is a description
+of the runtime, not a metaphor.
