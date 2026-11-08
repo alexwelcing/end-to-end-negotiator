@@ -71,9 +71,11 @@ the specs, the machines and the served networks (about 15 MB). Serve it with any
 `python -m http.server 8791 --directory site/dist`, and open `index.html` or `machine.html`.
 `node scripts/wasm_smoke.mjs --dist site/dist --native http://127.0.0.1:8787` asks the browser build what
 `scripts/ci_smoke.py` asks a running server and compares the answers; CI does both on every push.
-`.github/workflows/pages.yml` deploys `site/dist` to Cloudflare Pages when the repository variable
-`CF_PAGES_PROJECT` and the secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are set; by hand,
-`wrangler pages deploy site/dist --project-name <project>`.
+The site is live at [https://nerve-machine-room.aw-ab5.workers.dev](https://nerve-machine-room.aw-ab5.workers.dev) (the machine room at `/machine`), served by a Cloudflare Worker that
+holds `site/dist` as static assets (`site/wrangler.toml`). By hand, after `wrangler login`:
+`wrangler deploy --config site/wrangler.toml`. `.github/workflows/pages.yml` does the same on every push to
+`nerve` once the repository variable `CF_DEPLOY` and the secrets `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` are set.
 
 ## Layout
 

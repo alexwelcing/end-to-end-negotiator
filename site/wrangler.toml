@@ -1,0 +1,10 @@
+# The static lab on Cloudflare: a Worker that serves `dist/` as static assets (Pages is now part of Workers).
+# Build `dist/` with `python scripts/build_site.py`, then `wrangler deploy --config site/wrangler.toml`.
+# `/machine` resolves to `machine.html` through the assets' html handling; `dist/_headers` sets caching.
+name = "nerve-machine-room"
+compatibility_date = "2026-11-01"
+
+[assets]
+directory = "./dist"
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"

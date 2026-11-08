@@ -85,8 +85,12 @@ the machine re-plans. Each milestone is a demo on the day it passes.
   `api()` goes through `window.nerveApi` when `site/nerve-local.js` has loaded the module, the 19 specs, the
   3 machines and the 19 served networks (13.5 MB in all). Verified in a browser: the machine room ticks the
   chain at about 1.6 ms per tick with full agreement and the lab's clicks and drags answer as the server's do.
-  `.github/workflows/pages.yml` builds and deploys the site to Cloudflare Pages when the repository variable
-  `CF_PAGES_PROJECT` and the Cloudflare secrets are set; CI checks the wasm build on every push. Not yet:
+  **Live at [https://nerve-machine-room.aw-ab5.workers.dev](https://nerve-machine-room.aw-ab5.workers.dev)** (the machine room at `/machine`): a Cloudflare Worker serving `site/dist` as
+  static assets (`site/wrangler.toml`; Pages is now part of Workers, and the same Worker is where M4's Durable
+  Object will live). Verified on the deployed site: the chain ticks by its networks with full agreement.
+  `.github/workflows/pages.yml` builds and deploys on push once `CF_DEPLOY` and the Cloudflare secrets are
+  set; until then the deploy is `wrangler deploy --config site/wrangler.toml` by hand. CI builds the site and
+  runs the parity check on every push. Not yet:
   the parity test that runs the native binary and the wasm build on the same step table and recorded
   frames in a real browser (CI runs `scripts/wasm_smoke.mjs` in Node instead: the same module and files,
   328 answers compared with the server, none differ); deep links, presenter mode and recorded traces;

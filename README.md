@@ -36,10 +36,12 @@ Seventeen interfaces, each a small neural network trained to be the program, eac
 * **Hosted:** [huggingface.co/spaces/AlexWelcing/nerve-lab](https://huggingface.co/spaces/AlexWelcing/nerve-lab),
   a Docker Space built from this repository's `Dockerfile` on a free CPU; `.github/workflows/space.yml` redeploys it
   on every push to `nerve`. The machine room is at [`/machine`](https://alexwelcing-nerve-lab.hf.space/machine).
-* **In your browser, no server:** the same two pages run on a WebAssembly build of the engine, every click,
-  drag frame and machine tick a function call in the visitor's browser. `python scripts/build_site.py` writes
-  `site/dist` (the wasm module, the pages, the specs, the machines and the served networks) for any static host;
-  `.github/workflows/pages.yml` deploys it to Cloudflare Pages.
+* **In your browser, no server:** [nerve-machine-room.aw-ab5.workers.dev](https://nerve-machine-room.aw-ab5.workers.dev) (the lab) and
+  [/machine](https://nerve-machine-room.aw-ab5.workers.dev/machine) (the machine room) are the same two pages on a WebAssembly build of the engine,
+  served as static files from Cloudflare's edge: every click, drag frame and machine tick is a function call in
+  your browser. `python scripts/build_site.py` writes `site/dist` for any static host;
+  `wrangler deploy --config site/wrangler.toml` publishes it, and `.github/workflows/pages.yml` does so on push
+  once the Cloudflare secrets are set.
 * **Locally, one command** (needs a Rust toolchain, no GPU, no Python):
   ```
   cargo run --release -p nerve -- serve
