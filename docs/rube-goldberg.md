@@ -1,192 +1,241 @@
-# The Rube Goldberg machine: a deep dive on getting there with models and no code
+# The Most Complicated Way to Turn On a Light
 
-Plan written 2026-11-08, after machine-room milestones M1–M4 (docs/machine-room.md) and the move of
-rendering into the models. It says what "no code" means for a machine, what we have, what is missing
-for a machine that runs like a Rube Goldberg contraption under a visitor's hands, and the milestones,
-with acceptance tests and predictions registered in advance, to get there.
+*A plan, written 2026-11-08, for a Rube Goldberg machine made of neural networks, drawn by neural
+networks, that you can reach into with both hands, built with no code. It follows machine-room
+milestones M1–M4 (docs/machine-room.md) and the move of rendering into the models.*
 
-## 1. The promise, made precise
+## 0. The brief, as given
 
-An interface here is a spec and a network. The spec is a declaration (state, actions, transitions,
-invariants, `ensures`, `render`, `futures`, `emits`, `scene`); the network is trained from the spec's
-own oracle and checked against it on every step. A machine is a document of block instances, inputs
-and wires. Nothing in a spec or a machine document is code: there is no program to call, no handler to
-write, no frame loop per machine.
+> embrace the absurdity of the task and intentionally try to show off. this is for flexing skill and
+> having fun at the same time.
 
-What *is* code is the runtime, and it is generic: it never knows which machine it runs.
+Noted. A Rube Goldberg machine exists to do something trivial in the most elaborate way anyone can
+think of, and every part must be visibly, lovingly unnecessary. Ours turns on a light switch. The
+light switch is `specs/toggle.nerve`, two states and one action, the smallest interface we have. It
+will take about fifty neural networks, a marble, a sliding puzzle solving itself, a negotiation between
+two agents over two books and two hats, a tower of Hanoi, a traffic jam, a kanban card's journey to
+*done*, a seesaw, a catapult and an odometer to flip it. Then a bell rings.
 
-| Part | Generic runtime (code, written once) | Per interface or machine (declared or learned) |
+Everything that moves is a network trained from a spec and checked against that spec every tick.
+Everything you see is drawn by a network trained from the spec's picture. Nothing in the machine is a
+program. You can grab any piece while it runs, from your phone, in a room with friends who are
+grabbing other pieces. If a network lies, the machine stops at that piece and shows you the lie.
+
+## 1. What "no code" means, precisely, so the flex is real
+
+An interface is a spec and a network. The spec declares state, actions, transitions, invariants,
+`ensures`, `render`, `futures`, `emits` and `scene`; the network is trained from the spec's own oracle.
+A machine is a document of block instances, inputs and wires. There is no program per interface or per
+machine: no handler, no frame loop, no draw call.
+
+The runtime is code, written once, and it never knows which machine it is running:
+
+| Part | Generic runtime (code, once) | Per interface or machine (declared or learned) |
 |---|---|---|
-| Behaviour | oracle evaluation, spec check, tick loop, event queue | transitions, `emits`, wires: declared; the step: learned |
-| Look | rasteriser (the render oracle), raster compositing, hit targets | `scene` and shapes: declared; the pixels: learned |
-| Hands | drag minimisation over futures, bindings interpreter, detach/queue | `futures`, `bindings`: declared; the energy tie-break: learned |
-| Hosting | lab pages, wasm module, Durable Object | nothing |
+| Behaviour | oracle evaluation, the spec check, the tick loop, the event queue | transitions, `emits`, wires: declared; the step: learned |
+| Look | the rasteriser (render oracle), compositing rasters, hit targets | `scene` and shapes: declared; the pixels: learned |
+| Hands | drag minimisation over futures, the bindings interpreter, detach and queue | `futures`, `bindings`: declared; the energy tie-break: learned |
+| Hosting | the lab pages, the wasm module, the Durable Object | nothing |
 
-The rule for every milestone below: if a demo needs a line in a `.rs` or `.js` file that names the
-demo, the design is wrong. The author writes specs and a machine document, runs `nerve train`,
-`nerve train-picture` and `nerve check`, and the machine runs.
+The rule for every milestone: if the demo needs a line in a `.rs` or `.js` file that names the demo,
+the design is wrong. The author writes specs and a machine document, runs `nerve train`,
+`nerve train-picture` and `nerve check`, and the machine runs. We will hold ourselves to this in the
+pull request: `git grep` for a block's name outside `specs/`, `machines/` and the docs returns nothing.
 
-## 2. Where we stand
+## 2. The script
 
-- Behaviour: 19 interfaces, one network each trained on its full spec; all 14 finite ones exact, the
-  continuous ones within 1% of range on 99.6–100% of transitions (linked sliders excepted, 10%).
-- Composition: `emits` on transitions, `machine:` documents, the composed oracle, a tick with a FIFO
-  cascade and a per-tick bound, held deliveries for grabbed blocks, `with:` payloads evaluated over the
-  machine when the event is raised. The odometer (Prediction 1) and the chain (Predictions 2 and 3)
-  hold on the served networks.
-- Look: `scene`/shapes in every spec, the render oracle, a render network per interface (in training as
-  this is written), pages that draw the network's pixels and report the pixel error.
-- Hands: drags as minimisation over spec-derived futures with the network's energy as tie-breaker,
-  for every drag kind Dragology has; grabs inside a running machine detach the block and queue its
-  deliveries; clicks are actions. No keyboard yet.
-- Hosting: the lab on a server, the same lab on WebAssembly at the edge, a shared room per machine on a
-  Durable Object; two browsers see and drive one machine.
+The machine is `machines/light.nerve`. A visitor presses Space (or taps the marble). Then, in order,
+each stage armed by the one before it through a tiny *relay* block (a bool and a pulse: the only new
+block whose job is plumbing, and the whole machine's conductor):
 
-## 3. What a Rube Goldberg machine needs that we do not have
+1. **The marble** rolls down a ramp (continuous: position, speed) and leaves it at the bottom. `exit`.
+2. **The block on tracks** (`tracks`, continuous, from round 2) catches it on the top rail and slides to
+   the end. If a visitor has dragged the block to the middle rail, it stops short (that rail only
+   reaches from 60 to 180) and the run stalls there until someone fixes it. `exit`.
+3. **The dominoes** fall one per tick, left to right, twelve of them. `last_falls` arms the Hanoi relay.
+4. **The Tower of Hanoi solves itself.** Every tick the relay pulses `hint`, the action the network
+   learned from examples alone (paper 1's `learn` hole; 81 examples, 100% learned). Fifteen moves,
+   four discs climb onto the right peg. `solved` arms the next relay.
+5. **The sliding puzzle solves itself**, the same way, with a `hint` it learns from the breadth-first
+   solution of all 360 reachable boards. Four slides. `solved`.
+6. **Sokoban solves itself**: the player pushes both boxes onto their goals from learned hints.
+   `solved`.
+7. **Rush Hour solves itself**: four slides and the red car drives off the right edge of the board,
+   which is the only way out, into
+8. **the kanban board**, where card *a* travels to do → doing → done on hints. When it lands in *done*,
+   `shipped` ticks **the todo list's** last box. `all_done`.
+9. **The negotiation.** Two agents split two books and two hats (`negotiate`, our homage to the repo
+   this all grew out of). Each tick one of them proposes or accepts, from a policy learned from
+   examples of a concede-one-item strategy. When they shake hands (`deal`), the scheduler
+10. **moves a meeting to the other room** (`set_room`), whose bar now overlaps another meeting; the
+    overlap `double_booking` shoves
+11. **the linked sliders**: the top thumb slides to the right and drags the two below it along, and
+    when the group hits the end of its tracks, `at_end` turns
+12. **the three-way switch** one place clockwise, r → b, which empties
+13. **the fruit list**: the banana goes back to the toolbar (`move_c(4)`), and the list, now two apples,
+    `shrank`, which rotates
+14. **the reorder list** home (`home`), which increments
+15. **the six-digit odometer** (`odometer6`, six copies of one digit network), the machine's
+    scoreboard, which has in fact been counting every tick since the marble dropped, and whose
+    `wrap` of the ones digit at exactly the right moment is not something we leave to chance (a
+    relay again), so the odometer instead `shows` the tick count while
+16. **the seesaw** tips under the odometer's weight (its `drop_right` wired from `reorder.home`), which
+    loads
+17. **the catapult**, which fires on the next tick and `launch`es a second marble across the top of the
+    scene into
+18. **the bucket** (the `counter`, armed, counting to 9); on the ninth tick `full` fires, and at last
+19. **the light switch flips on.** `turned_on` rings
+20. **the bell.** `rang`. The run is over. The odometer reads the number of ticks it took; the
+    scoreboard says whether anyone grabbed anything on the way.
 
-A contraption is continuous motion handed from block to block, drawn as one scene, that a hand can
-interfere with anywhere. Five things are missing.
+Twenty stages, about thirty blocks (the odometer alone is six), roughly fifty networks counting the
+render networks, one machine document, zero functions.
+
+## 3. The flexes, listed so we do not forget to perform them
+
+- **Fifty networks, no code.** The counter in the corner says how many networks are running (behaviour
+  and render) and how many lines of code name this machine: 0.
+- **The puzzles solve themselves from examples.** Hanoi, the sliding puzzle, sokoban and Rush Hour each
+  have a `hint` the network learned from examples and nothing else; the spec only bounds it (a hint may
+  only make a legal move). The lab shows every hint as *learned*, not *agrees*, because no rule wrote it.
+- **Two networks haggle.** The negotiation's two sides are policies learned from examples; the deal they
+  reach is theirs. Spectators can bet.
+- **Every hand-off is checked, live.** A green light per block per tick, the composed oracle's agreement
+  per tick, the pixel error of every picture. Code shows nothing when it is right; this runtime shows
+  its checks, thirty at a time.
+- **Break it.** A button corrupts one block's weights (or a visitor picks the block). The machine runs
+  until the first lie and stops there with the transition on screen: "the dominoes said the fourth fell
+  before the third". Press Run to watch it limp, or Heal to reload the weights.
+- **Grab anything, with friends.** The room (M4) is the stage: one person drops the marble, another
+  drags the track block onto the middle rail to stall it, a third moves the meeting back, and the
+  machine re-plans from whatever state it is left in, in agreement with the composed oracle at k = 1,
+  10, 100 ticks (the chain's Prediction 3, on thirty blocks).
+- **It runs at the edge, on a phone, with no server.** The whole machine is static files and a wasm
+  module; the shared room is one Durable Object. Both already exist; the contraption is new documents
+  and new weights.
+- **Motion is the model.** The clock ticks at 30 Hz; the marble's position is state; the render network
+  draws every tick. There is no tween anywhere. If something looks like it jumps, the model is wrong,
+  and the pixel error says so.
+- **The machine is its document.** A textarea with `machines/light.nerve` in it. Edit a wire, press
+  Apply, the runtime re-parses, `nerve check` runs in the browser, and the machine is different. Rewire
+  the bell to ring when the dominoes fall and skip the other seventeen stages, if you are in a hurry.
+- **A replay is a list of inputs.** A tick is a pure function of state and inputs, so a run is
+  reproducible from its input log; the best runs (shortest, most sabotaged, most hands) are kept and
+  replayable, as proof and as sport.
+- **The odometer counts the ticks** because of course it does.
+
+## 4. What is missing, technically
 
 ### R1. Time at frame rate, inside the model
 
-Today the chain ticks at 6 per second and the pages slide elements between ticks with a CSS
-transition. That slide is code pretending to be motion. In a machine of models, motion is state: a
-ball block has `pos` and `v`, its `advance` transition moves it by `dt`, the clock ticks at 30–60 Hz,
-and the render network draws every tick. Nothing interpolates; the model is the animation.
+Today the chain ticks six times a second and the pages slide elements between ticks with a CSS
+transition, which is code pretending to be motion. Motion must be state: the marble has `pos` and `v`,
+its `advance` moves it by `dt`, the clock ticks at 30–60 Hz, the render network draws every tick.
 
-Consequences:
 - Continuous blocks must step at frame rate. The continuous trainer answers a step by Adam descent (60
-  steps, 11 seeds): milliseconds on a GPU, too slow for 60 Hz across several blocks in WebAssembly.
-  The fix is an *amortised step head*: a small network trained alongside the energy that predicts the
-  next state directly, checked every tick by the energy (its answer must be the energy's argmin within
-  tolerance) and by the oracle; descent remains the fallback when the check fails. The check is what
-  keeps it honest, as everywhere else.
-- Agreement for continuous blocks is "within 1% of range", so the machine room's agreement pill
-  becomes a tolerance, shown as such.
-- The CSS slide goes away wherever a picture is drawn: if a block looks like it jumps, its tick is too
-  coarse, and that is the model's problem to fix, not the page's.
+  steps, 11 seeds): fine on a GPU, too slow for thirty blocks at 30 Hz in WebAssembly. The fix is an
+  **amortised step head**: a small network trained alongside the energy that predicts the next state
+  directly, checked every tick by the energy (its answer must be the energy's argmin within tolerance)
+  and by the oracle; descent is the fallback when the check fails. The check keeps it honest, as
+  everywhere else.
+- Agreement for continuous blocks is "within 1% of range", shown as a tolerance.
+- The CSS slide is removed wherever a picture is drawn.
 
 ### R2. The hand-off rule (paper 2 §5.4, Prediction 4)
 
-Continuous error compounds across blocks. A hand-off is a discrete event whose payload is the spec's
-canonical value, not the sender's float: the ball enters the next track at that track's entry
-position with a quantised speed (`with: {v: "round(ball.v)"}` or a declared set of speeds), and the
-receiving block starts from a state it was trained on. Inside a block the motion is continuous and
-carries its error for one episode; across a hand-off the machine is exact again. The ball demo
-measures drift with and without the rule.
+Continuous error compounds across blocks. A hand-off is an event whose payload is the spec's canonical
+value (the next track's entry position, a quantised speed), not the sender's float, so the receiving
+block starts from a state it was trained on. Inside a block the motion is continuous and carries its
+error for one episode; across a hand-off the machine is exact again. Measured on the ball machine.
 
-### R3. One scene: layout and ports
+### R3. One scene
 
-The machine room draws each block in its own panel. A contraption is one picture. The machine document
-gains:
-- `place:` per block, `{x, y, scale}` in the machine's own coordinates, so block pictures composite
-  onto one canvas (the page composites rasters, generic code);
-- `ports:` on blocks, named points in the block's coordinates (`exit: [240, 0]`, `entry: [0, 0]`),
-  so a wire can be drawn as the path the ball takes and the page can show a hand-off as the ball
-  leaving one picture where the next begins;
-- a machine-level `scene:` for the backdrop (a table, a wall), rendered by the oracle (static).
+The machine room draws each block in its own panel; a contraption is one picture. Machine documents
+gain `place:` per block (`{x, y, scale}` in the machine's coordinates), `ports:` on blocks (named points
+such as `exit: [240, 0]`) so wires draw as the marble's path and a hand-off reads as the ball leaving one
+picture where the next begins, and a machine-level `scene:` for the backdrop. The page composites the
+render networks' rasters where the document says.
 
-The render networks still draw every block; the page only places the pictures where the machine says.
+### R4. New blocks and new holes
 
-### R4. The blocks of a contraption
+New specs, each with a scene, trained on its full spec for behaviour and picture: marble (continuous),
+dominoes, seesaw, catapult, bell, relay. New `learn` holes with examples generated by `nerve gen`'s
+own breadth-first searches: fifteen's `hint` (360 boards), sokoban's `hint`, rush_hour's `hint`, and
+the negotiation's two policies. New `emits` on the existing specs: `solved`, `escaped`, `shipped`,
+`all_done`, `deal`, `double_booking`, `at_end`, `shrank`. Retraining the specs whose state did not
+change is unnecessary (`emits` is derived, not learned); the ones that gain a hole are retrained, and
+their round-2 numbers are re-recorded.
 
-Each is a spec with a `scene`, trained on its full spec for behaviour and picture:
+### R5. Hands and keys
 
-| Block | State | Actions / events | Notes |
-|---|---|---|---|
-| marble on a ramp | `pos`, `v` (continuous) | `advance(dt)`; emits `exit` at the end with `v` | the ball demo's block; slope as a constant in the spec |
-| track (have it: `tracks`) | `track`, `pos` | `move`; emits `exit` | three rails; a grab moves the block between rails |
-| domino row | `fallen` (0..n), `pushed` (bool) | `advance`; `push`; emits `last_falls` | finite; one domino per tick |
-| seesaw | `angle` (−1, 0, 1), `load` | `drop_left/right`; emits `tips` with the side | finite |
-| bucket | `fill` (0..k) | `add`; emits `full` | the counter, renamed |
-| gate | `open` (bool) | `toggle`; a grab flips it | the toggle; a grab mid-run is the user's interference |
-| fan / windmill | `phase` | `advance`; emits `tick` every n | the clock with a picture |
-| catapult | `armed`, `loaded` | `load`; `fire`; emits `launch` | one-shot, re-armed by a later event |
-| bell | `rings` | `ring` | terminal: the run ends when it emits `rang` |
+Grabs already work inside a running machine (detach, queue, drop as an external action). The
+contraption adds `bindings:` (paper 2 §5.2): Space drops the marble, G toggles the gate on the track,
+B breaks a random block, H heals it, R resets, and arrows nudge a selected block; the runtime
+interprets the table. Live editing of the machine document is a textarea and a re-parse.
 
-Ten blocks, ten networks for behaviour, ten for pictures, all under a few minutes of GPU each. The
-machine document wires them: marble exit → track entry, track exit → dominoes push, last domino →
-seesaw drop, seesaw tips → bucket add, bucket full → catapult fire, launch → bell ring. The gate sits
-on the track: closed, the ball stops (the track's `move` guard reads the gate through a wire payload or
-the gate's `emits`), and the visitor opens it.
+## 5. Milestones
 
-### R5. Hands everywhere, and keys
-
-- Grabs: every block's futures work inside the machine already (detach, queue, drop as an external
-  action). The contraption adds grabs that change the *course*: move a track to another rail, flip the
-  gate, lift the seesaw. Those are ordinary `futures`.
-- Keys: `bindings:` in the spec (paper 2 §5.2) map keys and modifiers to actions with parameters from
-  the pointer, focus or selection; the runtime interprets the table. Space to drop the marble, R to
-  reset, arrows to nudge a selected block.
-- Placing and rewiring live: a machine document is text; a visitor who edits it (a textarea, generic)
-  re-parses and re-runs. No code, and the most direct demonstration that the machine is its document.
-- Shared: all of this already works in a room; a contraption with two people's hands in it is the
-  Rube Goldberg version of the chain demo.
-
-## 4. Milestones
-
-Each milestone ships in the lab and on the site the day it passes, with its numbers in this file.
+Each ships in the lab and on the site the day it passes, with its numbers in this file.
 
 ### M5. Time at frame rate (R1, R2)
 
-- `machines/ball.nerve`: three `tracks` blocks in a row (the paper's ball demo), the clock at 30 Hz,
-  hand-offs as events with the canonical payload.
-- The amortised step head for continuous blocks, trained with the energy, checked per tick.
-- The machine room's agreement pill as a tolerance for continuous blocks; the CSS slide removed where a
-  picture is drawn.
-- **Acceptance (Prediction 4):** over 200 runs, position error against the composed oracle after 1,
-  10 and 100 hand-offs is bounded by one block's within-episode error (≤ 1%) with the rule, and
-  grows past 1% within ten hand-offs without it. **Prediction 5 (new):** the step head agrees with
-  descent within tolerance on ≥ 99% of ticks, and a tick of three continuous blocks takes under 4 ms
-  in WebAssembly.
+- `machines/ball.nerve`: three `tracks` blocks in a row (paper 2's ball demo), the clock at 30 Hz,
+  hand-offs with the canonical payload; the amortised step head; the tolerance pill; the CSS slide gone.
+- **Acceptance (Prediction 4):** over 200 runs, position error against the composed oracle after 1, 10
+  and 100 hand-offs is bounded by one block's within-episode error (≤ 1%) with the rule, and grows past
+  1% within ten hand-offs without it. **Prediction 5 (new):** the step head agrees with descent within
+  tolerance on ≥ 99% of ticks, and a tick of three continuous blocks takes under 4 ms in WebAssembly.
 
 ### M6. One scene (R3)
 
-- `place:` and `ports:` in machine documents; a machine-level `scene:`; the page composites block
-  pictures on one canvas and draws wires as paths between ports.
-- The chain and the ball machine drawn as single scenes.
-- **Acceptance:** a hand-off reads as continuous on screen: the ball's picture leaves one block at its
-  exit port on tick t and appears at the next block's entry port on tick t+1, at every hand-off of
-  100 runs (checked from the rasters' element positions, not by eye).
+- `place:`, `ports:` and a machine-level `scene:`; the chain and the ball machine as single scenes with
+  wires as paths.
+- **Acceptance:** at every hand-off of 100 runs the ball's picture leaves one block at its exit port on
+  tick t and appears at the next block's entry port on tick t+1 (checked from the rasters' element
+  positions, not by eye).
 
-### M7. The contraption (R4)
+### M7. The Most Complicated Way to Turn On a Light (R4, the script of §2)
 
-- The ten blocks of R4 as specs with scenes, trained on their full specs (behaviour and picture), and
-  `machines/rube.nerve` wiring them from marble to bell with the gate in the way.
-- **Acceptance:** 100 runs from the dropped marble end with the bell, zero violations at any block,
-  every continuous block within tolerance, every hand-off exact; in 100 further runs a scripted hand
-  flips the gate or moves the track mid-run and the composed oracle's prediction from the dropped
-  state is matched at k = 1, 10, 100 ticks (the chain's Prediction 3, on the contraption).
+- The new blocks, the new holes, the new events, `machines/light.nerve`, and the stage in the lab with
+  the network counter, the break button and the odometer.
+- **Acceptance (Prediction 6):** 100 runs from Space to bell complete with zero violations at any
+  block, every continuous block within tolerance, every hand-off exact, every self-solving puzzle
+  solved by its learned hints alone; in 100 further runs a scripted hand sabotages one stage (moves the
+  track, flips the gate, moves the meeting back) and the composed oracle's prediction from the dropped
+  state is matched at k = 1, 10, 100 ticks. **Falsifier:** any run that needs a line of code to finish.
 
-### M8. Keys and the desktop (R5)
+### M8. Keys, the editor and the crowd (R5)
 
-- `bindings:` in specs and the runtime's interpreter; selection and focus as blocks (paper 2 §6.3).
-- The contraption under keys: drop, reset, nudge; the board demo's traces.
-- **Acceptance (Prediction 6, the paper's board prediction):** runtime and composed oracle agree on
-  1,000 replayed input traces of length 50, and every input is answered within the frame.
+- `bindings:` and the interpreter; the machine-document editor; replays kept and ranked; the room's
+  scoreboard (hands, sabotage, ticks).
+- **Acceptance (Prediction 7, paper 2's board prediction):** runtime and composed oracle agree on
+  1,000 replayed input traces of length 50, and every input is answered within the frame; a run edited
+  in the textarea to skip to the bell runs on the next tick.
 
-## 5. What could go wrong
+## 6. What could go wrong, and what we do about it
 
-- **Continuous exactness.** Linked sliders sit at 10% within tolerance. The contraption's continuous
-  blocks have one continuous field each (position) plus a small discrete one (speed class), which is
-  the regime that reaches 99.6–100%. If a block needs two coupled continuous fields, split it.
-- **Picture sharpness.** Render networks at 192 pixels on the long side reach 0.7–3% mean pixel error
-  so far; edges are soft. More steps and a perceptual term help; so does a smaller raster per block,
-  since a contraption shows ten blocks at once. The oracle's picture is always one click away, and the
-  error is always on screen.
-- **Speed in the browser.** A render network forward is 30–100 ms in WebAssembly today. At 30 Hz with
-  ten blocks that is too slow; the plan is smaller block rasters, drawing only blocks whose state
-  changed this tick (most do not), and a WebGPU path later. The behaviour networks are already fast.
-- **Synchronous time with several moving things.** Two balls in one tick are two external advances
-  and their cascades, in order; the paper's tick semantics covers it, the tests will say whether the
-  order ever matters.
-- **Authoring friction.** Ten new specs is ten rounds of `nerve check`, `train`, `train-picture`. The
-  tooling is there; the risk is only our patience, and a `nerve machine new` that scaffolds a block
-  spec from a template would remove most of it.
+- **Continuous exactness.** Linked sliders sit at 10% within tolerance; the contraption's continuous
+  blocks keep one continuous field each (position) plus a small discrete one (speed class), the regime
+  that reaches 99.6–100%. A block that needs two coupled continuous fields is split in two.
+- **Hints at scale.** Hanoi learned 81 examples perfectly; fifteen has 360, sokoban and Rush Hour fewer.
+  If a puzzle's network misses examples, the lab says *misses example* at that move and the machine
+  stops there, which is itself a demonstration; the fix is more capacity or the hole-oversampling knob,
+  both already in the trainer.
+- **Picture sharpness.** Render networks at 192 pixels reach 0.7–3% mean pixel error so far; edges are
+  soft. More steps, a perceptual term and smaller per-block rasters (thirty blocks share one screen).
+  The oracle's picture is one click away and the error is always on screen, so a blurry block is a
+  number, not an embarrassment.
+- **Speed in the browser.** A render network forward is 30–100 ms in WebAssembly; thirty blocks at 30 Hz
+  is not that. Only blocks whose state changed this tick are redrawn (most do not change on most
+  ticks), block rasters shrink, and a WebGPU path is the next step if that is not enough.
+- **Synchronous time with two marbles.** Two balls in one tick are two external advances and their
+  cascades, in order; the tick semantics covers it, and the tests will say whether order ever matters.
+- **Our patience.** Six new specs, four new holes, eight new events, thirty blocks to place. The
+  tooling exists (`nerve gen`, `nerve check`, `nerve train`, `nerve train-picture`, `nerve site`); a
+  `nerve new-block` that scaffolds a spec from a template removes most of the typing.
 
-## 6. What to measure and write down
+## 7. What gets written down
 
-Predictions 4, 5 and 6 above join Predictions 1–3 (paper 2) in a results table in this file as the
-milestones land, with the same discipline: registered before the run, falsifiers named, numbers
-generated from committed logs. If the contraption works, it is paper 3: a machine of thirty networks
-that a visitor can reach into, with no code between the parts.
+Predictions 4–7 join 1–3 (paper 2) in a results table in this file as the milestones land: registered
+before the run, falsifiers named, numbers generated from committed logs. If the machine turns the light
+on, it is paper 3, titled after this file, and the demo is the first thing a reader sees.

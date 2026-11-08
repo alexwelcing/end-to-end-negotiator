@@ -144,10 +144,11 @@ generated specs moved from Python scripts to `nerve gen` (Rust), `nerve site` re
 `nerve smoke` replaced `ci_smoke.py`, so the toolchain is Rust end to end (the pages and the Node parity
 check remain JavaScript, which is what a browser runs).
 
-## Next: the Rube Goldberg machine
+## Next: The Most Complicated Way to Turn On a Light
 
-The plan for a contraption that runs at frame rate, is drawn as one scene and takes hands and keys,
-with milestones M5–M8 and Predictions 4–6, is `docs/rube-goldberg.md`.
+The plan for the Rube Goldberg machine: fifty networks turning on the toggle through self-solving puzzles, a
+negotiation, a marble and a bell, grabbable in a shared room, with milestones M5–M8 and Predictions 4–7,
+is `docs/rube-goldberg.md`.
 
 ## Later, on the same foundation
 
