@@ -5,6 +5,10 @@
 //! one int, and the six cars make 4,608 tuples. `slide_<car>(to)` moves that car to `to` when nothing
 //! is in the way: no other car may touch any cell the car sweeps through, exactly the run of positions
 //! Dragology's `tryMove` walks before it hits something. `ensures` say the same of any transition.
+//! `hint` is the way out, learned from examples alone as hanoi's is: one per board the red car can
+//! still leave, the board after the first slide of a shortest escape, found here by breadth-first
+//! search backwards from every board with the red car out. A machine pulsing `hint` every tick
+//! drives the red car off the board, and the slide that takes it out emits `escaped`.
 
 use super::{commas, generated_by, l, text};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -105,6 +109,12 @@ fn never_passes(k: &Car) -> String {
         .join(" and ")
 }
 
+/// `emits`: the red car has just got out, reaching the first position with every cell past the edge.
+fn escaped() -> String {
+    let red = CARS[0].name;
+    format!("emits: {{ escaped: \"{red} == {W} and old.{red} < {W}\" }}")
+}
+
 fn transitions() -> Vec<String> {
     let mut out = Vec::new();
     for k in &CARS {
@@ -112,7 +122,14 @@ fn transitions() -> Vec<String> {
         out.push(format!("  slide_{}:", k.name));
         out.push(format!("    when: \"{}\"", clear.join(" and ")));
         out.push(format!("    {}: \"to\"", k.name));
+        if k.name == "red" {
+            out.push(format!("    {}", escaped()));
+        }
     }
+    // The hole's fallback: a board no example covers stays as it is. The network learns the examples on top.
+    out.push(l("  hint:"));
+    out.extend(CARS.iter().map(|k| format!("    {}: \"{}\"", k.name, k.name)));
+    out.push(format!("    {}", escaped()));
     out
 }
 
@@ -169,22 +186,23 @@ fn slides(s: &Board) -> Vec<Board> {
     out
 }
 
-/// (tuples, boards, legal moves over all boards, fewest drags to get the red car off the board).
-fn stats() -> (usize, usize, usize, usize) {
-    let mut tuples: Vec<Board> = vec![[0; 6]];
+/// Every tuple of positions, one per value of the state, in field order (the red car varies slowest).
+fn tuples() -> Vec<Board> {
+    let mut out: Vec<Board> = vec![[0; 6]];
     for (i, car) in CARS.iter().enumerate() {
-        tuples = tuples.iter().flat_map(|t| (0..=car.last()).map(move |p| { let mut n = *t; n[i] = p; n })).collect();
+        out = out.iter().flat_map(|t| (0..=car.last()).map(move |p| { let mut n = *t; n[i] = p; n })).collect();
     }
-    let boards: Vec<Board> = tuples.iter().copied().filter(is_board).collect();
-    let moves: usize = boards.iter().map(|b| slides(b).len()).sum();
-    let start: Board = [CARS[0].start, CARS[1].start, CARS[2].start, CARS[3].start, CARS[4].start, CARS[5].start];
-    assert!(is_board(&start));
-    let mut dist: HashMap<Board, usize> = HashMap::from([(start, 0)]);
-    let mut queue = VecDeque::from([start]);
+    out
+}
+
+/// Fewest slides from each board to one with the red car out, by breadth-first search backwards from
+/// every such board at once: a slide runs back along the same clear cells, so the graph is undirected.
+/// A board the red car can never leave is absent.
+fn distances(boards: &[Board]) -> HashMap<Board, usize> {
+    let out: Vec<Board> = boards.iter().copied().filter(|b| b[0] == W).collect();
+    let mut dist: HashMap<Board, usize> = out.iter().map(|b| (*b, 0)).collect();
+    let mut queue: VecDeque<Board> = out.into_iter().collect();
     while let Some(s) = queue.pop_front() {
-        if s[0] == W {
-            return (tuples.len(), boards.len(), moves, dist[&s]);
-        }
         for n in slides(&s) {
             if !dist.contains_key(&n) {
                 dist.insert(n, dist[&s] + 1);
@@ -192,11 +210,53 @@ fn stats() -> (usize, usize, usize, usize) {
             }
         }
     }
-    panic!("the red car cannot get out");
+    dist
+}
+
+/// The `hint` examples: for every board the red car can still get out of, the board after the first slide
+/// of a shortest way out. Ties break by car, in state order (red, a, b, c, d, e), then by the nearer stop.
+fn hints(boards: &[Board], dist: &HashMap<Board, usize>) -> Vec<(Board, Board)> {
+    let mut out = Vec::new();
+    for s in boards {
+        let Some(&d) = dist.get(s) else { continue };
+        if d == 0 {
+            continue;
+        }
+        let moved = |n: &Board| (0..CARS.len()).find(|&i| n[i] != s[i]).expect("a slide moves one car");
+        let mut closer: Vec<(usize, usize, Board)> = slides(s)
+            .into_iter()
+            .filter(|n| dist.get(n) == Some(&(d - 1)))
+            .map(|n| {
+                let i = moved(&n);
+                (i, n[i], n)
+            })
+            .collect();
+        closer.sort_unstable();
+        out.push((*s, closer[0].2));
+    }
+    out
 }
 
 pub fn spec() -> String {
-    let (n_tuples, n_boards, _n_moves, solution) = stats();
+    let tuples = tuples();
+    let n_tuples = tuples.len();
+    let boards: Vec<Board> = tuples.into_iter().filter(is_board).collect();
+    let n_boards = boards.len();
+    let dist = distances(&boards);
+    let hints = hints(&boards, &dist);
+    let start: Board = CARS.map(|c| c.start);
+    assert!(is_board(&start));
+    let solution = dist.get(&start).copied().expect("the red car cannot get out");
+    let n_out = boards.iter().filter(|b| b[0] == W).count();
+    let n_stuck = n_boards - dist.len();
+    let longest = dist.values().copied().max().unwrap_or(0);
+    let rest = if n_stuck == 0 {
+        format!("{n_out} boards all have it out already; they")
+    } else {
+        format!("{} boards ({n_out} have it out already, {n_stuck} are stuck for good)", n_out + n_stuck)
+    };
+    let board = |b: &Board| CARS.iter().zip(b).map(|(c, p)| format!("{}: {p}", c.name)).collect::<Vec<_>>().join(", ");
+    let examples: Vec<String> = hints.iter().map(|(s, n)| format!("      - {{ state: {{{}}}, next: {{{}}} }}", board(s), board(n))).collect();
     let mut apart = Vec::new();
     for (i, k) in CARS.iter().enumerate() {
         for o in &CARS[i + 1..] {
@@ -213,6 +273,10 @@ pub fn spec() -> String {
         format!("# car is one int, its position along its line, so there are {} tuples, {n_boards} of them boards.", commas(n_tuples)),
         format!("# From the start the red car is out in {solution} drags. Dragology slides a car smoothly between its"),
         l("# stops (`between`); here the drop snaps to the closest one."),
+        format!("# `hint` is the way out, given only by example as hanoi's is: for each of the {} boards the red car can", hints.len()),
+        format!("# still leave, the board after the first slide of a shortest escape ({longest} slides at most). The other"),
+        format!("# {rest} get no example, and a hint leaves them as they are."),
+        l("# A machine pulsing `hint` every tick drives the red car off the board; `escaped` fires as it leaves."),
         generated_by("rush_hour"),
         l("nerve: 1"),
         l("name: rush_hour"),
@@ -221,6 +285,7 @@ pub fn spec() -> String {
     lines.extend(CARS.iter().map(|c| format!("  {}: {{type: int, range: [0, {}]}}   # {}", c.name, c.last(), describe(c))));
     lines.push(l("actions:"));
     lines.extend(CARS.iter().map(|c| format!("  slide_{}: {{params: {{to: {{type: int, range: [0, {}]}}}}}}", c.name, c.last())));
+    lines.push(l("  hint: {}   # the first slide of a shortest way out: shown by examples, never written down"));
     lines.push(l("transitions:"));
     lines.push(l("  # a car goes to `to` when no other car touches a cell it would sweep through on the way"));
     lines.extend(transitions());
@@ -230,6 +295,8 @@ pub fn spec() -> String {
     lines.push(format!("  - {{ holds: \"{} <= 1\" }}   # one car moves at a time", one_car.join(" + ")));
     lines.extend(CARS.iter().map(|c| format!("  - {{ holds: \"{}\" }}   # {} never passes through another car", never_passes(c), c.name)));
     lines.extend(CARS.iter().map(|c| format!("  - {{ after: slide_{}, holds: \"{} == to or {} == old.{}\" }}   # it stops where it was dropped, or stays", c.name, c.name, c.name, c.name)));
+    let any_slide: Vec<String> = CARS.iter().map(never_passes).collect();
+    lines.push(format!("  - {{ after: hint, holds: \"{} <= 1 and {}\" }}   # a hint is one legal slide of one car", one_car.join(" + "), any_slide.join(" and ")));
     lines.push(l("scene:"));
     lines.push(format!("  box: [{}, {}, {}, {}]", ORIGIN - 10, ORIGIN - 10, ORIGIN + SIZE * W + 65, ORIGIN + SIZE * H + 10));
     lines.push(l("  shapes:"));
@@ -255,6 +322,59 @@ pub fn spec() -> String {
     lines.push(l("futures:"));
     lines.push(l("  # one gesture per car: every stop it can slide to along its line, in either direction"));
     lines.extend(CARS.iter().map(|c| format!("  drag_{}: {{ kind: closest, over: {}, grab: {}, action: slide_{}, stickiness: 6, floating: true }}", c.name, c.name, c.name, c.name)));
+    lines.push(l("learn:"));
+    lines.push(l("  - name: solve"));
+    lines.push(l("    action: hint   # its transition above is the fallback for the boards no example covers"));
+    lines.push(l("    examples:"));
+    lines.extend(examples);
     lines.push(format!("initial: {{{}}}", CARS.iter().map(|c| format!("{}: {}", c.name, c.start)).collect::<Vec<_>>().join(", ")));
     text(lines)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::oracle::Oracle;
+    use crate::spec::{ActionInst, Spec, State};
+    use crate::value::Value;
+
+    fn search() -> (Vec<Board>, HashMap<Board, usize>) {
+        let boards: Vec<Board> = tuples().into_iter().filter(is_board).collect();
+        let dist = distances(&boards);
+        (boards, dist)
+    }
+
+    #[test]
+    fn every_hint_is_one_legal_slide_toward_the_exit() {
+        let sp = Spec::parse(&spec()).unwrap();
+        let o = Oracle::new(&sp);
+        let hole = sp.holes.iter().find(|h| h.name == "solve").expect("the solve hole");
+        assert_eq!(hole.action, "hint");
+        let (boards, dist) = search();
+        let out = boards.iter().filter(|b| b[0] == W).count();
+        assert_eq!(hole.examples.len(), dist.len() - out, "one example per board the red car can still leave");
+        let hint = ActionInst::new("hint");
+        for ex in &hole.examples {
+            assert_ne!(ex.state, ex.next, "a hint moves a car");
+            let v = o.violations(&ex.state, Some(&hint), &ex.next, 0.01);
+            assert!(v.is_empty(), "{} -> {}: {v:?}", sp.state_key(&ex.state), sp.state_key(&ex.next));
+        }
+    }
+
+    #[test]
+    fn hints_from_the_start_take_the_red_car_out_in_the_fewest_slides() {
+        let sp = Spec::parse(&spec()).unwrap();
+        let hole = sp.holes.iter().find(|h| h.name == "solve").unwrap();
+        let next_of: HashMap<String, &State> = hole.examples.iter().map(|e| (sp.state_key(&e.state), &e.next)).collect();
+        let (_, dist) = search();
+        let start: Board = CARS.map(|c| c.start);
+        let mut s = sp.initial.clone();
+        let mut n = 0;
+        while s[0] != Value::Int(W as i64) {
+            s = next_of[&sp.state_key(&s)].clone();
+            n += 1;
+        }
+        assert_eq!(n, dist[&start]);
+        assert_eq!(n, 4, "the header's count of drags from the start");
+    }
 }
