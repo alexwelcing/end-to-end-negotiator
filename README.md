@@ -33,8 +33,9 @@ treating software as the deliverable.
 
 Seventeen interfaces, each a small neural network trained to be the program, each held to its spec as you use it.
 
-* **Hosted:** the drag lab runs as a Hugging Face Space built from this repository's `Dockerfile` (link here once
-  the Space is up; `.github/workflows/space.yml` keeps it current).
+* **Hosted:** [huggingface.co/spaces/AlexWelcing/nerve-lab](https://huggingface.co/spaces/AlexWelcing/nerve-lab),
+  a Docker Space built from this repository's `Dockerfile` on a free CPU; `.github/workflows/space.yml` redeploys it
+  on every push to `nerve`.
 * **Locally, one command** (needs a Rust toolchain, no GPU, no Python):
   ```
   cargo run --release -p nerve -- serve
