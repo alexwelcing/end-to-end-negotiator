@@ -95,7 +95,7 @@ enum Cmd {
         hidden: usize,
         #[arg(long, default_value_t = 4)]
         layers: usize,
-        #[arg(long, default_value_t = 8)]
+        #[arg(long, default_value_t = 6)]
         octaves: usize,
         #[arg(long, default_value_t = 200)]
         log_every: usize,
@@ -272,7 +272,7 @@ fn main() -> Result<()> {
             if kind == "grid" {
                 sc.hidden = if hidden == 128 { 64 } else { hidden };
                 sc.layers = if layers == 4 { 2 } else { layers };
-                sc.octaves = if octaves == 8 { 4 } else { octaves };
+                sc.octaves = if octaves == 6 { 4 } else { octaves };
             }
             let (p, report) = nerve::shader::train_with(&s, &cfg, sc, &device(cuda)?)?;
             let dir = out.join(&s.name);

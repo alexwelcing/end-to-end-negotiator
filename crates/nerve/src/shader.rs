@@ -63,7 +63,9 @@ impl ShaderConfig {
         let scene = spec.scene.as_ref().context("the spec has no scene to draw")?;
         let (w, h) = scene.raster_size();
         let enc = Encoder::new(spec)?;
-        Ok(Self { w: w * scale.max(1), h: h * scale.max(1), state_dim: enc.state_dim, cond: 128, hidden: 128, layers: 4, octaves: 8, kind: "mlp".into(), grid_levels: vec![], grid_channels: 0 })
+        // octaves: the top octave's wavelength is 2 * aspect / 2^(octaves-1) in x units over w pixels; 6 keeps it at
+        // about four pixels of the 4x raster (8 put it at two, the sampling lattice itself, and aliased)
+        Ok(Self { w: w * scale.max(1), h: h * scale.max(1), state_dim: enc.state_dim, cond: 128, hidden: 128, layers: 4, octaves: 6, kind: "mlp".into(), grid_levels: vec![], grid_channels: 0 })
     }
 
     /// The grid kind: feature grids of `bases` rows (columns follow the aspect), `channels` each, and a
@@ -331,8 +333,16 @@ impl Shader {
                 worst = (e, self.spec.state_key(s));
             }
         }
+        // off the training lattice: a draw at 0.9x the training size against the oracle at that size; a shader
+        // that learned the lattice rather than the picture scores far worse here than at (w, h)
+        let (ow, oh) = ((w * 9) / 10, (h * 9) / 10);
+        let mut total_off = 0.0f64;
+        for s in states.iter().take(16) {
+            total_off += f64::from(render::mae(&self.draw(s, ow, oh)?, &render::rasterize(&self.spec, s, ow, oh)?));
+        }
         let n = states.len().max(1) as f64;
         Ok(json!({"n": states.len(), "mae": total / n, "mae_native": total_ss / n, "mae_native_point": total_point / n,
+                  "mae_off_lattice": total_off / states.len().min(16).max(1) as f64, "off_w": ow, "off_h": oh,
                   "worst_mae": worst.0, "worst_state": worst.1, "w": w, "h": h, "native_w": nw, "native_h": nh, "supersample": k}))
     }
 
@@ -430,8 +440,10 @@ pub fn train_with(spec: &Spec, cfg: &ShaderTrainConfig, sc: ShaderConfig, dev: &
             for _ in 0..p {
                 let k = rng.gen_range(0..npx);
                 let (i, j) = (k % w, k / w);
-                xy.push(2.0 * (i as f32 + 0.5) / w as f32 - 1.0);
-                xy.push(2.0 * (j as f32 + 0.5) / h as f32 - 1.0);
+                // anywhere inside the pixel's footprint, not its centre: the picture must hold between the
+                // training lattice's points too, or a draw at another size aliases (streaks through glyphs)
+                xy.push(2.0 * (i as f32 + rng.gen_range(0.0f32..1.0)) / w as f32 - 1.0);
+                xy.push(2.0 * (j as f32 + rng.gen_range(0.0f32..1.0)) / h as f32 - 1.0);
                 y.extend([t[k], t[npx + k], t[2 * npx + k]]);
             }
         }

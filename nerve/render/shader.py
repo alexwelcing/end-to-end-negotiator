@@ -28,7 +28,7 @@ class RustShaderConfig:
     cond: int = 128
     hidden: int = 128
     layers: int = 4
-    octaves: int = 8
+    octaves: int = 6                                   # top octave ~4 px of the 4x raster; 8 aliased at off-lattice sizes
     kind: str = "mlp"                                  # "mlp" | "grid"
     grid_levels: list = None                           # [[gw, gh], ...] in cells, coarse to fine
     grid_channels: int = 0
@@ -172,7 +172,10 @@ def train_shader(spec_name: str, rs: Rasters, cfg: RustShaderConfig, t: ShaderTr
     for step in range(t.steps):
         si = torch.randint(0, n, (b,), device=dev)
         pi = torch.randint(0, npx, (b, t.pixels), device=dev)
-        pred = model(X[si], grid[pi])
+        # a random point inside each sampled pixel's footprint (the oracle is area-averaged, so the target holds
+        # across the pixel); pixel centres alone taught the lattice, not the picture, and aliased at other sizes
+        jitter = (torch.rand(b, t.pixels, 2, device=dev) - 0.5) * torch.tensor([2.0 / rs.w, 2.0 / rs.h], device=dev)
+        pred = model(X[si], grid[pi] + jitter)
         y = imgs[si].gather(1, pi[..., None].expand(-1, -1, 3))
         diff = pred - y
         loss = (diff ** 2).mean() + 0.3 * diff.abs().mean()
