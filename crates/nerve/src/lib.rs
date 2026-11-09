@@ -14,6 +14,7 @@ pub mod oracle;
 pub mod picture;
 pub mod render;
 pub mod serve;
+pub mod shader;
 #[cfg(feature = "server")]
 pub mod site;
 #[cfg(feature = "server")]

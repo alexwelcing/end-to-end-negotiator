@@ -1,0 +1,93 @@
+{
+ "iteration": 6,
+ "rationale": "Iterations 3, 4 and 5 all scored a full 1.0 on seen, held-out and learned-only with zero violations and 2376/2376 coverage, and the spec sha256 has been confirmed unchanged three times, so the recipe is settled and the only remaining risk is accidental drift. The one deliverable that has now failed to land twice is the margin report: learnings.md still has no line about runner-up margins, which most likely means the margin_checker could not get energies out of `nerve step` in the form it expected and silently gave up rather than reporting the obstacle. I therefore keep this a strict freeze of the iter-5 recipe (same three working roles, same rollout and train knobs, trainer told to copy the iter-5 knobs.json verbatim if it exists on disk) and give the margin task one last, failure-proof shape: the checker must first discover what `nerve step` and the nerve package actually expose, then either compute the minimum margin over learned-only pairs or append a line stating exactly why it cannot, with the command and error text, so the next supervisor finally gets a definitive answer either way. Its gate is 'a line exists', not 'a number exists', so it can no longer block a 1.0 run. No exploratory knob changes are allowed because every past change to data scale or negative ratio cost accept conformance, and the cost target stays at or below iter 5 since no role has an open-ended task.",
+ "roles": [
+  {
+   "name": "spec_verifier",
+   "prompt": "Owns: spec, read-only. Run `python -m nerve check` on /home/user/end-to-end-negotiator/specs/negotiate.nerve and compute its sha256. Expected: 0 problems, 216 states, 11 actions, no holes, sha256 eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f. Do NOT edit the spec under any circumstances. Append one line to evolution/learnings.md of the form 'iter_006 spec_verifier: nerve check <result>; sha256 <hash> <confirmed|MISMATCH>; spec unchanged.' If the hash mismatches, say so loudly in learnings.md and stop; do not try to fix it.",
+   "owns": [
+    "spec"
+   ],
+   "knobs": {}
+  },
+  {
+   "name": "coverage_hunter",
+   "prompt": "Owns: rollout. Goal: every (grid state, enabled action) pair across all 216 states must appear as a positive in episodes.v1.jsonl, exactly as achieved in iters 3-5. Step 1: run `python -m nerve rollout <spec> --log <log> --policy coverage random --episodes 600 --horizon 12` (use the harness rollout knobs if they differ). Step 2: 133 grid states are unreachable from initial (wrong-parity turn at rounds 1..3, and rounds=0 non-initial states), so rollouts from initial can never cover them. Synthesise episodes for every (state, enabled action) pair using the spec's own transition (via `python -m nerve step` or the nerve package), written in the exact line schema of the existing log entries (copy a real line and match every field). Oversample accept pairs by duplicating each accept positive 3x so the rarest action gets equal effective mass. Step 3: verify coverage: compute the set of (state, action) pairs in the log and confirm all 2376 eval pairs are present (fraction 1.0). Do not proceed and report failure if fraction < 1.0. Do not change the negative ratio or any train knob. Report the final pair count and coverage fraction.",
+   "owns": [
+    "rollout"
+   ],
+   "knobs": {
+    "episodes": 600,
+    "horizon": 12,
+    "negatives": 3,
+    "accept_oversample": 3
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "Owns: train. This is a frozen recipe. If /home/user/end-to-end-negotiator/runs/negotiate-claude/iter_005/knobs.json (or the iter_005 run directory's knobs.json) exists, copy it verbatim into knobs.json and change nothing. Otherwise write knobs.json with exactly: epochs 60, lr 0.001, d 64, hidden 256, hole_weight 1.0 (these reproduce params 339954 as in iters 3 and 5; if the resulting params differ from 339954 after training, note that in your report but do not retrain with different knobs). Never change the spec. Never disable the compiled circuit. After the harness trains, read eval.json and report all/seen/heldout/learned-only exact, violation_rate, per_action, coverage fraction and params. Do not react to anything except a margin_checker report of a margin below 0.05, and even then only propose a change in your report rather than applying it.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs": 60,
+    "lr": 0.001,
+    "d": 64,
+    "hidden": 256,
+    "hole_weight": 1.0
+   }
+  },
+  {
+   "name": "margin_checker",
+   "prompt": "Owns: eval. Your deliverable is one line appended to evolution/learnings.md, and that line MUST exist even if you fail. Procedure: (1) Run `python -m nerve step --help` and inspect the nerve package (e.g. `python -c 'import nerve, inspect; print(dir(nerve))'`) to find how to obtain per-candidate energies or scores for a (state, action) pair with the compiled circuit OFF (learned-only). (2) If energies are obtainable: for every learned-only eval pair (all 2376), compute margin = energy(runner-up successor) - energy(true successor) (or the equivalent score gap). Append: 'iter_006 margin_checker: min_margin_all=<x> at <state,action>; min_margin_accept_unreachable=<y> at <state,action>; n_pairs=<n>; pairs_below_0.05=<k>'. (3) If energies are NOT obtainable after at most 30 minutes of effort, append instead: 'iter_006 margin_checker: UNAVAILABLE - <exact command tried> -> <exact error or missing API>; recommend <what would be needed>'. Do not write anything else to learnings.md. Do not modify the spec, log, knobs or model.",
+   "owns": [
+    "eval"
+   ],
+   "knobs": {
+    "margin_threshold": 0.05
+   }
+  }
+ ],
+ "phases": [
+  {
+   "name": "verify_spec",
+   "roles": [
+    "spec_verifier"
+   ],
+   "gate": "nerve check reports 0 problems and sha256 equals eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f; spec file unmodified"
+  },
+  {
+   "name": "cover",
+   "roles": [
+    "coverage_hunter"
+   ],
+   "gate": "coverage fraction == 1.0 over all 2376 (state, action) eval pairs; log has >= 6000 positive pairs"
+  },
+  {
+   "name": "train",
+   "roles": [
+    "trainer"
+   ],
+   "gate": "knobs.json is a verbatim copy of iter_005 knobs (or the listed defaults); eval.json: all.exact == 1.0, heldout.exact == 1.0, learned_only.exact == 1.0, violation_rate == 0.0 on all splits; any regression against iter 5 rejects the run"
+  },
+  {
+   "name": "audit",
+   "roles": [
+    "margin_checker"
+   ],
+   "gate": "evolution/learnings.md contains a line starting with 'iter_006 margin_checker:' (either a numeric report or an UNAVAILABLE report)"
+  }
+ ],
+ "train": {
+  "epochs": 60,
+  "lr": 0.001,
+  "d": 64,
+  "hidden": 256,
+  "hole_weight": 1
+ },
+ "rollout": {
+  "episodes": 400,
+  "horizon": 12,
+  "negatives": 3
+ }
+}

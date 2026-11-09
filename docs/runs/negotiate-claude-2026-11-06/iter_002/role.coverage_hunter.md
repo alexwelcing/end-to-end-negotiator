@@ -1,0 +1,7 @@
+I ran the rollout, but I couldn't compute which pairs are still missing, so `learnings.md` has not been updated. The sandbox blocked every post-run analysis script (python and jq/awk pipelines) pending approval.
+
+**WHAT I CHANGED:** `nerve rollout --help` has no option for starting from arbitrary or random states (only `--policy`, `--episodes`, `--horizon`, `--negatives`, `--seed`). So I ran `--policy coverage random --episodes 4000 --horizon 6 --seed 7` into `runs/negotiate-claude/iter_002/episodes.v1.jsonl`. The log now has 19,201 lines, and the run added 4,800 positives.
+
+**WHY:** The 432 missing pairs sit on states that can't be reached from the initial state. A policy that only walks forward from there can't reach them. More episodes may hit a few extra reachable pairs, such as the accept pairs, but it can't cover those states.
+
+**WHAT I EXPECT:** The eval's `coverage.in_log` should stay near 1,944–2,000 of 2,376, with the same ~432 unreachable-state pairs absent, mostly propose pairs. The learned-only score depends on the model, so the accept miss may or may not recur. If you approve a python run, I'll count the pairs still absent from the log, grouped by action, and write them to `learnings.md`.

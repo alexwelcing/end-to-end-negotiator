@@ -1,0 +1,5 @@
+WHAT I CHANGED: I appended data to `episodes.v1.jsonl`. This was a rollout with `--policy coverage random` (3000 episodes, horizon 6), then one with `--policy exhaustive`, which enumerates every (state, action) pair through the oracle. I also appended 500 duplicate accept positives. I did not touch the spec.
+
+WHY: `nerve rollout` has no option to start from an arbitrary state, so the `exhaustive` policy was the way to reach the 133 states that plain rollouts can't. I re-ran the eval's own `coverage()` on the log: pairs 2376, in_log 2376, fraction 1.0. The ok positives are propose 5854, accept 1165 and walk 657, so accept is 15.2% of 7676. Without the duplicates it was 9.3%.
+
+WHAT I EXPECT: Every grid pair now has a positive, so the coverage gap is gone and held-out pairs are still masked at training time. The extra accept weight should lift the learned-only accept accuracy from 0.9676. I set no knobs, so `knobs.coverage_hunter.json` was not written.

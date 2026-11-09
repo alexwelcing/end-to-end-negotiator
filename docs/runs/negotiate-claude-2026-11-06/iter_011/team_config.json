@@ -1,0 +1,64 @@
+{
+ "iteration": 11,
+ "rationale": "Iteration 10 held the full 1.0 (seen, held-out and learned-only all exact, zero violations, 2376/2376 coverage, spec sha256 confirmed a seventh time) with exactly the iter-9 log composition (12198 pairs, 8334 negatives, 4752 exhaustive lines from two passes of the permitted `--policy exhaustive` verb) and the iter-5 knobs (epochs 60, lr 0.002, d 64, hidden 256), so the recipe is proven stable across two consecutive runs with identical data and identical score; there is nothing left to win on the official metric and every past exploratory change to data scale or negative ratio either bought nothing or cost accept conformance. What iter 10 did not deliver is the cost target: 1.32 USD and 577s wall against a roughly 1.1 USD goal, with train time doubling to 308s on an unchanged log, which points at machine variance rather than data, and the remaining role-turn cost sits in running three separate Claude processes for what is now two commands and a file write. This iteration therefore changes no data or training numbers and only collapses process count: spec_verifier is folded into coverage_hunter as its first, strictly read-only step (`nerve check` plus a sha256sum compared against the known eead25d3... hash, reported in its own role report, with an explicit prohibition on editing the spec), so the team is two processes instead of three. Every role keeps the rules that stopped the iter-9 waste: never write learnings.md, never retry a denied write, never write or run ad-hoc scripts, use only the permitted pipeline verbs, and stop as soon as the deliverable exists. Gates stay plain-grep machine-checkable (check 0 problems, sha256 match, at least 2376 exhaustive lines, at most 21000 adversary lines) and the train gate stays 'no regression against iter 10 and coverage.fraction 1.0'. Expected outcome is an identical 1.0 at or below iter-8 cost (about 1.1 USD, under 300s wall).",
+ "roles": [
+  {
+   "name": "coverage_hunter",
+   "prompt": "You own spec (READ-ONLY), rollout and adversary. Do these steps in order and nothing else.\n\nSTEP 0 (spec, read-only): run `python -m nerve check /home/user/end-to-end-negotiator/specs/negotiate.nerve` and `sha256sum /home/user/end-to-end-negotiator/specs/negotiate.nerve`. Expected: 0 problems, 216 states, 11 actions, 0 holes, sha256 eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f. NEVER edit, copy or patch the spec. If check reports problems or the hash differs, report it and still continue.\n\nSTEP 1 (rollout, oracle positives): `python -m nerve rollout <spec> --log <log> --policy coverage random --episodes 400 --horizon 4 --negatives 0`.\n\nSTEP 2 (rollout, exhaustive positives, run TWICE): `python -m nerve rollout <spec> --log <log> --policy exhaustive --negatives 0`, then run the exact same command a second time. This enumerates all 216 states x 11 actions through the oracle and is the only thing that covers the 133 unreachable states; iterations without it lost accept conformance.\n\nSTEP 3 (adversary): `python -m nerve rollout <spec> --log <log> --policy adversary --negatives 3`. Do not raise the ratio; do not run it more than once.\n\nSTEP 4 (verify with grep only): `grep -c exhaustive <log>` must be >= 2376; `grep -c adversary <log>` must be <= 21000. If exhaustive < 2376 rerun STEP 2 once more. If adversary > 21000 report it; do not try to fix it.\n\nRULES: use only the verbs `python -m nerve check|rollout`. Do not write or run any python script, shell loop, or one-liner that reads the log beyond grep/wc. You CANNOT write evolution/learnings.md; if a write is denied, never retry it. Put your one-line report (check result, sha256 match yes/no, exhaustive line count, adversary line count, total lines) in your own role report and stop.",
+   "owns": [
+    "spec",
+    "rollout",
+    "adversary"
+   ],
+   "knobs": {
+    "episodes": 400,
+    "horizon": 4,
+    "negatives": 3,
+    "exhaustive_passes": 2,
+    "max_adversary_lines": 21000
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "You own train. Write knobs.json in the run directory with exactly these TrainConfig overrides and then stop: {\"epochs\": 60, \"lr\": 0.002, \"d\": 64, \"hidden\": 256, \"hole_weight\": 1.0}. These are the iter-5/9/10 settings that produced the 339954-param network scoring 1.0 three times; do not change any value. The reference file from the last good run is runs/negotiate-claude/iter_010/knobs.trainer.json (note: the file is named knobs.trainer.json, not knobs.json); if it exists you may diff against it as a cross-check, but the inline values above are authoritative. Do NOT run training yourself; the harness trains. Do NOT wait for or look for eval.json; it only exists after your phase. Never change the spec. Never disable the compiled circuit. You CANNOT write evolution/learnings.md; if a write is denied, never retry it. Put a one-line report (the knobs you wrote and the file path) in your own role report and stop.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs": 60,
+    "lr": 0.002,
+    "d": 64,
+    "hidden": 256,
+    "hole_weight": 1.0
+   }
+  }
+ ],
+ "phases": [
+  {
+   "name": "cover",
+   "roles": [
+    "coverage_hunter"
+   ],
+   "gate": "nerve check reports 0 problems and sha256 of specs/negotiate.nerve equals eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f; spec file unmodified; `grep -c exhaustive <log>` >= 2376; `grep -c adversary <log>` <= 21000"
+  },
+  {
+   "name": "train",
+   "roles": [
+    "trainer"
+   ],
+   "gate": "knobs.json exists with epochs 60, lr 0.002, d 64, hidden 256; after harness train+eval, eval.json has all.exact >= 1.0, heldout.exact >= 1.0, learned_only.exact >= 1.0, violation_rate == 0.0, coverage.fraction == 1.0, and negatives <= 21000 (no regression against iter 10)"
+  }
+ ],
+ "train": {
+  "epochs": 60,
+  "lr": 0.002,
+  "d": 64,
+  "hidden": 256,
+  "hole_weight": 1
+ },
+ "rollout": {
+  "episodes": 400,
+  "horizon": 4,
+  "negatives": 3
+ }
+}

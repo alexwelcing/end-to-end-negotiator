@@ -1,0 +1,3 @@
+WHAT I CHANGED: I appended adversary rollouts to `episodes.v1.jsonl` with `--policy adversary --negatives 2`. The first run was 400 episodes (seed 7) and the second 60 episodes (seed 11). Together they added 9200 positives and 18400 near-miss negatives, and the log now holds 18400 negatives (`"ok":false` entries). I did not edit the spec, and I did not write a knobs file because I don't own `train`.
+WHY: The charter targets about 18000 to 19000 negatives at roughly 2.3:1 against positives, and it forbids going over 20000. The first run alone gave 16000 negatives, so the second run topped it up to 18400.
+WHAT I EXPECT: Training should take about as long as iter 5, not the iter 6 level. I expect the score to stay at 1.0 and the violation rate at 0.0.

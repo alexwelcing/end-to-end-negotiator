@@ -1,0 +1,3 @@
+WHAT I CHANGED: I appended the iter_006 line to `runs/negotiate-claude/evolution/learnings.md`. I didn't touch the spec.
+WHY: `python -m nerve check` on `specs/negotiate.nerve` returned 0 problems, 216 states, 11 actions and no holes. The sha256 is `eead25d3…1f04f`, which matches the expected hash.
+WHAT I EXPECT: The spec is unchanged, so the iter_005 score of 1.0 should carry over to this iteration.

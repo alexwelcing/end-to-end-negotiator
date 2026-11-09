@@ -1,0 +1,76 @@
+{
+ "iteration": 10,
+ "rationale": "Iteration 9 restored the full 1.0 (seen, held-out and learned-only all exact, zero violations, 2376/2376 coverage, spec sha256 confirmed a sixth time) and the log composition confirms the mechanism exactly as predicted: 4752 exhaustive positives (two passes of the permitted `--policy exhaustive` verb), 14197 coverage/random oracle positives, 5003 adversary negatives, trained with the iter-5 knobs (epochs 60, lr 0.002, d 64, hidden 256). So the recipe is settled and fully expressible in sandbox-permitted verbs; nothing on the score is left to win. What iter 9 got wrong is cost: 1.67 USD against a 1.32 target, and the role reports show why: three of the four roles were told to append to evolution/learnings.md, which the permission layer denies to any role that does not own eval, and each role burned turns retrying shell appends and Edit calls before giving up, while the trainer also waited for an eval.json that only exists after its phase. This iteration therefore changes no data or training numbers at all and only removes waste: adversary is folded back into coverage_hunter (owns rollout and adversary, one process instead of two, same three commands in the same order), every role is told explicitly that it cannot write learnings.md and must put its one-line report in its own role report instead and never retry a denied write, and the trainer is told to write the knobs file and stop. Gates stay machine-checkable with plain greps (exhaustive lines at least 2376, adversary lines at most 21000) and the train gate stays 'no regression against iter 9'. Expected outcome is an identical 1.0 at about iter-8 cost (roughly 1.1 USD, under 300s wall).",
+ "roles": [
+  {
+   "name": "spec_verifier",
+   "prompt": "Read-only. Run `python -m nerve check specs/negotiate.nerve` and `sha256sum specs/negotiate.nerve`. Expected hash is eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f. Put exactly one line in your role report: 'iter_010 spec_verifier: nerve check <problems> problems, <states> states, <actions> actions, holes <n>; sha256 <hash>; spec unchanged/CHANGED'. You cannot write to evolution/learnings.md (the sandbox denies it to roles that do not own eval); do not try, and do not retry any denied write. Do NOT edit the spec under any circumstances; if the hash differs, say CHANGED and stop.",
+   "owns": [
+    "spec"
+   ],
+   "knobs": {}
+  },
+  {
+   "name": "coverage_hunter",
+   "prompt": "Owns rollout and adversary. Goal: every one of the 2376 (grid state, enabled action) pairs over all 216 states, including the 133 states unreachable from initial, must appear as a positive in episodes.v1.jsonl, plus near-miss negatives at the iter-5 ratio. This is the exact iter-9 recipe that scored 1.0; iters 7 and 8 lost coverage by replacing step (2) with scripts the sandbox denies. Do NOT write, run, or request approval for any python, awk, or shell script. Run ONLY these commands, in this order, each exactly once unless stated: (1) `python -m nerve rollout specs/negotiate.nerve --log <log> --policy coverage random --episodes 400 --horizon 8 --negatives 0`; (2) `python -m nerve rollout specs/negotiate.nerve --log <log> --policy exhaustive --negatives 0`, which enumerates all 216 states x 11 actions through the oracle and writes positives with source 'exhaustive'; (3) command (2) a second time so every grid pair has at least two positives; (4) `python -m nerve rollout specs/negotiate.nerve --log <log> --policy adversary --negatives 3 --episodes 400 --horizon 8`, once only, never with more negatives or more episodes (iters 6 and 7 showed extra negatives tripled train time and bought nothing). Verify with `grep -c '\"source\":\"exhaustive\"' <log>` (expect 4752; if below 2376 run command (2) again) and `grep -c '\"source\":\"adversary\"' <log>` (must be at most 21000; if it already exceeds 21000 before step (4), skip step (4) and say so). Put exactly one line in your role report: 'iter_010 coverage_hunter: exhaustive_lines <n>, oracle_lines <m>, adversary_lines <k>, log_lines <total>' where oracle_lines is `grep -c '\"source\":\"oracle\"'` and log_lines is `wc -l`. You cannot write to evolution/learnings.md; do not try, and do not retry any denied write. Do not touch the spec.",
+   "owns": [
+    "rollout",
+    "adversary"
+   ],
+   "knobs": {
+    "episodes": 400,
+    "horizon": 8,
+    "negatives": 3
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "Owns train. Write the knobs file (the harness names it knobs.trainer.json in the iteration directory) with EXACTLY these values, which are the iter-5 and iter-9 values from runs/negotiate-claude/iter_009/knobs.trainer.json: epochs 60, lr 0.002, d 64, hidden 256, hole_weight 1.0. You may read that file to confirm; do not copy any other file, and do not change any knob in reaction to anything. eval.json does not exist during your phase (the harness trains after you finish), so do not wait for it, do not try to run training yourself, and do not try to write to evolution/learnings.md (the sandbox denies it; do not retry a denied write). Never change the spec. Never disable the compiled circuit. Your role report is one line: 'iter_010 trainer: wrote knobs epochs 60 lr 0.002 d 64 hidden 256 hole_weight 1.0; matches iter_009: yes/no'.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs": 60,
+    "lr": 0.002,
+    "d": 64,
+    "hidden": 256,
+    "hole_weight": 1.0
+   }
+  }
+ ],
+ "phases": [
+  {
+   "name": "verify",
+   "roles": [
+    "spec_verifier"
+   ],
+   "gate": "nerve check reports 0 problems, 216 states, 11 actions, no holes; sha256 equals eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f; spec unchanged"
+  },
+  {
+   "name": "cover",
+   "roles": [
+    "coverage_hunter"
+   ],
+   "gate": "grep -c '\"source\":\"exhaustive\"' on the log returns at least 2376 AND grep -c '\"source\":\"adversary\"' returns at most 21000; otherwise stop, do not train"
+  },
+  {
+   "name": "train",
+   "roles": [
+    "trainer"
+   ],
+   "gate": "knobs file has epochs 60, lr 0.002, d 64, hidden 256, hole_weight 1.0; eval.json: all.exact == 1.0, heldout.exact == 1.0, learned_only.exact == 1.0, violation_rate == 0.0, coverage.fraction == 1.0, negatives <= 21000; any regression against iter 9 rejects the run"
+  }
+ ],
+ "train": {
+  "epochs": 60,
+  "lr": 0.002,
+  "d": 64,
+  "hidden": 256,
+  "hole_weight": 1
+ },
+ "rollout": {
+  "episodes": 400,
+  "horizon": 8,
+  "negatives": 3
+ }
+}

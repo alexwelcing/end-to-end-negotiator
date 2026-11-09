@@ -1,0 +1,86 @@
+{
+ "iteration": 9,
+ "rationale": "Iteration 8 is the first regression since iter 2 (score 0.9966, learned-only accept 0.958, held-out accept 0.947, coverage 1555/2376) and the role reports show exactly why: both of its machine-checkable instructions failed silently at the sandbox, not at the model. coverage_hunter ran the 400-episode rollout and then tried to synthesise the 133 unreachable states with an ad-hoc python script, which the permission layer denied, so the log has zero 'exhaustive' positives; iters 3 through 6, which all scored 1.0, never used a script at all, they used the permitted verb `python -m nerve rollout --policy exhaustive --negatives 0`, which enumerates all 216 states x 11 actions through the oracle and is the only reason those runs had 2376 exhaustive lines. Iter 7 and 8 both dropped that verb and both lost coverage. The trainer also drifted: it was told to copy iter_005/knobs.json, that file does not exist (the real file is knobs.trainer.json), so it fell back to epochs 40 / lr 0.001 instead of iter 5's epochs 60 / lr 0.002, and the smaller log plus the weaker schedule is what let accept extrapolate on the unseen states. This iteration therefore changes no numbers and adds no roles; it restores the iter-5 recipe with every step expressed as a verb the harness already permits: coverage_hunter runs the coverage/random rollout and then the exhaustive policy twice (second pass stands in for the accept oversampling that iter 5 could not get approved and did not need), verifies with a plain grep count of exhaustive lines, and is forbidden from writing or running any script; adversary returns as its own role at the iter-0/iter-5 ratio of 3 negatives per positive with the 21000 cap kept; the trainer gets the iter-5 knobs inline with the correct file name as a cross-check; spec_verifier stays read-only. The cover gate is now 'at least 2376 exhaustive lines in the log', which a grep can check inside the sandbox, so it can no longer be skipped. Target is a return to 1.0 at roughly iter-5 cost (about 1.32 USD, under 400s).",
+ "roles": [
+  {
+   "name": "spec_verifier",
+   "prompt": "Read-only. Run `python -m nerve check specs/negotiate.nerve` and compute sha256 of the spec with `sha256sum specs/negotiate.nerve`. Append one line to evolution/learnings.md: 'iter_009 spec_verifier: nerve check <problems> problems, <states> states, <actions> actions, holes <n>; sha256 <hash>; spec unchanged/CHANGED'. Expected hash is eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f. Do NOT edit the spec under any circumstances; if the hash differs, say CHANGED and stop.",
+   "owns": [
+    "spec"
+   ],
+   "knobs": {}
+  },
+  {
+   "name": "coverage_hunter",
+   "prompt": "Owns rollout. Goal: every one of the 2376 (grid state, enabled action) pairs over all 216 states must appear as a positive in episodes.v1.jsonl, including the 133 states unreachable from initial. Iters 3-6 achieved this with a permitted pipeline verb; iters 7 and 8 lost it by trying ad-hoc scripts that the sandbox denies. Do NOT write, run, or request approval for any python, awk, or shell script. Use ONLY these commands, in order: (1) `python -m nerve rollout specs/negotiate.nerve --log <log> --policy coverage random --episodes 400 --horizon 8 --negatives 0`; (2) `python -m nerve rollout specs/negotiate.nerve --log <log> --policy exhaustive --negatives 0` which enumerates all 216 states x 11 actions through the oracle and writes positives with source 'exhaustive'; (3) run command (2) a second time so every grid pair, including accept on unreachable states, has at least two positives; (4) verify with `grep -c '\"source\":\"exhaustive\"' <log>` and expect at least 4752; if it is below 2376, run command (2) again. Append one line to evolution/learnings.md: 'iter_009 coverage_hunter: exhaustive_lines <n>, oracle_lines <m> (grep -c source oracle), log_lines <total> (wc -l)'. Do not add negatives; adversary owns them. Do not touch the spec.",
+   "owns": [
+    "rollout"
+   ],
+   "knobs": {
+    "episodes": 400,
+    "horizon": 8,
+    "negatives": 0
+   }
+  },
+  {
+   "name": "adversary",
+   "prompt": "Owns adversary. Generate near-miss negatives at the iter-5 ratio of 3 per positive: successors that break exactly one invariant or one ensures clause, paired with the positive (same state, same action). Run exactly `python -m nerve rollout specs/negotiate.nerve --log <log> --policy adversary --negatives 3 --episodes 400 --horizon 8` once. Do not raise negatives, do not run it twice; iters 6 and 7 showed extra negatives tripled train time and bought nothing. Verify with `grep -c '\"source\":\"adversary\"' <log>` and make sure it is at or below 21000; if it is already above 21000 before you run, skip the run and say so. Append one line to evolution/learnings.md: 'iter_009 adversary: adversary_lines <k>'. Do not touch the spec and do not run any script.",
+   "owns": [
+    "adversary"
+   ],
+   "knobs": {
+    "negatives": 3
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "Owns train. Write knobs.json (the harness may name it knobs.trainer.json) with EXACTLY these values, which are the iter-5 values from runs/negotiate-claude/iter_005/knobs.trainer.json: epochs 60, lr 0.002, d 64, hidden 256, hole_weight 1.0. You may read that file to confirm but do not copy any other file; the file iter_005/knobs.json does not exist and iter 8 regressed by falling back to epochs 40 / lr 0.001 when it could not find it. Never change the spec. Never disable the compiled circuit. Never change any knob in reaction to anything. After the harness trains, read eval.json and append one line to evolution/learnings.md: 'iter_009 trainer: all <x> heldout <x> learned_only <x> violations <v> accept_learned_only <a> coverage <f> negatives <k> params <p> seconds <s>'. If learned_only.per_action.accept < 1.0, list the exact missed (state, action) pairs from eval.json on a second line.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs": 60,
+    "lr": 0.002,
+    "d": 64,
+    "hidden": 256,
+    "hole_weight": 1.0
+   }
+  }
+ ],
+ "phases": [
+  {
+   "name": "verify",
+   "roles": [
+    "spec_verifier"
+   ],
+   "gate": "nerve check reports 0 problems, 216 states, 11 actions, no holes; sha256 equals eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f; spec unchanged"
+  },
+  {
+   "name": "cover",
+   "roles": [
+    "coverage_hunter",
+    "adversary"
+   ],
+   "gate": "grep -c '\"source\":\"exhaustive\"' on the log returns at least 2376 AND grep -c '\"source\":\"adversary\"' returns at most 21000; otherwise stop, do not train"
+  },
+  {
+   "name": "train",
+   "roles": [
+    "trainer"
+   ],
+   "gate": "knobs file has epochs 60, lr 0.002, d 64, hidden 256; eval.json: all.exact == 1.0, heldout.exact == 1.0, learned_only.exact == 1.0, violation_rate == 0.0, coverage.fraction == 1.0, negatives <= 21000; any regression against iter 5 rejects the run"
+  }
+ ],
+ "train": {
+  "epochs": 60,
+  "lr": 0.002,
+  "d": 64,
+  "hidden": 256,
+  "hole_weight": 1
+ },
+ "rollout": {
+  "episodes": 400,
+  "horizon": 8,
+  "negatives": 3
+ }
+}

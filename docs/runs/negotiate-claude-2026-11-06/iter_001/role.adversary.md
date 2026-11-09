@@ -1,0 +1,5 @@
+The rollout ran, but the knobs file write was denied.
+
+WHAT I CHANGED: I appended 200 adversary-policy episodes (seed 11, `--negatives 4`) to `iter_001/episodes.v1.jsonl`, which added 4000 positives. I could not write `knobs.adversary.json` (`{"negatives": 4}`) because the write permission was denied, so that file does not exist yet.
+WHY: Negatives per positive go from 3 to 4 (about 33% more; I'm inferring the iter 0 value of 3 from 22419 negatives over 7473 pairs). That widens energy margins on near-miss successors, and the violation rate is already 0. I did not read margin_auditor's thinnest ensures clauses, so nothing was targeted at them.
+WHAT I EXPECT: The score stays at 1.0 with somewhat larger margins, but only if the knob takes effect. Please grant write access or create the knobs file, otherwise the trainer won't pick up `negatives: 4`.

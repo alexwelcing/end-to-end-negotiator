@@ -1,0 +1,97 @@
+{
+ "iteration": 0,
+ "rationale": "Initial team: audit the spec, cover the space, train, judge.",
+ "roles": [
+  {
+   "name": "spec_auditor",
+   "prompt": "Read the spec. Find invariants and ensures the author forgot, actions whose guards are never tested, and unreachable states. Propose spec patches; never change behaviour the author wrote.",
+   "owns": [
+    "spec"
+   ],
+   "knobs": {}
+  },
+  {
+   "name": "coverage_hunter",
+   "prompt": "Drive the oracle so every (state, action) pair appears in the log, with more episodes where the previous eval missed.",
+   "owns": [
+    "rollout"
+   ],
+   "knobs": {
+    "episodes": 50,
+    "horizon": 20
+   }
+  },
+  {
+   "name": "adversary",
+   "prompt": "Generate hard negatives: near-miss successor states that break exactly one invariant or one ensures clause. Pair every negative with its positive.",
+   "owns": [
+    "adversary"
+   ],
+   "knobs": {
+    "negatives": 3
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "Train the JEPA energy from the log. Report held-out conformance, learned-only conformance, and whether holes are learned.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs": 60,
+    "lr": 0.003,
+    "d": 64
+   }
+  },
+  {
+   "name": "energy_auditor",
+   "prompt": "Inspect the energy landscape: margin between the true successor and the runner-up on held-out pairs, calibration on violating futures, collapse symptoms in the encoder.",
+   "owns": [
+    "eval"
+   ],
+   "knobs": {}
+  }
+ ],
+ "phases": [
+  {
+   "name": "audit",
+   "roles": [
+    "spec_auditor"
+   ],
+   "gate": "spec.problems == 0"
+  },
+  {
+   "name": "data",
+   "roles": [
+    "coverage_hunter",
+    "adversary"
+   ],
+   "gate": null
+  },
+  {
+   "name": "learn",
+   "roles": [
+    "trainer"
+   ],
+   "gate": null
+  },
+  {
+   "name": "judge",
+   "roles": [
+    "energy_auditor"
+   ],
+   "gate": null
+  }
+ ],
+ "train": {
+  "epochs": 60,
+  "lr": 0.003,
+  "d": 64,
+  "hidden": 128
+ },
+ "rollout": {
+  "episodes": 50,
+  "horizon": 20,
+  "negatives": 3
+ }
+}

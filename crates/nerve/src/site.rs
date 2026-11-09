@@ -91,6 +91,12 @@ impl SiteBuild {
         let machines = stems(&root.join("machines"), "nerve")?;
         let models = dirs_with(&root.join("models/served"), "model.json");
         let pictures = dirs_with(&root.join("models/pictures"), crate::picture::META_FILE);
+        let shaders = dirs_with(&root.join("models/shaders"), crate::shader::META_FILE);
+        for n in &shaders {
+            for f in [crate::shader::META_FILE, crate::shader::WEIGHTS_FILE] {
+                copy(&root.join("models/shaders").join(n).join(f), &dist.join("models").join(n).join(f))?;
+            }
+        }
         for n in &specs {
             copy(&root.join("specs").join(format!("{n}.nerve")), &dist.join("specs").join(format!("{n}.nerve")))?;
         }
@@ -109,7 +115,7 @@ impl SiteBuild {
         }
         let sha = Command::new("git").args(["rev-parse", "--short", "HEAD"]).current_dir(root).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
         let manifest = json!({
-            "specs": specs, "machines": machines, "models": models, "pictures": pictures,
+            "specs": specs, "machines": machines, "models": models, "pictures": pictures, "shaders": shaders,
             "built": {"commit": sha, "at": chrono_free_now()},
         });
         std::fs::write(dist.join("manifest.json"), format!("{}\n", serde_json::to_string_pretty(&manifest)?))?;

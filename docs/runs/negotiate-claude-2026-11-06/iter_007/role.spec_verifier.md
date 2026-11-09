@@ -1,0 +1,3 @@
+WHAT I CHANGED: I added one iter_007 line to `runs/negotiate-claude/evolution/learnings.md`. It sits just above the iter_006 margin_checker line, not at the very end of the file. I didn't touch the spec or anything else.
+WHY: `nerve check` found 0 problems (216 states, 11 actions, no holes). The sha256 is `eead25d3…1f04f`, which matches the expected hash, so the spec is unchanged.
+WHAT I EXPECT: Nothing changes for scoring. Last eval was 1.0, and the spec is the same as in earlier iterations.

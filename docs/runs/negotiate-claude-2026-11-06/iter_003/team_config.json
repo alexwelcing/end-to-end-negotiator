@@ -1,0 +1,96 @@
+{
+ "iteration": 3,
+ "rationale": "Three iterations tell a consistent story: seen and held-out are at 1.0 with zero violations every time, and the only thing that moves the score is learned-only accept conformance (1.0 -> 0.981 -> 0.968). The verifier's finding explains it: 133 of the 216 grid states are unreachable from initial (wrong-parity turn at rounds 1..3, or rounds=0 non-initial), so their accept pairs are never positives in the log and the network extrapolates there when the compiled circuit is off. Iter 2 made it worse because the coverage_hunter did not actually cover anything (in_log fell from 1944 to 1501, fraction 0.63) while the log shrank to 4105 pairs, so accept, already the rarest action because it ends an episode, got even fewer effective samples. More data helped (iter 1 beat iter 2) but data from initial-state rollouts can never reach the 133 states, so the blocker is a rollout that does not start from initial. This iteration gives coverage_hunter an explicit, verifiable job: first look for a start-state option on `rollout`; if none exists, synthesise episodes for every (grid state, enabled action) pair using the spec's own transition via `nerve step` or the nerve package, write them in the exact line schema of the existing log, and oversample accept pairs by duplication so the rarest action gets equal effective mass. Its gate is hard: coverage fraction must be 1.0 on all 2376 pairs before anything trains. Rollout returns to the iter-1 data scale with the iter-0 3:1 negative ratio, training gets more epochs and the iter-2 hidden size to absorb it, and the energy_auditor is told to list the exact missed learned-only pairs so the next supervisor can target them instead of guessing. The spec stays untouched and the gate rejects any regression against iter 0.",
+ "roles": [
+  {
+   "name": "coverage_hunter",
+   "prompt": "Owns: rollout. Your single deliverable is coverage fraction 1.0: every (state, action) pair in the 216-state eval grid must appear as a positive in episodes.v1.jsonl. 133 grid states are unreachable from the initial state (wrong-parity turn at rounds 1..3, and all rounds=0 states except (a,0,0,open) and its walk successor), so plain rollouts from initial can never cover them; iter 2 proved this when coverage fell to 0.63. Procedure: (1) run `python -m nerve rollout --help` and look for any option to start episodes from an arbitrary or random state; if it exists, use it with `--policy coverage random` over all 216 states. (2) If no such option exists, synthesise episodes yourself: enumerate all 216 states, for each state enumerate the actions whose guards hold, compute the spec's true successor using `python -m nerve step` or by importing the nerve package's interpreter (never by hand), and append one episode per pair in exactly the line schema used by existing episodes.v1.jsonl lines (same keys, same source field convention, same state encoding). Validate by re-running the coverage computation the eval uses and confirm in_log == pairs. (3) Also run the normal rollout at the configured episodes/horizon so the reachable distribution stays dense. (4) Accept is the rarest action because it terminates episodes; duplicate every accept positive so accept pairs make up at least 15% of positives. Report the final pair count, in_log count, fraction, and per-action positive counts. Do not touch the spec.",
+   "owns": [
+    "rollout"
+   ],
+   "knobs": {
+    "episodes": 3000,
+    "horizon": 6
+   }
+  },
+  {
+   "name": "adversary",
+   "prompt": "Owns: adversary. Generate near-miss negatives paired with their positives: for each positive (state, action), produce successors that break exactly one invariant or exactly one ensures clause of that action. Keep the ratio at about 3 negatives per positive (iter 0's ratio, which gave 1.0); iter 1's 3.2:1 on a doubled log and iter 2's 3:1 on a tiny log both lost learned-only accept, so do not raise the ratio. Make sure every accept positive, including the synthesised ones at unreachable states, gets its full set of negatives, with particular attention to the accept-vs-propose confusion at wrong-parity states. Report negatives per action.",
+   "owns": [
+    "adversary"
+   ],
+   "knobs": {
+    "negatives": 3
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "Owns: train. Write knobs.json with TrainConfig overrides; the harness trains. First inspect TrainConfig's fields (import it from the nerve package and print its dataclass fields) and use any per-action or class weighting field if one exists to upweight accept; if none exists, rely on the coverage_hunter's duplication. The log is now roughly iter-1 scale plus synthesised unreachable-state pairs, so use at least 1.5x the iter-0 epoch count and the iter-2 hidden size (about 228k params) so each positive is seen often enough. Never change the spec. Never disable the compiled circuit to improve numbers. Report all/heldout/learned-only exact and per-action conformance from eval.json, and flag any learned-only accept miss as the headline.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs": 60,
+    "hidden": 256
+   }
+  },
+  {
+   "name": "energy_auditor",
+   "prompt": "Owns: eval. After training, use `python -m nerve step` to find every learned-only pair whose prediction differs from the spec's successor, and write the full list to evolution/learnings.md: state, action, true successor, predicted successor, energy of each, runner-up margin, and whether that state is reachable from initial. Then sample 30 accept pairs at unreachable (wrong-parity) states and 30 at reachable states and report the median and minimum runner-up margin for each group. State plainly whether the remaining accept misses are a coverage problem (missed pair not in the log as a positive) or a margin problem (in the log but outvoted), because that decides the next iteration's lever. Also record the per-action positive counts and the negatives-per-positive ratio actually used.",
+   "owns": [
+    "eval"
+   ],
+   "knobs": {}
+  },
+  {
+   "name": "spec_verifier",
+   "prompt": "Owns: spec. Read-only. Run `python -m nerve check` on specs/negotiate.nerve and confirm 0 problems, 216 states, 11 actions, no holes. Confirm the spec file is byte-identical to the author's version. Do not edit the spec under any circumstances; it has scored 1.0 on seen and held-out in every iteration. Write one line to evolution/learnings.md confirming the check and the hash.",
+   "owns": [
+    "spec"
+   ],
+   "knobs": {}
+  }
+ ],
+ "phases": [
+  {
+   "name": "verify",
+   "roles": [
+    "spec_verifier"
+   ],
+   "gate": "nerve check reports 0 problems and the spec is unchanged"
+  },
+  {
+   "name": "cover",
+   "roles": [
+    "coverage_hunter",
+    "adversary"
+   ],
+   "gate": "coverage fraction == 1.0 (in_log == pairs over all 216 states), accept positives >= 15% of positives, negatives per positive between 2.5 and 3.5"
+  },
+  {
+   "name": "train",
+   "roles": [
+    "trainer"
+   ],
+   "gate": "seen exact == 1.0, heldout exact == 1.0, violation_rate == 0.0, learned_only exact == 1.0 with accept == 1.0; any number below iter 0 rejects the run and keeps the iter-0 model as best"
+  },
+  {
+   "name": "audit",
+   "roles": [
+    "energy_auditor"
+   ],
+   "gate": "learnings.md lists every learned-only miss with reachability and margin, and names the lever for the next iteration"
+  }
+ ],
+ "train": {
+  "epochs": 60,
+  "lr": 0.002,
+  "hidden": 256,
+  "hole_weight": 1
+ },
+ "rollout": {
+  "episodes": 400,
+  "horizon": 6,
+  "negatives": 3
+ }
+}

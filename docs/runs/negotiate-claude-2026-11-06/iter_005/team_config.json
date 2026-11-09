@@ -1,0 +1,100 @@
+{
+ "iteration": 5,
+ "rationale": "Iterations 3 and 4 both scored a full 1.0: seen, held-out and learned-only exact at 1.0, zero violations, 2376/2376 coverage, and the spec verified unchanged by sha256 in each run. The one open question iter 4 was supposed to answer, the minimum runner-up margin on learned-only pairs, never landed in learnings.md, so we still do not know whether the 1.0 is comfortable or seed-fragile. There is no score to win and every exploratory change since iter 0 that touched data scale or negative ratio cost accept conformance, so this iteration is a strict freeze: same roles, same rollout and train knobs as iter 4, coverage_hunter keeps its synthesis job and hard 1.0 coverage gate, spec_verifier stays read-only, and the only change is making margin_checker's deliverable explicit and machine-checkable: it must append a single line to learnings.md with the global minimum margin, the minimum accept-on-unreachable-state margin, and the worst pair, computed via `nerve step` on every learned-only pair, and the eval gate fails if that line is missing. The trainer is told to copy knobs verbatim and not to react to anything but a reported margin below 0.05. Cost should land at or below iter 4 since no role has a new open-ended task.",
+ "roles": [
+  {
+   "name": "spec_verifier",
+   "prompt": "Owns: spec, read-only. Run `python -m nerve check` on specs/negotiate.nerve and compute its sha256. Confirm 0 problems, 216 states, 11 actions, no holes, and sha256 eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f. Do NOT edit the spec under any circumstances. Append one line to evolution/learnings.md: 'iter_005 spec_verifier: <check result>; sha256 <hash> confirmed; spec unchanged.' If the hash differs, say so loudly and stop the phase.",
+   "owns": [
+    "spec"
+   ],
+   "knobs": {}
+  },
+  {
+   "name": "coverage_hunter",
+   "prompt": "Owns: rollout. Goal: every one of the 2376 (grid state, enabled action) pairs over all 216 states must appear as a positive in episodes.v1.jsonl, exactly as in iter 3 and iter 4. Step 1: run `python -m nerve rollout specs/negotiate.nerve --log <log> --policy coverage random --episodes 400 --horizon 8` from initial. Step 2: 133 grid states are unreachable from initial (wrong-parity turn at rounds 1..3, rounds=0 non-initial), so synthesise one episode per (state, enabled action) pair for ALL 216 states using the spec's own transition via `python -m nerve step` or the nerve package, written in the exact line schema of the existing log (same keys, same source field convention as iter 3/4). Step 3: duplicate every accept positive so accept has effective mass equal to propose. Step 4: run the coverage check and report pairs, in_log, fraction. Gate: fraction must be 1.0 on 2376/2376 pairs before training starts. Do not change the negative ratio; adversary handles negatives.",
+   "owns": [
+    "rollout"
+   ],
+   "knobs": {
+    "episodes": 400,
+    "horizon": 8
+   }
+  },
+  {
+   "name": "adversary",
+   "prompt": "Owns: adversary. Generate near-miss negatives at the iter-0 ratio of roughly 3 negatives per positive: for each positive, successors that break exactly one invariant or one ensures clause, paired with the positive (same state, same action). Use `--policy adversary --negatives 3`. Do not exceed 3:1; higher ratios in iter 1 crowded out accept positives. Report the final positive/negative counts.",
+   "owns": [
+    "adversary"
+   ],
+   "knobs": {
+    "negatives": 3
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "Owns: train. Write knobs.json as an exact copy of the iter-4 knobs: epochs 60, lr 0.002, d 64, hidden 256, hole_weight 1.0. Do not change any value unless margin_checker from the previous iteration reported a minimum margin below 0.05 in learnings.md, in which case raise epochs to 80 only. Never change the spec. Never disable the compiled circuit. After the harness trains, report all/heldout/learned-only exact, violation_rate, per-action conformance and hole accuracy from eval.json.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs": 60,
+    "lr": 0.002,
+    "d": 64,
+    "hidden": 256,
+    "hole_weight": 1.0
+   }
+  },
+  {
+   "name": "margin_checker",
+   "prompt": "Owns: eval. Deliverable is one line in evolution/learnings.md, nothing else is acceptable. For EVERY learned-only eval pair (all 2376), run `python -m nerve step` with the compiled circuit off and record the energy gap between the true successor and the runner-up. Compute: (a) global minimum margin and the pair that attains it, (b) minimum margin restricted to accept pairs on the 133 unreachable states, (c) count of pairs with margin below 0.05, (d) whether any spec-violating future has energy within 0.05 of the true successor. Append exactly: 'iter_005 margin_checker: min_margin=<a> at <state,action>; min_accept_unreachable=<b>; n_below_0.05=<c>; violating_future_near=<yes/no>'. If the eval shows any miss, list the exact missed pairs on a second line. Do not change anything.",
+   "owns": [
+    "eval"
+   ],
+   "knobs": {}
+  }
+ ],
+ "phases": [
+  {
+   "name": "verify_spec",
+   "roles": [
+    "spec_verifier"
+   ],
+   "gate": "nerve check reports 0 problems and sha256 matches eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f; otherwise abort."
+  },
+  {
+   "name": "cover",
+   "roles": [
+    "coverage_hunter",
+    "adversary"
+   ],
+   "gate": "coverage fraction == 1.0 on 2376/2376 pairs and negatives/positives <= 3.2; otherwise abort before training."
+  },
+  {
+   "name": "train",
+   "roles": [
+    "trainer"
+   ],
+   "gate": "all.exact == 1.0 and heldout.exact == 1.0 and learned_only.exact == 1.0 and violation_rate == 0.0; any regression against iter 4 rejects the run."
+  },
+  {
+   "name": "audit",
+   "roles": [
+    "margin_checker"
+   ],
+   "gate": "learnings.md contains a line starting with 'iter_005 margin_checker: min_margin='; otherwise the phase is marked failed."
+  }
+ ],
+ "train": {
+  "epochs": 60,
+  "lr": 0.002,
+  "d": 64,
+  "hidden": 256,
+  "hole_weight": 1
+ },
+ "rollout": {
+  "episodes": 400,
+  "horizon": 8,
+  "negatives": 3
+ }
+}

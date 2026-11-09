@@ -1,0 +1,5 @@
+WHAT I CHANGED: Nothing in the log or spec. I kept the `negatives` knob at 3. The episode log has only its header, so there are no positives to pair negatives with yet. I did not write a knobs file because I don't own `train`.
+
+WHY: `rollout` and `exhaustive` in `nerve/data/rollout.py` already attach `negatives` near-miss successors to every positive they log. This includes the exhaustive pass over all (state, action) pairs, so unreachable and wrong-parity accept states get their full set of 3. Adding negatives by hand would push the ratio above 3:1, which earlier iterations showed hurts learned-only accept. I haven't inspected the `_negatives` code itself, so I haven't confirmed it varies the accept-vs-propose confusion at wrong-parity states. For the same reason I have no per-action negative counts.
+
+WHAT I EXPECT: `coverage_hunter` runs its exhaustive pass with 3 negatives, which gives about 3 per accept, propose and walk positive, or roughly 7.1k negatives across the 2,376 grid pairs plus any extra rollout data. Learned-only accept should stay at or above 0.97. I'm not adding extra accept negatives, because that would raise the ratio.

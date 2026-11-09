@@ -1,0 +1,75 @@
+{
+ "iteration": 8,
+ "rationale": "Iteration 7 kept the official score at 1.0 (seen, held-out and learned-only all exact, zero violations, spec sha256 confirmed a fifth time), but two of its own instructions silently failed: coverage fell to 1994/2376 (fraction 0.84) even though coverage_hunter's gate was supposed to be a hard 1.0, and negatives rose to 32190 even though they were supposed to be pinned to the iter-5 level, pushing cost to 1.48 USD against a 1.32 target. The score survived only because the log happened to be large (13381 pairs), which is the same luck that failed in iters 1 and 2 when accept pairs on the 133 unreachable states went unseen, so the drift is a real durability risk rather than a cosmetic one. The margin question is now definitively answered as 'not answerable inside this harness': after two iterations the checker established that nerve step reports only combined energies one pair per process and that any ad-hoc python run is denied by the sandbox, and it left a ready script at iter_007/run/margin_check.py that only a human can approve. Continuing to spend a role on it buys nothing, so I remove margin_checker, cut the team back to the three roles that actually produce the 1.0, and make the two broken instructions machine-checkable instead of advisory: coverage_hunter must run `python -m nerve eval` itself and read coverage.fraction from eval.json before handing off, and the train-phase gate rejects the run if negatives exceed 21000 or coverage is below 1.0 in the final eval.json, regardless of score. Rollout negatives are pinned as a hard knob rather than a suggestion, the trainer copies iter_005/knobs.json verbatim (the cheapest 1.0 run with the settled 339954-param network), and the spec stays read-only. Cost target is at or below iter 5 (about 1.32 USD, under 400s); the human-side action is to run the iter_007 margin script once outside the sandbox if they want the margin number.",
+ "roles": [
+  {
+   "name": "spec_verifier",
+   "prompt": "Read-only. Run `python -m nerve check specs/negotiate.nerve` and compute sha256 of the spec. Append one line to evolution/learnings.md: 'iter_008 spec_verifier: nerve check <problems> problems, <states> states, <actions> actions, holes <n>; sha256 <hash>; spec unchanged/CHANGED'. Expected hash is eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f. Do NOT edit the spec under any circumstances; if the hash differs, say CHANGED and stop.",
+   "owns": [
+    "spec"
+   ],
+   "knobs": {}
+  },
+  {
+   "name": "coverage_hunter",
+   "prompt": "Owns rollout. Goal: every one of the 2376 (grid state, enabled action) pairs over all 216 states must appear as a positive in episodes.v1.jsonl, including the 133 states unreachable from initial (wrong-parity turn at rounds 1..3, and rounds=0 non-initial). Steps: (1) run `python -m nerve rollout specs/negotiate.nerve --log <log> --policy coverage random --episodes 400 --horizon 8 --negatives 2` exactly, do not raise negatives; (2) reuse the synthesis procedure from iter_003..iter_006 (episodes starting from arbitrary grid states using the spec's own transition, written in the exact line schema of the existing log, accept pairs duplicated 3x so the rarest action gets equal effective mass); (3) VERIFY before handing off: run `python -m nerve eval specs/negotiate.nerve --log <log>` (or the eval invocation the harness exposes) and read coverage.in_log and coverage.fraction from eval.json. If fraction < 1.0, list the missing pairs and synthesise them, then re-check. Append one line to evolution/learnings.md: 'iter_008 coverage_hunter: in_log <n>/2376 fraction <f>, positives <p>, negatives <k>'. Keep total negatives at or below 21000; if rollout produced more, do not add any further negatives. Do not touch the spec.",
+   "owns": [
+    "rollout"
+   ],
+   "knobs": {
+    "episodes": 400,
+    "horizon": 8,
+    "negatives": 2
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "Owns train. If runs/negotiate-claude/iter_005/knobs.json exists, copy it verbatim to this iteration's knobs.json and change nothing. Otherwise use the train knobs given below. Never change the spec. Never disable the compiled circuit. Never raise epochs, d or hidden in reaction to anything. After the harness trains, read eval.json and append one line to evolution/learnings.md: 'iter_008 trainer: all <x> heldout <x> learned_only <x> violations <v> accept_learned_only <a> coverage <f> negatives <k> params <p> seconds <s>'. If learned_only.per_action.accept < 1.0, list the exact missed (state, action) pairs from eval.json in a second line so the next supervisor can target them.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs": 40,
+    "lr": 0.001,
+    "d": 64,
+    "hidden": 256,
+    "hole_weight": 1.0
+   }
+  }
+ ],
+ "phases": [
+  {
+   "name": "verify",
+   "roles": [
+    "spec_verifier"
+   ],
+   "gate": "nerve check reports 0 problems, 216 states, 11 actions, no holes; sha256 equals eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f; spec unchanged"
+  },
+  {
+   "name": "cover",
+   "roles": [
+    "coverage_hunter"
+   ],
+   "gate": "coverage_hunter's own eval shows coverage.fraction == 1.0 on all 2376 pairs AND total negatives <= 21000; otherwise stop, do not train"
+  },
+  {
+   "name": "train",
+   "roles": [
+    "trainer"
+   ],
+   "gate": "eval.json: all.exact == 1.0, heldout.exact == 1.0, learned_only.exact == 1.0, violation_rate == 0.0, coverage.fraction == 1.0, negatives <= 21000; any regression against iter 5 rejects the run"
+  }
+ ],
+ "train": {
+  "epochs": 40,
+  "lr": 0.001,
+  "d": 64,
+  "hidden": 256,
+  "hole_weight": 1
+ },
+ "rollout": {
+  "episodes": 400,
+  "horizon": 8,
+  "negatives": 2
+ }
+}

@@ -1,0 +1,5 @@
+WHAT I CHANGED: Nothing. I wrote no knobs file and made no spec or episode edits, because my charter has no knobs (`{}`) and I found no problem to fix. I didn't compute margins, calibration or collapse checks myself. I only read `eval.json` in the iteration directory, which looks like the trainer's run, since "Previous eval" was listed as none.
+
+WHY: That `eval.json` reports a score of 1.0. Exact-match accuracy is 1.0 on the heldout (276), seen (1528), all (1804) and learned_only sets, and the violation rate is 0.0. Per-action accuracy is 1.0 for propose, accept and walk. Coverage is 1804/1804 pairs in the log, with 164 of 216 states valid. Perfect heldout accuracy and zero violations give no sign of collapse or miscalibration.
+
+WHAT I EXPECT: The score should stay at 1.0 (60 epochs, d=64) on this setup. The remaining risk is that exact-match accuracy can't show a thin margin between the true successor and the runner-up. A later iteration that adds harder, rarer or invalid-state pairs could reveal one.

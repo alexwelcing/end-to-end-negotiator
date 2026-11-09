@@ -1,0 +1,5 @@
+WHAT I CHANGED: I appended episodes to `episodes.v1.jsonl` with `python -m nerve rollout` (40 episodes, horizon 8, `--negatives 3`, seed 7). The rollout reported 3336 positives added, and the log now has 13345 lines. I didn't edit the spec or write a knobs file.
+
+WHY: The `--negatives 3` flag is the adversary's knob for hard negatives. I assumed rollout pairs each negative with its positive, but I didn't open the log to check. I also didn't check that each negative breaks exactly one invariant or ensures clause. I skipped the spec auditor's `spec_audit.json` and `role.spec_auditor.md`.
+
+WHAT I EXPECT: The extra near-miss negatives should help the trained model separate the invariant-breaking successor states from valid ones, which should raise the heldout and learned_only scores. I haven't run `nerve train` or scored anything, so this is untested.

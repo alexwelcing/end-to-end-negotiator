@@ -1,0 +1,113 @@
+{
+ "iteration": 1,
+ "rationale": "Iteration 0 already hit the ceiling: 1.0 exact on seen, held-out and learned-only, zero violations, 1804/1804 pairs covered, and the spec check presumably clean. There is no score left to win, so the only rational moves are (a) don't break it, and (b) harden it against the two ways a perfect number can be fragile: a lucky held-out split and thin energy margins that a different seed or a slightly longer horizon would expose. The 164-of-216 valid states gap also deserves a one-time check that the 52 missing states are genuinely unreachable under the invariants rather than uncovered. So I keep the winning rollout/train knobs essentially unchanged, drop the spec_auditor to a read-only verifier (no patching a spec that scores 1.0), add a margin_auditor that uses `step` to measure runner-up margins and spec-violating-future energies on held-out pairs, raise adversarial negatives modestly to widen margins without changing the positive distribution, and add a split_prober that re-rolls a fresh held-out set with a different seed and longer horizon to confirm the 1.0 generalizes. Gates are 'no regression' rather than 'improve'. Cost should stay around the iter-0 budget.",
+ "roles": [
+  {
+   "name": "spec_verifier",
+   "prompt": "Owns: spec. Read specs/negotiate.nerve and run `python -m nerve check`. The current model scores 1.0, so DO NOT patch the spec. Your only job is to confirm check reports 0 issues and to explain, state by state, why the 52 states not in valid_states (164 of 216) are unreachable under the invariants. If any of those states is actually reachable, report it in learnings.md as a coverage gap for coverage_hunter; do not edit the spec.",
+   "owns": [
+    "spec"
+   ],
+   "knobs": {}
+  },
+  {
+   "name": "coverage_hunter",
+   "prompt": "Owns: rollout. Reproduce iter-0 coverage: every (state, action) pair must appear as a positive in episodes.v1.jsonl. Run `python -m nerve rollout <spec> --log <log> --policy coverage random --episodes N`. Keep N at the iter-0 level (coverage was already 1.0); only raise it for a state spec_verifier flags as reachable-but-uncovered. Do not change horizon.",
+   "owns": [
+    "rollout"
+   ],
+   "knobs": {
+    "episodes": 1800,
+    "horizon": 12
+   }
+  },
+  {
+   "name": "adversary",
+   "prompt": "Owns: adversary. Generate near-miss negatives: successors that break exactly one invariant or one ensures clause, paired with their positive (same state, same action). Use `--policy adversary --negatives K`. Violation rate is already 0, so the goal is wider energy margins, not fixing errors: raise K by ~30% over iter 0 and prioritize the ensures clauses margin_auditor reports as thinnest. Never generate negatives that are actually valid successors.",
+   "owns": [
+    "adversary"
+   ],
+   "knobs": {
+    "negatives": 4
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "Owns: train. Train with the iter-0 recipe (it scored 1.0): `python -m nerve train <spec> --log <log> --out <run> --epochs E --lr LR --d D`. Write knobs.json with the same epochs/lr/d/hidden/hole_weight as iter 0 unless margin_auditor reports a margin below 0.1 on held-out pairs, in which case raise epochs by 25% only. Report all/heldout/learned-only exact and hole accuracy from eval.json. Never change the spec. Never disable the compiled circuit. Flag any regression below 1.0 immediately.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs": 40,
+    "lr": 0.003,
+    "d": 64,
+    "hidden": 128,
+    "hole_weight": 4.0
+   }
+  },
+  {
+   "name": "margin_auditor",
+   "prompt": "Owns: eval. The score is 1.0; your job is to measure how safe that 1.0 is. Use `python -m nerve step` on every held-out pair and on a sample of 100 seen pairs: record the energy margin between the true successor and the runner-up, the energies of the nearest spec-violating futures (one per invariant/ensures clause), and whether learned-only predictions collapse onto a small set of states. Report the minimum, 5th-percentile and median margin per action (propose/accept/walk) and the thinnest ensures clause. Write all findings to evolution/learnings.md so adversary and trainer can target them next iteration.",
+   "owns": [
+    "eval"
+   ],
+   "knobs": {}
+  },
+  {
+   "name": "split_prober",
+   "prompt": "Owns: rollout, eval. Guard against a lucky held-out split. Roll out a fresh evaluation set with a different random seed and a longer horizon (`python -m nerve rollout <spec> --log <probe_log> --policy random --episodes 400 --horizon 20`), then run `python -m nerve eval` of the trained run against it. Report exact and violation_rate per action on this probe set alongside the official held-out numbers. If the probe set scores below 0.98, name the failing (state, action) pairs in evolution/learnings.md. Do not modify episodes.v1.jsonl.",
+   "owns": [
+    "rollout",
+    "eval"
+   ],
+   "knobs": {
+    "episodes": 400,
+    "horizon": 20
+   }
+  }
+ ],
+ "phases": [
+  {
+   "name": "verify_spec",
+   "roles": [
+    "spec_verifier"
+   ],
+   "gate": "check reports 0 issues; no spec edits made"
+  },
+  {
+   "name": "cover",
+   "roles": [
+    "coverage_hunter",
+    "adversary"
+   ],
+   "gate": "coverage fraction == 1.0 and every pair has at least 3 adversarial negatives"
+  },
+  {
+   "name": "train",
+   "roles": [
+    "trainer"
+   ],
+   "gate": "all_exact == 1.0 and heldout_exact == 1.0 and violation_rate == 0.0"
+  },
+  {
+   "name": "harden",
+   "roles": [
+    "margin_auditor",
+    "split_prober"
+   ],
+   "gate": "probe-set exact >= 0.98 and min held-out margin recorded in learnings.md"
+  }
+ ],
+ "train": {
+  "epochs": 40,
+  "lr": 0.003,
+  "d": 64,
+  "hidden": 128,
+  "hole_weight": 4
+ },
+ "rollout": {
+  "episodes": 400,
+  "horizon": 12,
+  "negatives": 4
+ }
+}

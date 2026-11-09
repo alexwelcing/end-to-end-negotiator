@@ -1,0 +1,5 @@
+WHAT I CHANGED: I wrote `runs/negotiate-claude/iter_002/knobs.trainer.json` with `{"epochs": 120, "lr": 0.003, "d": 64, "hidden": 192, "hole_weight": 4}`. The iter-0/1 knobs were epochs 60, lr 0.003, d 64, hidden 128. `hole_weight` is 4 because iter_001's `knobs.effective.json` already used 4, though the config default is 20.
+
+WHY: The log grew about 2.5x and `learned_only` accept fell to 0.981. That calls for roughly 2.5x the epochs, but my epochs multiplier is capped at 2.0, so 120 is the most I could set. Hidden is 1.5x (128 to 192), which `TrainConfig` supports. I left lr, d and `hole_weight` as they were, and did not touch the spec or the compiled circuit.
+
+WHAT I EXPECT: I can't run training, so I have no eval numbers for iter_002; `eval.json` doesn't exist yet. I expect `learned_only` accept to recover to about 0.99 or better. I expect all, seen, heldout and per-action exact to stay at 1.0, as in iter_001, which had learned-only 0.9983 (accept 0.981).

@@ -1,0 +1,88 @@
+{
+ "iteration": 2,
+ "rationale": "Iteration 1 did not improve on iteration 0: official score slipped from 1.0000 to 0.9997 because learned-only accept conformance dropped to 0.981 (one accept pair of 54 mispredicted when the compiled circuit is off), while seen/held-out stayed at 1.0 and violations at 0. Two things changed at once in iter 1: the eval grid grew from 164 to all 216 states (so 432 of 2376 eval pairs are now unreachable-state pairs that never appear as positives, coverage fraction 0.82), and the log more than doubled (17151 pairs, 55k negatives) with the same epochs, so the network saw each positive fewer effective times. The spec is verified clean and must not be touched, so the remaining lever is purely rollout/train: (a) get positives for the unreachable grid states into the log so learned-only is not extrapolating there, which needs a coverage_hunter that starts episodes from arbitrary grid states rather than only from initial, (b) restore the iter-0 negative ratio (~3:1) so adversarial mass does not crowd out the accept positives, and (c) give training more epochs and a slightly larger hidden layer to absorb the bigger log, with an energy_auditor focused specifically on the learned-only accept miss to tell us whether it is a margin problem or a coverage problem. Gates are strict: any regression below iter-0 numbers rejects the run, and learned-only must come back to 1.0. Cost target is the iter-1 budget or lower since no spec roles run.",
+ "roles": [
+  {
+   "name": "coverage_hunter",
+   "prompt": "Owns: rollout. Eval now enumerates all 216 grid states x 11 actions (2376 pairs) and only 1944 were in the log last time. The 432 missing pairs are on grid states unreachable from initial (rounds=0 states other than (a,0,0,open)/(a,0,0,no_deal), and wrong-turn-parity states at rounds 1..3). First check whether `python -m nerve rollout --help` offers a way to start episodes from arbitrary/random grid states (e.g. --start random, --from-state, --grid, or a coverage policy flag); if it does, use it so every grid (state, action) pair with an enabled guard appears as a positive at least 3 times. If it does not, run `--policy coverage random` with episodes raised to 4000 and horizon 6, then report exactly which (state, action) pairs remain absent from episodes.v1.jsonl, grouped by action, to learnings.md. Pay particular attention to accept pairs: last run's only learned-only miss was an accept. Do not edit the spec.",
+   "owns": [
+    "rollout"
+   ],
+   "knobs": {
+    "episodes": 4000,
+    "horizon": 6
+   }
+  },
+  {
+   "name": "adversary",
+   "prompt": "Owns: adversary. Generate near-miss negatives that break exactly one invariant or one ensures clause, paired with the same (state, action) positive. Target a negatives:positives ratio of about 3:1 as in iteration 0 (which scored 1.0); iteration 1 ran ~3.2:1 on a much larger log and learned-only accept dipped, so do NOT raise K beyond 3 per positive. Spread negatives evenly across propose/accept/walk so no action is over-penalised; report the per-action negative counts.",
+   "owns": [
+    "adversary"
+   ],
+   "knobs": {
+    "negatives": 3
+   }
+  },
+  {
+   "name": "trainer",
+   "prompt": "Owns: train. Write knobs.json. The log is now ~2.5x larger than iteration 0 but epochs stayed the same, and learned-only accept fell to 0.981. Raise epochs so each positive is seen at least as many times as in iteration 0, keep lr unchanged from the iter-0 run, keep d at the iter-0 value, and raise hidden modestly (about 1.5x) if TrainConfig exposes it. Keep hole_weight at its current value (there are no learn holes in this spec). Report all/seen/heldout/learned-only exact and per-action numbers from eval.json. Never change the spec. Never disable the compiled circuit.",
+   "owns": [
+    "train"
+   ],
+   "knobs": {
+    "epochs_multiplier": 2.0,
+    "hidden_multiplier": 1.5
+   }
+  },
+  {
+   "name": "energy_auditor",
+   "prompt": "Owns: eval. Using `python -m nerve step` on the trained run: (1) find every eval pair where the learned-only prediction differs from the spec successor and print the state, action, true successor energy, predicted successor energy, and the margin; (2) for all accept pairs, report the minimum margin between the true successor and the runner-up, and flag any below 10% of the median margin; (3) for each unreachable grid state, say whether the learned-only prediction agrees with the spec. Write to evolution/learnings.md a one-paragraph verdict: is the remaining learned-only gap a coverage problem (missing positives) or a margin problem (positives present but weakly separated)? Do not modify the spec or the run.",
+   "owns": [
+    "eval"
+   ],
+   "knobs": {}
+  }
+ ],
+ "phases": [
+  {
+   "name": "cover",
+   "roles": [
+    "coverage_hunter"
+   ],
+   "gate": "every reachable (state, action) pair appears as a positive; report remaining absent grid pairs"
+  },
+  {
+   "name": "harden",
+   "roles": [
+    "adversary"
+   ],
+   "gate": "negatives:positives between 2.5:1 and 3.2:1, no action with zero negatives"
+  },
+  {
+   "name": "train",
+   "roles": [
+    "trainer"
+   ],
+   "gate": "heldout exact == 1.0 and all exact == 1.0 and violation_rate == 0.0 and learned_only exact >= 0.9983"
+  },
+  {
+   "name": "audit",
+   "roles": [
+    "energy_auditor"
+   ],
+   "gate": "learnings.md updated with coverage-vs-margin verdict and list of any learned-only misses"
+  }
+ ],
+ "train": {
+  "epochs": 24,
+  "lr": 0.001,
+  "d": 64,
+  "hidden": 192,
+  "hole_weight": 1
+ },
+ "rollout": {
+  "episodes": 400,
+  "horizon": 6,
+  "negatives": 3
+ }
+}

@@ -209,7 +209,7 @@ impl App {
                 .map(|((inst, ty, spec), net)| {
                     let mut summary = match self.entry(ty) {
                         Ok(entry) => spec_summary(entry),
-                        Err(_) => spec_summary(&Entry { spec: spec.clone(), model: None, picture: None, source: String::new() }),
+                        Err(_) => spec_summary(&Entry { spec: spec.clone(), model: None, picture: None, shader: None, source: String::new() }),
                     };
                     summary["instance"] = json!(inst);
                     summary["type"] = json!(ty);

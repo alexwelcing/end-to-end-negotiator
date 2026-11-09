@@ -1,0 +1,3 @@
+WHAT I CHANGED: I wrote `iter_001/knobs.trainer.json` with epochs 60, lr 0.003, d 64 and hidden 128, the same as iter 0. I did not touch the spec, and the compiled circuit stays enabled. I left out `hole_weight`, which iter 0 didn't set (this spec has no `learn` holes).
+WHY: There is no margin_auditor report, so the +25% epochs rule doesn't apply. Iter 0's eval was 1.0 on all, heldout, learned-only and hole accuracy, with 0 violations. The charter says to match iter 0, so I used iter 0's actual 60 epochs instead of the 40 in the knob defaults.
+WHAT I EXPECT: Another 1.0 on all, heldout and learned-only exact, and 0 violations. I'll flag any score below 1.0 as a regression once the harness's eval.json comes back.

@@ -109,6 +109,15 @@ impl Lin {
         Ok(Self { w, b })
     }
 
+    /// The same map on a batch of any rank (`[.., nin] -> [.., nout]`): per-pixel layers of the shader.
+    pub(crate) fn fwd_nd(&self, x: &Tensor) -> Result<Tensor> {
+        let y = x.broadcast_matmul(&self.w.as_tensor().t()?)?;
+        Ok(match &self.b {
+            Some(b) => y.broadcast_add(b.as_tensor())?,
+            None => y,
+        })
+    }
+
     pub(crate) fn fwd(&self, x: &Tensor, detach: bool) -> Result<Tensor> {
         let w = if detach { self.w.as_tensor().detach() } else { self.w.as_tensor().clone() };
         let y = x.matmul(&w.t()?)?;

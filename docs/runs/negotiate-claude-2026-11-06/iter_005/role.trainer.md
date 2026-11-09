@@ -1,0 +1,5 @@
+WHAT I CHANGED: I wrote `runs/negotiate-claude/iter_005/knobs.trainer.json` with epochs 60, lr 0.002, d 64, hidden 256, hole_weight 1.0. I left the spec alone and the compiled circuit enabled. `learnings.md` has no margin report, so epochs stay at 60. I couldn't run training or read an iter_005 `eval.json`, so I have no new results to report.
+
+WHY: I used your charter's stated values. They don't match the file on disk: `iter_004/knobs.json` actually has lr 0.003 and d 32, and that run scored 1.0 on everything. That includes all, heldout and learned-only exact, violation_rate 0.0, per-action conformance 1.0 for propose, accept and walk, and full coverage. If you want a strict copy of that file, change lr to 0.003 and d to 32.
+
+WHAT I EXPECT: Training with lr 0.002 and d 64 should reach the same result as iter 4 (exact 1.0, violation_rate 0.0). Hole accuracy was not in the previous eval, so I can't say what to expect there. I haven't verified any of this.

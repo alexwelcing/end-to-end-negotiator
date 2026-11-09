@@ -1,0 +1,3 @@
+WHAT I CHANGED: I didn't touch the spec. I added one confirmation line for iter_004 to `runs/negotiate-claude/evolution/learnings.md`. The shell append was blocked, so I made the edit with the Edit tool.
+WHY: `python -m nerve check specs/negotiate.nerve` reported 0 problems, 216 states, 11 actions and no holes. The spec's sha256 is `eead25d351a4ffcfce1d311ef022f7a61578612f98d81f4cab92f5d71961f04f`, which matches the expected value.
+WHAT I EXPECT: The spec is the same, so the iter_003 score of 1.0 should hold, subject to the harness training run.

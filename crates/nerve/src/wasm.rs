@@ -31,7 +31,7 @@ impl Room {
     pub fn add_spec(&mut self, text: &str) -> Result<String, JsError> {
         let spec = Spec::parse(text).map_err(js)?;
         let name = spec.name.clone();
-        self.app.add_entry(Entry { spec, model: None, picture: None, source: text.to_string() });
+        self.app.add_entry(Entry { spec, model: None, picture: None, shader: None, source: text.to_string() });
         Ok(name)
     }
 
@@ -63,6 +63,26 @@ impl Room {
 
     pub fn has_picture(&self, spec: &str) -> bool {
         self.app.entry(spec).ok().is_some_and(|e| e.picture.is_some())
+    }
+
+    /// Loads the shader of an interface already added: `shader.json` text and `shader.safetensors`
+    /// bytes, as `nerve train-shader` writes them.
+    pub fn add_shader(&mut self, spec: &str, meta_json: &str, weights: &[u8]) -> Result<(), JsError> {
+        let s = self.app.entry(spec).map_err(js)?.spec.clone();
+        let p = crate::shader::Shader::from_bytes(s, meta_json, weights, &Device::Cpu).map_err(js)?;
+        self.app.set_shader(spec, std::sync::Arc::new(p)).map_err(js)
+    }
+
+    pub fn has_shader(&self, spec: &str) -> bool {
+        self.app.entry(spec).ok().is_some_and(|e| e.shader.is_some())
+    }
+
+    /// The shader's weights as JSON (`{shader: config, tensors: {name: {shape, data}}}`) for the
+    /// page's WebGL fragment shader, which draws the picture on the GPU at the display's resolution.
+    pub fn shader_weights(&self, spec: &str) -> Result<String, JsError> {
+        let e = self.app.entry(spec).map_err(js)?;
+        let sh = e.shader.as_ref().ok_or_else(|| JsError::new("no shader"))?;
+        Ok(sh.export_json().map_err(js)?.to_string())
     }
 
     /// Answers an API path (`/api/specs`, `/api/<spec>/step`, `/api/machine/<name>/tick`, ...) with

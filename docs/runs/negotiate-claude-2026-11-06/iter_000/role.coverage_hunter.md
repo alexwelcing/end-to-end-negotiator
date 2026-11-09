@@ -1,0 +1,3 @@
+WHAT I CHANGED: I appended 50 episodes at horizon 20 (seed 11) to `episodes.v1.jsonl` with `nerve rollout`. That added 5376 positive examples and brought the log to 34,849 lines.
+WHY: This is the first iteration with no previous eval, so I ran one broad pass with the allowed knobs to cover as many (state, action) pairs as possible. I did not check which pairs the log now covers.
+WHAT I EXPECT: Good coverage of propose, accept and walk across the rounds 0–3 states, though rare corners such as accept at rounds 0 or propose at rounds 3 may still be thin. If the first eval shows misses, I'll run more episodes targeted at those pairs.

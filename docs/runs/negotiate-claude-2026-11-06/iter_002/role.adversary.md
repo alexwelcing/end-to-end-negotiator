@@ -1,0 +1,3 @@
+WHAT I CHANGED: Nothing. The episode log already has near-miss negatives at exactly 3:1 for every action (propose 11817:3939, accept 1215:405, walk 1368:456), so I added no rollouts. I couldn't write `knobs.adversary.json` because the write needed approval and wasn't granted. `negatives` stays at its default of 3 and I've set no other knobs.
+WHY: Iteration 0 scored 1.0 at 3:1, and raising K above 3 per positive hurt learned-only accept in iteration 1. Negatives are already spread in the same proportion across propose, accept and walk, so no action is over-penalised.
+WHAT I EXPECT: The score stays near 0.9997. The only gap is learned-only accept (about 0.98), which more negatives wouldn't fix. If you grant the write, an empty `{}` knobs file is all that's needed.

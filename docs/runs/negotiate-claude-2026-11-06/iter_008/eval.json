@@ -1,0 +1,54 @@
+{
+ "all": {
+  "n": 2376,
+  "exact": 0.9991582491582491,
+  "violation_rate": 0.0,
+  "per_action": {
+   "propose": 1.0,
+   "accept": 0.9907407407407407,
+   "walk": 1.0
+  }
+ },
+ "seen": {
+  "n": 2009,
+  "exact": 1.0,
+  "violation_rate": 0.0,
+  "per_action": {
+   "propose": 1.0,
+   "accept": 1.0,
+   "walk": 1.0
+  }
+ },
+ "heldout": {
+  "n": 367,
+  "exact": 0.9945504087193461,
+  "violation_rate": 0.0,
+  "per_action": {
+   "propose": 1.0,
+   "walk": 1.0,
+   "accept": 0.9473684210526315
+  }
+ },
+ "learned_only": {
+  "n": 2376,
+  "exact": 0.9949494949494949,
+  "violation_rate": 0.0,
+  "per_action": {
+   "propose": 0.9984567901234568,
+   "accept": 0.9583333333333334,
+   "walk": 1.0
+  }
+ },
+ "score": 0.9966,
+ "train_pairs": 5461,
+ "negatives": 10922,
+ "seconds": 63.2,
+ "params": 339954,
+ "coverage": {
+  "pairs": 2376,
+  "in_log": 1555,
+  "fraction": 0.6545,
+  "valid_states": 216,
+  "all_states": 216
+ }
+}

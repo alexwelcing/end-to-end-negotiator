@@ -64,6 +64,43 @@ enum Cmd {
         /// Directory of render networks (`<dir>/<spec name>/picture.json`), as written by `nerve train-picture`.
         #[arg(long, default_value = "models/pictures")]
         pictures: Option<PathBuf>,
+        /// Directory of shaders (`<dir>/<spec name>/shader.json`), as written by `nerve train-shader`.
+        #[arg(long, default_value = "models/shaders")]
+        shaders: Option<PathBuf>,
+    },
+    /// Train the shader of a spec with a `scene:` (the picture as a function of the pixel, any resolution) and save it to `<out>/<spec name>/`.
+    TrainShader {
+        spec: PathBuf,
+        #[arg(long, default_value = "models/shaders")]
+        out: PathBuf,
+        #[arg(long, default_value_t = 4000)]
+        steps: usize,
+        /// States per step.
+        #[arg(long, default_value_t = 8)]
+        batch: usize,
+        /// Random pixels per state per step.
+        #[arg(long, default_value_t = 2048)]
+        pixels: usize,
+        #[arg(long, default_value_t = 1e-3)]
+        lr: f64,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+        /// Random valid states to train on when the spec is not finite.
+        #[arg(long, default_value_t = 256)]
+        samples: usize,
+        /// The training raster is the scene's raster times this.
+        #[arg(long, default_value_t = 4)]
+        scale: usize,
+        #[arg(long, default_value_t = 128)]
+        hidden: usize,
+        #[arg(long, default_value_t = 4)]
+        layers: usize,
+        #[arg(long, default_value_t = 8)]
+        octaves: usize,
+        #[arg(long, default_value_t = 200)]
+        log_every: usize,
+        #[arg(long)]
+        cuda: bool,
     },
     /// Train the render network of a spec with a `scene:` on its render oracle and save it to `<out>/<spec name>/`.
     TrainPicture {
@@ -188,7 +225,20 @@ fn device(cuda: bool) -> Result<candle_core::Device> {
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
-        Cmd::Serve { specs, addr, lambda, models, cuda, machines, pictures } => serve(&specs, &addr, lambda, models.as_deref(), &machines, pictures.as_deref(), &device(cuda)?)?,
+        Cmd::Serve { specs, addr, lambda, models, cuda, machines, pictures, shaders } => serve(&specs, &addr, lambda, models.as_deref(), &machines, pictures.as_deref(), shaders.as_deref(), &device(cuda)?)?,
+        Cmd::TrainShader { spec, out, steps, batch, pixels, lr, seed, samples, scale, hidden, layers, octaves, log_every, cuda } => {
+            let s = Spec::load(&spec)?;
+            let cfg = nerve::shader::ShaderTrainConfig { steps, batch_states: batch, pixels, lr, seed, samples, scale, log_every };
+            let mut sc = nerve::shader::ShaderConfig::for_spec(&s, scale)?;
+            sc.hidden = hidden;
+            sc.layers = layers;
+            sc.octaves = octaves;
+            let (p, report) = nerve::shader::train_with(&s, &cfg, sc, &device(cuda)?)?;
+            let dir = out.join(&s.name);
+            p.save(&dir, &cfg, &report)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            println!("saved {}", dir.display());
+        }
         Cmd::TrainPicture { spec, out, epochs, batch, lr, seed, samples, log_every, cuda } => {
             let s = Spec::load(&spec)?;
             let cfg = nerve::picture::PictureTrainConfig { epochs, batch, lr, seed, samples, log_every, ..Default::default() };
@@ -367,7 +417,7 @@ fn check_machine(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::path::Path>, machines_dir: &std::path::Path, pictures: Option<&std::path::Path>, dev: &candle_core::Device) -> Result<()> {
+fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::path::Path>, machines_dir: &std::path::Path, pictures: Option<&std::path::Path>, shaders: Option<&std::path::Path>, dev: &candle_core::Device) -> Result<()> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "nerve"))
@@ -385,8 +435,12 @@ fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::pa
             Some(d) if d.join(nerve::picture::META_FILE).exists() && spec.scene.is_some() => Some(std::sync::Arc::new(nerve::picture::Picture::load(spec.clone(), &d, dev)?)),
             _ => None,
         };
-        println!("  {:<22} {} futures{}{}", spec.name, spec.futures.len(), if model.is_some() { ", trained model" } else { "" }, if picture.is_some() { ", picture" } else { "" });
-        entries.push(nerve::serve::Entry { spec, model, picture, source });
+        let shader = match shaders.map(|p| p.join(&spec.name)) {
+            Some(d) if d.join(nerve::shader::META_FILE).exists() && spec.scene.is_some() => Some(std::sync::Arc::new(nerve::shader::Shader::load(spec.clone(), &d, dev)?)),
+            _ => None,
+        };
+        println!("  {:<22} {} futures{}{}{}", spec.name, spec.futures.len(), if model.is_some() { ", trained model" } else { "" }, if picture.is_some() { ", picture" } else { "" }, if shader.is_some() { ", shader" } else { "" });
+        entries.push(nerve::serve::Entry { spec, model, picture, shader, source });
     }
     let mut machines = Vec::new();
     if machines_dir.is_dir() {

@@ -51,6 +51,8 @@ pub struct Entry {
     pub model: Option<Arc<dyn LearnedEnergy>>,
     /// The render network: what the interface looks like, drawn by weights (`picture.rs`).
     pub picture: Option<Arc<crate::picture::Picture>>,
+    /// The shader: the same picture as a function of the pixel, at any resolution (`shader.rs`).
+    pub shader: Option<Arc<crate::shader::Shader>>,
     /// The spec's source text: shown in the lab as the whole description of the program.
     pub source: String,
 }
@@ -80,6 +82,11 @@ pub struct App {
 #[derive(Deserialize)]
 pub struct ViewReq {
     pub state: J,
+    /// Optional raster size for `/api/<spec>/shader`, which draws at any resolution.
+    #[serde(default)]
+    pub w: Option<usize>,
+    #[serde(default)]
+    pub h: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -185,6 +192,13 @@ impl App {
         Ok(())
     }
 
+    /// Gives an interface its shader.
+    pub fn set_shader(&mut self, spec: &str, shader: Arc<crate::shader::Shader>) -> Result<()> {
+        let e = self.specs.iter_mut().find(|e| e.spec.name == spec).with_context(|| format!("unknown spec {spec:?}"))?;
+        e.shader = Some(shader);
+        Ok(())
+    }
+
     /// Adds a machine, replacing one of the same name.
     pub fn add_machine(&self, m: MachineEntry) {
         let mut machines = self.machines.write().unwrap_or_else(|e| e.into_inner());
@@ -260,6 +274,10 @@ impl App {
             ["api", spec, "picture"] => {
                 let r: ViewReq = parse(body)?;
                 self.picture(spec, &r.state)?
+            }
+            ["api", spec, "shader"] => {
+                let r: ViewReq = parse(body)?;
+                self.shader_picture(spec, &r.state, r.w, r.h)?
             }
             ["api", spec, "field"] => self.field(spec, &parse(body)?)?,
             ["api", spec, "drag"] => self.drag_start(spec, &parse(body)?)?,
@@ -432,6 +450,28 @@ impl App {
         }
         Ok(out)
     }
+
+    /// The shader's picture of a state at the requested size (default: the scene's raster at the
+    /// shader's training scale), the oracle at the same size, and the pixel error between them.
+    pub fn shader_picture(&self, spec: &str, state: &J, w: Option<usize>, h: Option<usize>) -> Result<J> {
+        let e = self.entry(spec)?;
+        let sp = &e.spec;
+        let scene = sp.scene.as_ref().with_context(|| format!("{spec} has no scene"))?;
+        let sh = e.shader.as_ref().with_context(|| format!("{spec} has no shader"))?;
+        let s = sp.state_from_json(state)?;
+        let (w, h) = match (w, h) {
+            (Some(w), Some(h)) => (w.clamp(8, 4096), h.clamp(8, 4096)),
+            _ => (sh.cfg.w, sh.cfg.h),
+        };
+        let truth = crate::render::rasterize(sp, &s, w, h)?;
+        let drawn = sh.draw(&s, w, h)?;
+        Ok(json!({
+            "w": w, "h": h, "view": crate::render::raster_view(scene, w, h),
+            "oracle": crate::render::base64(&crate::render::to_rgb8(&truth, w, h)),
+            "network": crate::render::base64(&crate::render::to_rgb8(&drawn, w, h)),
+            "mae": crate::render::mae(&drawn, &truth),
+        }))
+    }
 }
 
 /// One interface as the lab lists it: fields, gestures, actions, size, its network's record, its source.
@@ -489,6 +529,7 @@ pub fn spec_summary(e: &Entry) -> J {
         "valid_states": valid_states(sp),
         "model": e.model.as_ref().map(|m| m.describe()),
         "picture": e.picture.as_ref().map(|p| p.describe()),
+        "shader": e.shader.as_ref().map(|p| p.describe()),
         "scene": sp.scene.as_ref().map(|sc| json!({"box": [sc.x0, sc.y0, sc.x1, sc.y1], "raster": sc.raster_size()})),
         "ports": J::Object(sp.ports.iter().map(|(n, (x, y))| (n.clone(), json!([x, y]))).collect()),
         "source": e.source,
@@ -674,6 +715,7 @@ mod http {
             .route("/api/{spec}/view", post(view))
             .route("/api/{spec}/step", post(step))
             .route("/api/{spec}/picture", post(picture))
+            .route("/api/{spec}/shader", post(shader))
             .route("/api/{spec}/field", post(field))
             .route("/api/{spec}/drag", post(drag_start))
             .route("/api/drag/{sid}/frame", post(drag_frame))
@@ -695,6 +737,10 @@ mod http {
 
     async fn picture(AxState(app): S, Path(spec): Path<String>, Json(req): Json<ViewReq>) -> ApiResult {
         Ok(Json(app.picture(&spec, &req.state)?))
+    }
+
+    async fn shader(AxState(app): S, Path(spec): Path<String>, Json(req): Json<ViewReq>) -> ApiResult {
+        Ok(Json(app.shader_picture(&spec, &req.state, req.w, req.h)?))
     }
 
     /// A `vary` per pixel (three for a three-track `each`) is real work: keep it off the runtime.
@@ -778,7 +824,7 @@ mod tests {
     #[test]
     fn dispatch_answers_the_api_paths_without_a_server() {
         let sp = counter();
-        let app = App::new(vec![Entry { spec: sp.clone(), model: None, picture: None, source: String::new() }], 1.0);
+        let app = App::new(vec![Entry { spec: sp.clone(), model: None, picture: None, shader: None, source: String::new() }], 1.0);
         let specs = app.dispatch("/api/specs", &J::Null).unwrap();
         assert_eq!(specs[0]["name"], "counter");
         let step = app.dispatch("/api/counter/step", &json!({"state": sp.state_json(&sp.initial), "action": "inc"})).unwrap();
