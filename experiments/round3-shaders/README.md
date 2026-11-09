@@ -10,7 +10,7 @@ their committed `picture.json` evals at the scene's raster.
 |---|---|---|---|---|---|---|---|
 | bell | 768×768 | 0.039% | 0.176% | 1.94% | 241,027 | 20,000 | 117 s |
 | catapult | 768×640 | 0.013% | 0.029% | 1.37% | 237,187 | 20,000 | 81 s |
-| clock | 768×256 | 0.380% | 0.519% | 1.21% | 241,027 | 20,000 | 115 s |
+| clock | 768×256 | 0.007% | (scoring) | 1.21% | 478,275 | 40,000 | 427 s |
 | counter | 768×256 | 0.035% | 0.555% | 2.87% | 241,539 | 20,000 | 115 s |
 | digit | 640×768 | 0.019% | 0.276% | 0.65% | 241,027 | 20,000 | 117 s |
 | dominoes | 768×128 | 0.026% | 0.058% | 1.31% | 241,795 | 20,000 | 114 s |
@@ -19,9 +19,9 @@ their committed `picture.json` evals at the scene's raster.
 | insert_remove | 768×512 | 0.085% | (scoring) | 2.61% | 250,499 | 20,000 | 118 s |
 | kanban | 768×384 | 0.087% | (scoring) | 1.54% | 257,667 | 20,000 | 116 s |
 | linked_sliders | 768×384 | 0.417% | (scoring) | 0.78% | 243,075 | 20,000 | 116 s |
-| marble | 768×256 | 0.517% | 0.581% | 0.76% | 241,283 | 20,000 | 115 s |
+| marble | 768×256 | 0.025% | (scoring) | 0.76% | 478,531 | 40,000 | 424 s |
 | negotiate | 768×512 | 0.123% | (scoring) | 1.29% | 246,915 | 20,000 | 116 s |
-| rail | 768×128 | 0.277% | 0.345% | 0.61% | 238,979 | 20,000 | 114 s |
+| rail | 768×128 | 0.011% | (scoring) | 0.61% | 476,227 | 40,000 | 423 s |
 | relay | 768×512 | 0.018% | (scoring) | 1.64% | 236,675 | 20,000 | 81 s |
 | reorder | 768×128 | 0.043% | (scoring) | 1.98% | 254,083 | 20,000 | 113 s |
 | rush_hour | 768×640 | 0.164% | (scoring) | 1.90% | 256,387 | 20,000 | 119 s |
@@ -34,6 +34,8 @@ their committed `picture.json` evals at the scene's raster.
 | todo | 640×768 | 0.098% | (scoring) | 2.84% | 251,523 | 20,000 | 120 s |
 | toggle | 768×384 | 0.028% | 0.231% | 1.50% | 236,675 | 20,000 | 86 s |
 | tracks | 768×640 | 0.315% | (scoring) | 1.06% | 241,539 | 20,000 | 120 s |
+
+clock, marble and rail were retrained wider and longer (hidden 192, 5 layers, 40,000 steps, about 7 GPU minutes each): 0.380→0.007%, 0.517→0.025%, 0.277→0.011%. The rest are being retrained the same way.
 
 The shader is one network evaluated once per pixel, so the lab draws it as a WebGL fragment shader at the display's
 resolution (`crates/nerve/web/index.html`, "shader (GPU)"): 573×286 px in 0.1 ms on a laptop GPU, against 30–100 ms
