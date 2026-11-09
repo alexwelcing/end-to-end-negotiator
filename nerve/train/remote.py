@@ -18,6 +18,14 @@ from .loop import TrainConfig
 JOB_SCRIPT = "https://raw.githubusercontent.com/alexwelcing/nerve/nerve/hf/jobs/train_job.py"
 DEFAULT_REPO = "AlexWelcing/nerve-runs"
 
+def upload_inputs(api, repo: str, run: str, files: dict[str, str | bytes]) -> None:
+    """One commit for all of a run's inputs. The dataset repo allows 256 commits an hour; one commit per file
+    once spent that allowance on a batch of launches and the rest were refused."""
+    from huggingface_hub import CommitOperationAdd
+    ops = [CommitOperationAdd(path_in_repo=f"runs/{run}/in/{dest}", path_or_fileobj=src) for dest, src in files.items()]
+    api.create_commit(repo_id=repo, repo_type="dataset", operations=ops, commit_message=f"inputs for {run}")
+
+
 
 def wait_and_fetch(job_id: str, run: str, out_dir: str, repo: str = DEFAULT_REPO, timeout_s: int = 3 * 3600,
                    flavor: str = "", t0: float | None = None) -> dict[str, Any]:
@@ -69,9 +77,7 @@ def train_remote(spec_path: str, log_path: str, out_dir: str, cfg: TrainConfig, 
     mb = Path(log_path).stat().st_size / 1e6
     if mb > 300:
         return {"error": f"episode log is {mb:.0f} MB; refusing to upload (cap 300 MB). Regenerate with sane rollout knobs."}
-    for p, dest in ((spec_path, "spec.nerve"), (log_path, "episodes.v1.jsonl")):
-        api.upload_file(path_or_fileobj=p, path_in_repo=f"runs/{run}/in/{dest}", repo_id=repo, repo_type="dataset")
-    api.upload_file(path_or_fileobj=json.dumps(c).encode(), path_in_repo=f"runs/{run}/in/config.json", repo_id=repo, repo_type="dataset")
+    upload_inputs(api, repo, run, {"spec.nerve": spec_path, "episodes.v1.jsonl": log_path, "config.json": json.dumps(c).encode()})
     job = run_uv_job(job_script_url(), script_args=["--repo", repo, "--run", run, "--branch", __import__("subprocess").run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()], flavor=flavor, secrets={"HF_TOKEN": token}, token=token)
     print(f"[remote] job {job.id} on {flavor}: {getattr(job, 'url', '')}  (run {run})", flush=True)
     Path(out_dir).mkdir(parents=True, exist_ok=True)

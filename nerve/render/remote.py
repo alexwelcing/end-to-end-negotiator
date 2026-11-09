@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..train.remote import DEFAULT_REPO
+from ..train.remote import DEFAULT_REPO, upload_inputs
 from .train import RenderTrainConfig
 
 JOB_SCRIPT_PATH = "hf/jobs/render_job.py"
@@ -33,9 +33,7 @@ def render_remote(spec_path: str, render_dir: str, out_dir: str, cfg: RenderTrai
     name = load_spec(spec_path).name
     run = f"render-{name}/{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%S')}"
     c = asdict(cfg); c["device"] = "auto"
-    for p, dest in ((spec_path, "spec.nerve"), (f"{render_dir}/images.npy", "images.npy"), (f"{render_dir}/meta.json", "meta.json")):
-        api.upload_file(path_or_fileobj=p, path_in_repo=f"runs/{run}/in/{dest}", repo_id=repo, repo_type="dataset")
-    api.upload_file(path_or_fileobj=json.dumps(c).encode(), path_in_repo=f"runs/{run}/in/config.json", repo_id=repo, repo_type="dataset")
+    upload_inputs(api, repo, run, {"spec.nerve": spec_path, "images.npy": f"{render_dir}/images.npy", "meta.json": f"{render_dir}/meta.json", "config.json": json.dumps(c).encode()})
     job = run_uv_job(job_script_url(), script_args=["--repo", repo, "--run", run, "--branch", __import__("subprocess").run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()], flavor=flavor, secrets={"HF_TOKEN": token}, token=token)
     print(f"[remote] render job {job.id} on {flavor} (run {run})", flush=True)
     Path(out_dir).mkdir(parents=True, exist_ok=True)

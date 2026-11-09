@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..train.remote import DEFAULT_REPO
+from ..train.remote import DEFAULT_REPO, upload_inputs
 from .remote import _wait
 from .shader import ShaderTrain
 
@@ -31,10 +31,10 @@ def shader_remote(spec_name: str, rasters_dir: str, out_dir: str, train: ShaderT
     api = HfApi(token=token)
     api.create_repo(repo, repo_type="dataset", private=True, exist_ok=True)
     run = f"shader-{spec_name}/{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H-%M-%S')}"
-    for f in ("meta.json", "rasters.f32", "x.f32"):
-        api.upload_file(path_or_fileobj=f"{rasters_dir}/{f}", path_in_repo=f"runs/{run}/in/{f}", repo_id=repo, repo_type="dataset")
     c = asdict(train); c["device"] = "auto"; c["spec_name"] = spec_name; c.update(arch or {})
-    api.upload_file(path_or_fileobj=json.dumps(c).encode(), path_in_repo=f"runs/{run}/in/config.json", repo_id=repo, repo_type="dataset")
+    files = {f: f"{rasters_dir}/{f}" for f in ("meta.json", "rasters.f32", "x.f32")}
+    files["config.json"] = json.dumps(c).encode()
+    upload_inputs(api, repo, run, files)
     job = run_uv_job(job_script_url(), script_args=["--repo", repo, "--run", run, "--branch", __import__("subprocess").run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()], flavor=flavor, secrets={"HF_TOKEN": token}, token=token)
     print(f"[remote] shader job {job.id} on {flavor} (run {run})", flush=True)
     Path(out_dir).mkdir(parents=True, exist_ok=True)
