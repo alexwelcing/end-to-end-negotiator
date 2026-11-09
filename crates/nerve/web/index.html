@@ -570,6 +570,9 @@ async function shaderDraw(spec, s) {
   // frame is complete, minus the cost of the readback alone.
   const tq = glsh.timerExt;
   if (tq) {
+    // the film upload is queued just before the draw; make sure it has executed before the query opens, or the
+    // query spans the transfer too (it read ~1.8x the readback-measured draw on an A4500)
+    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); gl.clientWaitSync(fence, gl.SYNC_FLUSH_COMMANDS_BIT, 50_000_000); gl.deleteSync(fence);
     const q = gl.createQuery(); gl.beginQuery(tq.TIME_ELAPSED_EXT, q); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.endQuery(tq.TIME_ELAPSED_EXT);
     glsh.pendingQuery = q; glsh.px = [W, H];
     setTimeout(() => { try { if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE) && !gl.getParameter(tq.GPU_DISJOINT_EXT)) { glsh.ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; picPill(); } } catch {} gl.deleteQuery(q); }, 120);
