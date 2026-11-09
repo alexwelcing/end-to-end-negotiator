@@ -30,6 +30,11 @@ try {
   // The render networks (1–2 MB each) load when an interface is first drawn: their records now, so the
   // listings can describe them, their weights on the first request for their picture.
   const pictures = manifest.pictures || [];
+  const shaders = manifest.shaders || [];
+  const shaderRecords = new Map(await Promise.all(shaders.map(async name => [name, {meta: await text(`./models/${name}/shader.json`), record: JSON.parse(await text(`./models/${name}/shader.json`)), loaded: false}])));
+  const loadShader = async name => { const r = shaderRecords.get(name); if (!r || r.loaded) return; r.loaded = true;
+    room.add_shader(name, r.meta, await bytes(`./models/${name}/shader.safetensors`)); };
+  const describeShader = ({record: r}) => ({kind: "shader", w: r.shader.w, h: r.shader.h, octaves: r.shader.octaves, hidden: r.shader.hidden, layers: r.shader.layers, cond: r.shader.cond, params: (r.eval || {}).params || 0, device: "cpu", trained: {eval: r.eval, train: r.train}});
   const records = new Map(await Promise.all(pictures.map(async name => {
     const meta = await text(`./models/${name}/picture.json`);
     return [name, { meta, record: JSON.parse(meta) }];
@@ -49,8 +54,11 @@ try {
   window.nerveApi = async (path, body) => {
     const picture = /^\/api\/([^/]+)\/picture$/.exec(path);
     if (picture && records.has(picture[1])) await loadPicture(picture[1]);
+    const shader = /^\/api\/([^/]+)\/shader(_weights|_film)?$/.exec(path);
+    if (shader && shaderRecords.has(shader[1])) await loadShader(shader[1]);
     const out = call(path, body);
-    if (path === "/api/specs") return out.map(s => (s.picture || !records.has(s.name) ? s : { ...s, picture: describe(records.get(s.name)) }));
+    if (path === "/api/specs") return out.map(s => { let o = s.picture || !records.has(s.name) ? s : { ...s, picture: describe(records.get(s.name)) };
+      if (!o.shader && shaderRecords.has(s.name)) o = { ...o, shader: describeShader(shaderRecords.get(s.name)) }; return o; });
     return out;
   };
   window.nerveRoom = room;

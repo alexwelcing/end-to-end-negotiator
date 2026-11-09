@@ -133,6 +133,19 @@ impl Shader {
         self.out.fwd_nd(&h)
     }
 
+    /// The state's share of the work, done once per state on the CPU: the FiLM scale and shift of
+    /// every layer, `[layers][2 * hidden]` flattened (`g_0, b_0, g_1, b_1, ...`). The page's fragment
+    /// shader does the rest per pixel, so the state encoding never has to exist in JavaScript.
+    pub fn film(&self, s: &State) -> Result<Vec<f32>> {
+        let x = self.encode(std::slice::from_ref(s))?;
+        let c = self.cond[1].fwd(&self.cond[0].fwd(&x, false)?.gelu_erf()?, false)?.gelu_erf()?;
+        let mut out = Vec::with_capacity(self.cfg.layers * 2 * self.cfg.hidden);
+        for film in &self.film {
+            out.extend(film.fwd(&c, false)?.flatten_all()?.to_vec1::<f32>()?);
+        }
+        Ok(out)
+    }
+
     fn encode(&self, states: &[State]) -> Result<Tensor> {
         let mut xs = Vec::with_capacity(states.len() * self.cfg.state_dim);
         for s in states {
@@ -241,10 +254,14 @@ impl Shader {
     pub fn export_json(&self) -> Result<J> {
         let mut t = serde_json::Map::new();
         for (n, v, _) in &self.store.vars {
+            if n.starts_with("cond.") || n.starts_with("film.") {
+                continue; // the state's share stays in the engine (`film`); the page gets the per-pixel layers
+            }
             let x = v.as_tensor();
             t.insert(n.clone(), json!({"shape": x.dims(), "data": x.flatten_all()?.to_vec1::<f32>()?}));
         }
-        Ok(json!({"shader": self.cfg, "tensors": t}))
+        let scene = self.spec.scene.as_ref().context("no scene")?;
+        Ok(json!({"shader": self.cfg, "tensors": t, "view": render::raster_view(scene, self.cfg.w, self.cfg.h), "aspect": self.cfg.aspect()}))
     }
 }
 

@@ -125,6 +125,7 @@ input.num{width:86px;background:var(--bg);color:var(--ink);border:1px solid var(
             <label title="Shade each pointer position by where a drag would land"><input type="checkbox" id="showField" checked> regions</label>
             <label title="Mark every state the spec lets this drag reach"><input type="checkbox" id="showGhosts" checked> landing spots</label>
             <label title="Show the render oracle's exact picture instead of the render network's"><input type="checkbox" id="showOracle"> spec picture</label>
+            <label title="Draw with the shader (the picture as a function of the pixel) on your GPU at the display's resolution, when the interface has one"><input type="checkbox" id="useShader" checked> shader (GPU)</label>
             <span class="pill" id="picpill" hidden></span>
           </div>
         </div>
@@ -344,7 +345,7 @@ async function init() {
   }
   $("showField").onchange = () => drawField();
   $("showGhosts").onchange = () => render();
-  $("showOracle").onchange = () => { render(); picPill(); };
+  $("showOracle").onchange = $("useShader").onchange = () => { picture = {...picture, key: null}; render(); picPill(); if (state) fetchPicture(state); };
   select(specs[0].name);
 }
 
@@ -384,9 +385,11 @@ function renderNetwork() {
   const where = t.trained_on === "cuda" ? "the local GPU" : t.trained_on ? "the CPU" : "this machine";
   const pic = cur.picture;
   const pe = pic && pic.trained && pic.trained.eval ? pic.trained.eval : null;
+  const shFacts = cur.shader ? `<br>And the shader: ${cur.shader.params.toLocaleString()} parameters that answer "what colour is this point?", so your GPU draws the interface at any resolution${cur.shader.trained && cur.shader.trained.eval ? ` (${(100 * cur.shader.trained.eval.mae).toFixed(1)}% pixel error at ${cur.shader.trained.eval.w}×${cur.shader.trained.eval.h})` : ""}.` : "";
   const picFacts = pic ? `<br>The picture too: a render network of ${pic.params.toLocaleString()} parameters draws the ${pic.w}×${pic.h} pixels you see${pe ? `, ${(100 * pe.mae).toFixed(1)}% mean pixel error against the spec's own drawing over ${pe.n} states` : ""}.` : cur.scene ? "<br>The picture is the spec's own drawing (no render network loaded)." : "";
+  const picFactsAll = picFacts + shFacts;
   box.innerHTML = `${big ? `<div class="big">${big}</div><div>${caption}</div>` : ""}
-    <div class="netfacts">${viol}${holes}<br>${m.params.toLocaleString()} parameters · trained on ${where}${t.epochs ? `, ${t.epochs} epochs` : ""} · running on the ${m.device === "cuda" ? "GPU" : "CPU"}${picFacts}</div>`;
+    <div class="netfacts">${viol}${holes}<br>${m.params.toLocaleString()} parameters · trained on ${where}${t.epochs ? `, ${t.epochs} epochs` : ""} · running on the ${m.device === "cuda" ? "GPU" : "CPU"}${picFactsAll}</div>`;
 }
 
 async function select(name) {
@@ -437,6 +440,105 @@ async function refresh(changed = []) {
   fetchPicture(state);
 }
 
+
+// ---- The shader on the GPU ---------------------------------------------------------------------
+// The renderer is a model: `nerve train-shader` learned, from the spec's own drawing, what colour every
+// point of the interface is in every state. The page runs those weights as a WebGL fragment shader at
+// the display's resolution: one network evaluation per pixel, no drawing code, no raster to stretch.
+// The engine does the state's share (`/api/<spec>/shader_film`: FiLM scale and shift per layer); the
+// GPU does the pixels (`/api/<spec>/shader_weights`: the per-pixel layers, packed into a texture).
+const glsh = {spec: null, ready: null, gl: null, prog: null, cfg: null, view: null, canvas: null, filmTex: null, loc: {}};
+
+function glsl(cfg, nin, ninp, tw) {
+  return `#version 300 es
+precision highp float; precision highp int; precision highp sampler2D;
+uniform sampler2D uW; uniform sampler2D uF; uniform vec2 uSize; uniform float uAspect;
+out vec4 frag;
+const int HID = ${cfg.hidden}; const int OCT = ${cfg.octaves}; const int LAYERS = ${cfg.layers}; const int NIN = ${nin}; const int NINP = ${ninp}; const int TW = ${tw};
+float erf_(float x) { float s = sign(x); x = abs(x); float t = 1.0 / (1.0 + 0.3275911 * x);
+  float y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * exp(-x * x); return s * y; }
+float gelu(float x) { return 0.5 * x * (1.0 + erf_(x * 0.70710678118)); }
+float comp(vec4 v, int i) { return i == 0 ? v.x : i == 1 ? v.y : i == 2 ? v.z : v.w; }
+void main() {
+  float x = 2.0 * gl_FragCoord.x / uSize.x - 1.0;
+  float y = 1.0 - 2.0 * gl_FragCoord.y / uSize.y;
+  float f[NINP];
+  for (int i = 0; i < NINP; i++) f[i] = 0.0;
+  f[0] = x * uAspect; f[1] = y;
+  for (int k = 0; k < OCT; k++) { float fr = exp2(float(k)) * 3.14159265358979;
+    f[2 + 2 * k] = sin(f[0] * fr); f[3 + 2 * k] = sin(f[1] * fr); f[2 + 2 * OCT + 2 * k] = cos(f[0] * fr); f[3 + 2 * OCT + 2 * k] = cos(f[1] * fr); }
+  float h[HID]; float h2[HID];
+  for (int j = 0; j < HID; j++) { float acc = texelFetch(uW, ivec2(TW - 1, j), 0).x;
+    for (int i = 0; i < NINP; i += 4) acc += dot(texelFetch(uW, ivec2(i / 4, j), 0), vec4(f[i], f[i + 1], f[i + 2], f[i + 3]));
+    h[j] = gelu(acc); }
+  for (int l = 0; l < LAYERS; l++) { int base = HID * (1 + l);
+    for (int j = 0; j < HID; j++) { float acc = texelFetch(uW, ivec2(TW - 1, base + j), 0).x;
+      for (int i = 0; i < HID; i += 4) acc += dot(texelFetch(uW, ivec2(i / 4, base + j), 0), vec4(h[i], h[i + 1], h[i + 2], h[i + 3]));
+      float g = comp(texelFetch(uF, ivec2(j / 4, 2 * l), 0), j - 4 * (j / 4)); float b = comp(texelFetch(uF, ivec2(j / 4, 2 * l + 1), 0), j - 4 * (j / 4));
+      h2[j] = gelu(acc) * (1.0 + g) + b; }
+    for (int j = 0; j < HID; j++) h[j] = h2[j]; }
+  int ob = HID * (1 + LAYERS); vec3 rgb;
+  for (int c = 0; c < 3; c++) { float acc = texelFetch(uW, ivec2(TW - 1, ob + c), 0).x;
+    for (int i = 0; i < HID; i += 4) acc += dot(texelFetch(uW, ivec2(i / 4, ob + c), 0), vec4(h[i], h[i + 1], h[i + 2], h[i + 3]));
+    rgb[c] = acc; }
+  frag = vec4(clamp(rgb, 0.0, 1.0), 1.0);
+}`;
+}
+
+/** Compiles the spec's shader for the GPU once; resolves to false when WebGL2 or the shader is missing. */
+function shaderReady(spec) {
+  if (glsh.spec === spec.name && glsh.ready) return glsh.ready;
+  glsh.spec = spec.name;
+  glsh.ready = (async () => {
+    if (!spec.shader) return false;
+    const w = await api(`/api/${spec.name}/shader_weights`, {});
+    const cfg = w.shader, T = w.tensors, HID = cfg.hidden;
+    const nin = 2 + 4 * cfg.octaves, ninp = Math.ceil(nin / 4) * 4, tw = Math.ceil(Math.max(ninp, HID) / 4) + 1;
+    const rows = HID * (1 + cfg.layers) + 3;
+    const tex = new Float32Array(4 * tw * rows);
+    const put = (name, rowBase, nIn) => { const W = T[`${name}.weight`].data, B = T[`${name}.bias`].data, nOut = T[`${name}.weight`].shape[0];
+      for (let j = 0; j < nOut; j++) { for (let i = 0; i < nIn; i++) tex[4 * (tw * (rowBase + j)) + i] = W[j * nIn + i]; tex[4 * (tw * (rowBase + j) + tw - 1)] = B[j]; } };
+    put("inp", 0, nin); for (let l = 0; l < cfg.layers; l++) put(`layers.${l}`, HID * (1 + l), HID); put("out", HID * (1 + cfg.layers), HID);
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2", {antialias: false, preserveDrawingBuffer: true, premultipliedAlpha: false});
+    if (!gl) return false;
+    const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error("shader: " + gl.getShaderInfoLog(o)); return o; };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, `#version 300 es\nvoid main(){ vec2 p = vec2((gl_VertexID & 1) * 4 - 1, (gl_VertexID & 2) * 2 - 1); gl_Position = vec4(p, 0.0, 1.0); }`));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, glsl(cfg, nin, ninp, tw)));
+    gl.linkProgram(prog); if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error("shader link: " + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    const mk = (unit, width, height, data) => { const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, data); return t; };
+    mk(0, tw, rows, tex);
+    const filmTex = mk(1, HID / 4, 2 * cfg.layers, new Float32Array(2 * cfg.layers * HID));
+    gl.uniform1i(gl.getUniformLocation(prog, "uW"), 0); gl.uniform1i(gl.getUniformLocation(prog, "uF"), 1);
+    Object.assign(glsh, {gl, prog, cfg, canvas, filmTex, view: w.view, loc: {size: gl.getUniformLocation(prog, "uSize"), aspect: gl.getUniformLocation(prog, "uAspect")}});
+    gl.uniform1f(glsh.loc.aspect, w.aspect);
+    return true;
+  })().catch(err => { console.warn("GPU shader unavailable:", err); return false; });
+  return glsh.ready;
+}
+
+/** Draws state `s` with the GPU shader at the stage's own resolution; returns a data URL, or null. */
+async function shaderDraw(spec, s) {
+  if (!(await shaderReady(spec)) || cur !== spec) return null;
+  const {gl, canvas, cfg, filmTex, loc, view} = glsh;
+  const film = (await api(`/api/${spec.name}/shader_film`, {state: s})).film;   // the state's share, from the engine
+  if (cur !== spec) return null;
+  const k = scale(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let W = Math.max(8, Math.round(view[2] * k * dpr)), H = Math.max(8, Math.round(view[3] * k * dpr));
+  const cap = Math.sqrt(2.5e6 / (W * H)); if (cap < 1) { W = Math.round(W * cap); H = Math.round(H * cap); }
+  canvas.width = W; canvas.height = H; gl.viewport(0, 0, W, H);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, filmTex);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, cfg.hidden / 4, 2 * cfg.layers, gl.RGBA, gl.FLOAT, new Float32Array(film));
+  gl.uniform2f(loc.size, W, H);
+  const t0 = performance.now(); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.finish(); glsh.ms = performance.now() - t0; glsh.px = [W, H];
+  return canvas.toDataURL();
+}
+
 /** The picture of `s`, from the render network and the render oracle; redraws when it arrives. */
 async function fetchPicture(s) {
   if (!cur.scene) return;
@@ -446,10 +548,18 @@ async function fetchPicture(s) {
   picture.busy = true;
   const spec = cur;
   try {
-    const r = await api(`/api/${spec.name}/picture`, {state: s});
-    if (cur === spec) {
-      picture = {key, net: r.network ? rgbToUrl(r.network, r.w, r.h) : null, oracle: rgbToUrl(r.oracle, r.w, r.h), mae: r.mae ?? null, view: r.view, busy: false, pending: null};
+    const useShader = spec.shader && $("useShader").checked && !$("showOracle").checked;
+    const url = useShader ? await shaderDraw(spec, s) : null;
+    if (url && cur === spec) {
+      // the oracle's picture is only fetched for the "spec picture" toggle; the shader's own error is its trained eval
+      picture = {key, net: url, oracle: picture.oracle && picture.key === key ? picture.oracle : null, mae: null, view: glsh.view, busy: false, pending: null, gpu: true};
       render(); picPill();
+    } else {
+      const r = await api(`/api/${spec.name}/picture`, {state: s});
+      if (cur === spec) {
+        picture = {key, net: r.network ? rgbToUrl(r.network, r.w, r.h) : null, oracle: rgbToUrl(r.oracle, r.w, r.h), mae: r.mae ?? null, view: r.view, busy: false, pending: null};
+        render(); picPill();
+      }
     }
   } catch (err) { picture.busy = false; $("hint").innerHTML = `<span class="err">${err.message}</span>`; }
   picture.busy = false;
@@ -463,6 +573,8 @@ function picPill() {
   if (!cur.picture) { p.textContent = "picture: spec (no render network)"; p.className = "pill"; return; }
   if ($("showOracle").checked) { p.textContent = "picture: the spec's"; p.className = "pill"; return; }
   if (!picture.key) { p.textContent = "picture: loading the render network…"; p.className = "pill"; return; }
+  if (picture.gpu) { const ev = cur.shader && cur.shader.trained && cur.shader.trained.eval; const e = ev ? ` · ${(100 * ev.mae_native).toFixed(1)}% pixel error at the spec's raster, ${(100 * ev.mae).toFixed(1)}% at ${ev.w}×${ev.h}` : "";
+    p.textContent = `picture: the shader on your GPU, ${glsh.px[0]}×${glsh.px[1]} px in ${glsh.ms.toFixed(1)} ms${e}`; p.className = "pill" + (ev && ev.mae < 0.05 ? " ok" : ""); return; }
   const e = picture.mae === null ? "" : ` · pixel error ${(100 * picture.mae).toFixed(1)}%`;
   p.textContent = `picture: drawn by the render network${e}`;
   p.className = "pill" + (picture.mae !== null && picture.mae < 0.05 ? " ok" : "");

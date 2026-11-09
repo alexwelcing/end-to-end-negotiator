@@ -279,6 +279,16 @@ impl App {
                 let r: ViewReq = parse(body)?;
                 self.shader_picture(spec, &r.state, r.w, r.h)?
             }
+            ["api", spec, "shader_weights"] => {
+                let e = self.entry(spec)?;
+                e.shader.as_ref().with_context(|| format!("{spec} has no shader"))?.export_json()?
+            }
+            ["api", spec, "shader_film"] => {
+                let r: ViewReq = parse(body)?;
+                let e = self.entry(spec)?;
+                let sh = e.shader.as_ref().with_context(|| format!("{spec} has no shader"))?;
+                json!({"film": sh.film(&e.spec.state_from_json(&r.state)?)?})
+            }
             ["api", spec, "field"] => self.field(spec, &parse(body)?)?,
             ["api", spec, "drag"] => self.drag_start(spec, &parse(body)?)?,
             _ => bail!("no route {path}"),
@@ -716,6 +726,8 @@ mod http {
             .route("/api/{spec}/step", post(step))
             .route("/api/{spec}/picture", post(picture))
             .route("/api/{spec}/shader", post(shader))
+            .route("/api/{spec}/shader_weights", post(shader_weights))
+            .route("/api/{spec}/shader_film", post(shader_film))
             .route("/api/{spec}/field", post(field))
             .route("/api/{spec}/drag", post(drag_start))
             .route("/api/drag/{sid}/frame", post(drag_frame))
@@ -741,6 +753,14 @@ mod http {
 
     async fn shader(AxState(app): S, Path(spec): Path<String>, Json(req): Json<ViewReq>) -> ApiResult {
         Ok(Json(app.shader_picture(&spec, &req.state, req.w, req.h)?))
+    }
+
+    async fn shader_weights(AxState(app): S, Path(spec): Path<String>) -> ApiResult {
+        Ok(Json(app.dispatch(&format!("/api/{spec}/shader_weights"), &J::Null)?))
+    }
+
+    async fn shader_film(AxState(app): S, Path(spec): Path<String>, Json(req): Json<J>) -> ApiResult {
+        Ok(Json(app.dispatch(&format!("/api/{spec}/shader_film"), &req)?))
     }
 
     /// A `vary` per pixel (three for a three-track `each`) is real work: keep it off the runtime.
