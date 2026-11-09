@@ -35,6 +35,11 @@
   "native_w": 192,
   "native_h": 192,
   "mae_native_point": 0.002666412410326302,
-  "supersample": 4
+  "supersample": 4,
+  "mae_off_lattice": 0.0007908446481451392,
+  "off_w": 691,
+  "off_h": 691,
+  "scored_states": 10,
+  "training": "lattice"
  }
 }

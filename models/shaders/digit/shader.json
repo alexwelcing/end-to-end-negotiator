@@ -35,6 +35,11 @@
   "worst_state": "(7,)",
   "native_w": 160,
   "native_h": 192,
-  "supersample": 4
+  "supersample": 4,
+  "mae_off_lattice": 0.00036599665472749623,
+  "off_w": 576,
+  "off_h": 691,
+  "scored_states": 10,
+  "training": "wide"
  }
 }

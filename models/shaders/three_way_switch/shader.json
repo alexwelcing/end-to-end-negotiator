@@ -21,14 +21,25 @@
  },
  "eval": {
   "n": 6,
-  "mae": 0.0008351154586610695,
-  "worst_mae": 0.0009914388647302985,
+  "mae": 0.0008339354826603085,
+  "worst_mae": 0.0009903033496811986,
   "w": 768,
   "h": 640,
   "loss": 0.00029407136025838554,
   "seconds": 95.2,
   "trained_on": "cuda",
   "params": 237443,
-  "steps": 20000
+  "steps": 20000,
+  "mae_native": 0.0026316866278648376,
+  "mae_native_point": 0.005121431080624461,
+  "mae_off_lattice": 0.0013660352560691535,
+  "off_w": 691,
+  "off_h": 576,
+  "worst_state": "('r', True)",
+  "native_w": 192,
+  "native_h": 160,
+  "supersample": 4,
+  "scored_states": 6,
+  "training": "lattice"
  }
 }

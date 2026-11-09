@@ -264,7 +264,10 @@ Each ships in the lab and on the site the day it passes, with its numbers in thi
   Fourier features of the coordinate, conditioned on the state, trained on the oracle at four times the
   raster. It reaches 0.03–0.5% at that resolution and 0.06–0.7% box-filtered back to the scene's raster,
   with 240k parameters per interface, in two GPU minutes each. There is no raster to be soft: the edge
-  is as sharp as the highest octave the network learned.
+  is as sharp as the highest octave the network learned. One caveat found the same day: a shader trained
+  on pixel centres can be exact there and streak between them (counter 0.035% on the lattice, 1.7% off
+  it). Training on sub-pixel jitter with the top octave capped closes that (0.35% off the lattice); the
+  engine now scores off the lattice too (`mae_off_lattice`) and the shipping set is chosen on that.
 - **Speed in the browser.** *Resolved by the same move.* Because each pixel of the shader is independent,
   the page runs the weights as a WebGL fragment shader at the display's resolution (the engine does the
   state's share once per state, `shader_film`; the GPU does the pixels): 573×286 px in 0.1 ms where the

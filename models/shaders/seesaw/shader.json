@@ -8,7 +8,10 @@
   "cond": 128,
   "hidden": 128,
   "layers": 4,
-  "octaves": 8
+  "octaves": 6,
+  "kind": "mlp",
+  "grid_levels": [],
+  "grid_channels": 0
  },
  "train": {
   "steps": 20000,
@@ -21,14 +24,25 @@
  },
  "eval": {
   "n": 3,
-  "mae": 0.00011987524339929223,
-  "worst_mae": 0.00014898066001478583,
+  "mae": 0.0002132184502746289,
+  "worst_mae": 0.00024771064636297524,
   "w": 768,
   "h": 256,
-  "loss": 3.540228499332443e-05,
-  "seconds": 85.5,
+  "loss": 0.00010082736844196916,
+  "seconds": 86.4,
   "trained_on": "cuda",
-  "params": 236931,
-  "steps": 20000
+  "params": 235907,
+  "steps": 20000,
+  "mae_native": 0.0010977083390268187,
+  "mae_native_point": 0.001833350940917929,
+  "mae_off_lattice": 0.0004682759657346954,
+  "off_w": 691,
+  "off_h": 230,
+  "worst_state": "('right',)",
+  "native_w": 192,
+  "native_h": 64,
+  "supersample": 4,
+  "scored_states": 3,
+  "training": "jittered"
  }
 }
