@@ -142,6 +142,28 @@ def cmd_edge(a):
             pass
 
 
+def cmd_render(a):
+    """render-build | render-train | render-sheet for the neural field renderer."""
+    from .render import RenderSet
+    sp = _spec(a.spec)
+    if a.rcmd == "build":
+        from .render.dataset import build
+        from .render.templates import TEMPLATES
+        print(json.dumps(build(sp, TEMPLATES[sp.name], a.out, a.width, a.height, a.scale, a.holdout)))
+    elif a.rcmd == "train":
+        from .render.train import RenderTrainConfig, train_render
+        cfg = RenderTrainConfig(steps=a.steps, hidden=a.hidden, layers=a.layers, octaves=a.octaves, lr=a.lr, device=a.device)
+        if a.remote:
+            from .render.remote import render_remote
+            print(json.dumps(render_remote(a.spec, a.data, a.out, cfg, flavor=a.flavor))); return 0
+        r = train_render(sp, RenderSet(a.data), a.out, cfg)
+        print(json.dumps({k: r[k] for k in ("train", "heldout", "seconds", "params")}))
+    elif a.rcmd == "sheet":
+        from .render.sheet import contact_sheet
+        from .render.train import load_field
+        print(json.dumps(contact_sheet(sp, RenderSet(a.data), load_field(a.model), a.out, upscale=a.upscale)))
+
+
 def cmd_evolve(a):
     from .evolve import Supervisor
     sup = Supervisor(a.spec, a.workdir, budget_usd=a.budget, iterations=a.iterations, mode=a.mode,
@@ -205,6 +227,19 @@ def main(argv=None) -> int:
     s = sub.add_parser("export", help="export weights for the Cloudflare edge worker"); s.add_argument("spec"); s.add_argument("--model", required=True); s.add_argument("--out", required=True); s.set_defaults(f=cmd_export)
     s = sub.add_parser("edge", help="export + run the Cloudflare Worker locally on workerd"); s.add_argument("spec"); s.add_argument("--model", required=True)
     s.add_argument("--patches"); s.add_argument("--port", type=int, default=8788); s.add_argument("--no-serve", action="store_true"); s.set_defaults(f=cmd_edge)
+    for rc in ("build", "train", "sheet"):
+        s = sub.add_parser(f"render-{rc}", help=f"neural field renderer: {rc}"); s.add_argument("spec"); s.set_defaults(f=cmd_render, rcmd=rc)
+        s.add_argument("--out", required=True)
+        if rc == "build":
+            s.add_argument("--width", type=int, default=560); s.add_argument("--height", type=int, default=360); s.add_argument("--scale", type=int, default=1); s.add_argument("--holdout", type=float, default=0.2)
+        else:
+            s.add_argument("--data", required=True)
+        if rc == "train":
+            s.add_argument("--steps", type=int, default=4000); s.add_argument("--hidden", type=int, default=256); s.add_argument("--layers", type=int, default=6)
+            s.add_argument("--octaves", type=int, default=10); s.add_argument("--lr", type=float, default=1e-3); s.add_argument("--device", default="auto")
+            s.add_argument("--remote", choices=["hf"]); s.add_argument("--flavor", default="a10g-small")
+        if rc == "sheet":
+            s.add_argument("--model", required=True); s.add_argument("--upscale", type=int, default=2)
     s = sub.add_parser("evolve", help="EAT-style supervisor loop over team configs"); s.add_argument("spec"); s.add_argument("--workdir", required=True)
     s.add_argument("--budget", type=float, default=5.0); s.add_argument("--iterations", type=int, default=4); s.add_argument("--mode", choices=["offline", "claude"], default="offline")
     s.add_argument("--supervisor-model", default="claude-fable-5-1"); s.add_argument("--role-model", default="claude-sonnet-5-5")

@@ -25,3 +25,4 @@ docs/paper2/fig_cost.tex
 
 # the agents' worktrees
 /.claude/worktrees/
+.shoot-*/
