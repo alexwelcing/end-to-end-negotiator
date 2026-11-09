@@ -197,9 +197,12 @@ enum Cmd {
         spec: PathBuf,
         #[arg(long, default_value = "models/shaders")]
         dir: PathBuf,
-        /// How many states to score (a 4x supersampled oracle per state is the slow part).
-        #[arg(long, default_value_t = 256)]
+        /// At most this many states, drawn exactly as `rasters --max-states` draws them (so the default scores the
+        /// states the shader was trained on); 0 for every state. The 4x oracle per state is the slow part.
+        #[arg(long, default_value_t = 48)]
         states: usize,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
     },
     /// Write the render oracle's picture of a spec's initial state (or `--state` JSON) as a PPM file.
     Picture {
@@ -314,20 +317,7 @@ fn main() -> Result<()> {
             let s = Spec::load(&spec)?;
             let (w, h) = s.scene.as_ref().context("the spec has no scene")?.raster_size();
             let (w, h) = (w * scale.max(1), h * scale.max(1));
-            let mut states = nerve::picture::training_states(&s, samples, seed)?;
-            if max_states > 0 && states.len() > max_states {
-                use rand::seq::SliceRandom;
-                use rand::SeedableRng;
-                let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-                let keep: Vec<_> = {
-                    let mut idx: Vec<usize> = (1..states.len()).collect();
-                    idx.shuffle(&mut rng);
-                    idx.truncate(max_states - 1);
-                    idx.sort_unstable();
-                    std::iter::once(0).chain(idx).map(|i| states[i].clone()).collect()
-                };
-                states = keep;
-            }
+            let states = sampled_states(&s, samples, seed, max_states)?;
             std::fs::create_dir_all(&out)?;
             let mut raw: Vec<u8> = Vec::with_capacity(states.len() * 3 * w * h * 4);
             for st in &states {
@@ -351,10 +341,10 @@ fn main() -> Result<()> {
             std::fs::write(out.join("meta.json"), serde_json::to_string(&meta)?)?;
             println!("wrote {} rasters of {w}x{h} to {}", states.len(), out.display());
         }
-        Cmd::EvalShader { spec, dir, states } => {
+        Cmd::EvalShader { spec, dir, states, seed } => {
             let s = Spec::load(&spec)?;
             let sh = nerve::shader::Shader::load(s.clone(), &dir.join(&s.name), &candle_core::Device::Cpu)?;
-            let states = nerve::picture::training_states(&s, states, 0)?;
+            let states = sampled_states(&s, 256, seed, states)?;
             println!("{}", serde_json::to_string_pretty(&sh.evaluate(&states)?)?);
         }
         Cmd::Picture { spec, out, state } => {
@@ -506,6 +496,24 @@ fn check_machine(path: &Path) -> Result<()> {
         println!("ok: more than {EXHAUSTIVE_LIMIT} reachable states; {WALKS} random walks of {HORIZON} steps, {} ticks", report.ticks);
     }
     Ok(())
+}
+
+/// The states a raster dump holds: every valid state of a finite spec (or `samples` random ones of a continuous
+/// one), cut to `max_states` by a seeded shuffle that always keeps the initial state. `eval-shader` draws the same
+/// sample so it scores the states a shader was trained on.
+fn sampled_states(s: &Spec, samples: usize, seed: u64, max_states: usize) -> Result<Vec<nerve::spec::State>> {
+    let states = nerve::picture::training_states(s, samples, seed)?;
+    if max_states == 0 || states.len() <= max_states {
+        return Ok(states);
+    }
+    use rand::seq::SliceRandom;
+    use rand::SeedableRng;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut idx: Vec<usize> = (1..states.len()).collect();
+    idx.shuffle(&mut rng);
+    idx.truncate(max_states - 1);
+    idx.sort_unstable();
+    Ok(std::iter::once(0).chain(idx).map(|i| states[i].clone()).collect())
 }
 
 fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::path::Path>, machines_dir: &std::path::Path, pictures: Option<&std::path::Path>, shaders: Option<&std::path::Path>, dev: &candle_core::Device) -> Result<()> {
