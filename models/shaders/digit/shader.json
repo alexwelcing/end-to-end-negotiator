@@ -6,12 +6,12 @@
   "h": 768,
   "state_dim": 19,
   "cond": 128,
-  "hidden": 128,
-  "layers": 4,
+  "hidden": 192,
+  "layers": 5,
   "octaves": 8
  },
  "train": {
-  "steps": 20000,
+  "steps": 40000,
   "batch_states": 8,
   "pixels": 4096,
   "lr": 0.001,
@@ -21,20 +21,14 @@
  },
  "eval": {
   "n": 10,
-  "mae": 0.00018965309864142909,
-  "worst_mae": 0.00030064923339523375,
+  "mae": 3.781094892474357e-05,
+  "worst_mae": 5.447492003440857e-05,
   "w": 640,
   "h": 768,
-  "loss": 6.434128590626642e-05,
-  "seconds": 116.6,
+  "loss": 8.209990483010188e-06,
+  "seconds": 427.3,
   "trained_on": "cuda",
-  "params": 241027,
-  "steps": 20000,
-  "mae_native": 0.0027631906559690833,
-  "mae_native_point": 0.004167968081310392,
-  "worst_state": "(0,)",
-  "native_w": 160,
-  "native_h": 192,
-  "supersample": 4
+  "params": 478275,
+  "steps": 40000
  }
 }

@@ -6,12 +6,12 @@
   "h": 640,
   "state_dim": 21,
   "cond": 128,
-  "hidden": 128,
-  "layers": 4,
+  "hidden": 192,
+  "layers": 5,
   "octaves": 8
  },
  "train": {
-  "steps": 20000,
+  "steps": 40000,
   "batch_states": 8,
   "pixels": 4096,
   "lr": 0.001,
@@ -21,14 +21,14 @@
  },
  "eval": {
   "n": 48,
-  "mae": 0.003146206460466298,
-  "worst_mae": 0.007238645106554031,
+  "mae": 0.0001499736680064719,
+  "worst_mae": 0.00020667517674155533,
   "w": 768,
   "h": 640,
-  "loss": 0.004358682781457901,
-  "seconds": 119.8,
+  "loss": 7.138329237932339e-05,
+  "seconds": 432.7,
   "trained_on": "cuda",
-  "params": 241539,
-  "steps": 20000
+  "params": 478787,
+  "steps": 40000
  }
 }
