@@ -506,7 +506,13 @@ fn serve(dir: &std::path::Path, addr: &str, lambda: f64, models: Option<&std::pa
             _ => None,
         };
         let shader = match shaders.map(|p| p.join(&spec.name)) {
-            Some(d) if d.join(nerve::shader::META_FILE).exists() && spec.scene.is_some() => Some(std::sync::Arc::new(nerve::shader::Shader::load(spec.clone(), &d, dev)?)),
+            Some(d) if d.join(nerve::shader::META_FILE).exists() && spec.scene.is_some() => match nerve::shader::Shader::load(spec.clone(), &d, dev) {
+                Ok(s) => Some(std::sync::Arc::new(s)),
+                Err(e) => {
+                    eprintln!("  {:<22} shader not loaded: {e:#}", spec.name);
+                    None
+                }
+            },
             _ => None,
         };
         println!("  {:<22} {} futures{}{}{}", spec.name, spec.futures.len(), if model.is_some() { ", trained model" } else { "" }, if picture.is_some() { ", picture" } else { "" }, if shader.is_some() { ", shader" } else { "" });
