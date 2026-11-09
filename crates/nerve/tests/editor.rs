@@ -22,7 +22,7 @@ fn lab() -> Result<(App, String)> {
         let p = e?.path();
         if p.extension().is_some_and(|x| x == "nerve") {
             let source = std::fs::read_to_string(&p)?;
-            entries.push(Entry { spec: Spec::parse(&source)?, model: None, picture: None, source });
+            entries.push(Entry { spec: Spec::parse(&source)?, model: None, picture: None, shader: None, source });
         }
     }
     let app = App::new(entries, 1.0);
