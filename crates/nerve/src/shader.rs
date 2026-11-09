@@ -188,23 +188,54 @@ impl Shader {
         Ok(chw)
     }
 
-    /// Mean absolute pixel error against the oracle at the training resolution and at the scene's
-    /// own raster size, over `states`, with the worst state.
+    /// Box-filters a CHW raster of `w` x `h` down by `k`: what a display does when it shows the
+    /// shader's picture smaller than it was drawn (supersampling).
+    pub fn downsample(px: &[f32], w: usize, h: usize, k: usize) -> Vec<f32> {
+        let (ow, oh) = (w / k, h / k);
+        let mut out = vec![0f32; 3 * ow * oh];
+        let inv = 1.0 / (k * k) as f32;
+        for ch in 0..3 {
+            for oy in 0..oh {
+                for ox in 0..ow {
+                    let mut acc = 0f32;
+                    for dy in 0..k {
+                        for dx in 0..k {
+                            acc += px[ch * w * h + (oy * k + dy) * w + ox * k + dx];
+                        }
+                    }
+                    out[ch * ow * oh + oy * ow + ox] = acc * inv;
+                }
+            }
+        }
+        out
+    }
+
+    /// Mean absolute pixel error against the oracle, over `states`, with the worst state: at the
+    /// training resolution (`mae`); at the scene's own raster, point-sampled (`mae_native_point`,
+    /// which aliases thin lines, as any point sampler does); and at the scene's raster from the
+    /// training-resolution picture box-filtered down (`mae_native`), which is how a display shows it.
     pub fn evaluate(&self, states: &[State]) -> Result<J> {
         let (w, h) = (self.cfg.w, self.cfg.h);
         let (nw, nh) = self.spec.scene.as_ref().context("no scene")?.raster_size();
-        let (mut total, mut total_native) = (0.0f64, 0.0f64);
+        let k = (w / nw).max(1);
+        let (mut total, mut total_point, mut total_ss) = (0.0f64, 0.0f64, 0.0f64);
         let mut worst = (0.0f32, String::new());
         for s in states {
-            let e = render::mae(&self.draw(s, w, h)?, &render::rasterize(&self.spec, s, w, h)?);
+            let big = self.draw(s, w, h)?;
+            let e = render::mae(&big, &render::rasterize(&self.spec, s, w, h)?);
             total += f64::from(e);
-            total_native += f64::from(render::mae(&self.draw(s, nw, nh)?, &render::rasterize(&self.spec, s, nw, nh)?));
+            let truth = render::rasterize(&self.spec, s, nw, nh)?;
+            total_point += f64::from(render::mae(&self.draw(s, nw, nh)?, &truth));
+            if w == nw * k && h == nh * k {
+                total_ss += f64::from(render::mae(&Self::downsample(&big, w, h, k), &truth));
+            }
             if e > worst.0 {
                 worst = (e, self.spec.state_key(s));
             }
         }
         let n = states.len().max(1) as f64;
-        Ok(json!({"n": states.len(), "mae": total / n, "mae_native": total_native / n, "worst_mae": worst.0, "worst_state": worst.1, "w": w, "h": h, "native_w": nw, "native_h": nh}))
+        Ok(json!({"n": states.len(), "mae": total / n, "mae_native": total_ss / n, "mae_native_point": total_point / n,
+                  "worst_mae": worst.0, "worst_state": worst.1, "w": w, "h": h, "native_w": nw, "native_h": nh, "supersample": k}))
     }
 
     pub fn describe(&self) -> J {

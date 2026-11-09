@@ -180,6 +180,9 @@ enum Cmd {
         samples: usize,
         #[arg(long, default_value_t = 0)]
         seed: u64,
+        /// At most this many states (a seeded sample of a large finite state space); 0 for all.
+        #[arg(long, default_value_t = 0)]
+        max_states: usize,
     },
     /// Score a shader directory against the render oracle (mean pixel error at its training raster and the scene's).
     EvalShader {
@@ -286,11 +289,24 @@ fn main() -> Result<()> {
                 println!("wrote {}", out.join(format!("{n}.nerve")).display());
             }
         }
-        Cmd::Rasters { spec, out, scale, samples, seed } => {
+        Cmd::Rasters { spec, out, scale, samples, seed, max_states } => {
             let s = Spec::load(&spec)?;
             let (w, h) = s.scene.as_ref().context("the spec has no scene")?.raster_size();
             let (w, h) = (w * scale.max(1), h * scale.max(1));
-            let states = nerve::picture::training_states(&s, samples, seed)?;
+            let mut states = nerve::picture::training_states(&s, samples, seed)?;
+            if max_states > 0 && states.len() > max_states {
+                use rand::seq::SliceRandom;
+                use rand::SeedableRng;
+                let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+                let keep: Vec<_> = {
+                    let mut idx: Vec<usize> = (1..states.len()).collect();
+                    idx.shuffle(&mut rng);
+                    idx.truncate(max_states - 1);
+                    idx.sort_unstable();
+                    std::iter::once(0).chain(idx).map(|i| states[i].clone()).collect()
+                };
+                states = keep;
+            }
             std::fs::create_dir_all(&out)?;
             let mut raw: Vec<u8> = Vec::with_capacity(states.len() * 3 * w * h * 4);
             for st in &states {
