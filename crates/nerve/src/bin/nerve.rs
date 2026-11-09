@@ -167,6 +167,26 @@ enum Cmd {
         #[arg(long, default_value = "specs")]
         out: PathBuf,
     },
+    /// Dump the render oracle's rasters of a spec's training states at `scale` times the scene's raster:
+    /// `<out>/meta.json` (states, w, h) and `<out>/rasters.f32` (CHW float32, one state after another).
+    /// The GPU trainer in `nerve/render/` reads them and writes a shader the engine loads.
+    Rasters {
+        spec: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 4)]
+        scale: usize,
+        #[arg(long, default_value_t = 256)]
+        samples: usize,
+        #[arg(long, default_value_t = 0)]
+        seed: u64,
+    },
+    /// Score a shader directory against the render oracle (mean pixel error at its training raster and the scene's).
+    EvalShader {
+        spec: PathBuf,
+        #[arg(long, default_value = "models/shaders")]
+        dir: PathBuf,
+    },
     /// Write the render oracle's picture of a spec's initial state (or `--state` JSON) as a PPM file.
     Picture {
         spec: PathBuf,
@@ -265,6 +285,40 @@ fn main() -> Result<()> {
             for n in nerve::gen::write(&out, &names)? {
                 println!("wrote {}", out.join(format!("{n}.nerve")).display());
             }
+        }
+        Cmd::Rasters { spec, out, scale, samples, seed } => {
+            let s = Spec::load(&spec)?;
+            let (w, h) = s.scene.as_ref().context("the spec has no scene")?.raster_size();
+            let (w, h) = (w * scale.max(1), h * scale.max(1));
+            let states = nerve::picture::training_states(&s, samples, seed)?;
+            std::fs::create_dir_all(&out)?;
+            let mut raw: Vec<u8> = Vec::with_capacity(states.len() * 3 * w * h * 4);
+            for st in &states {
+                for v in nerve::render::rasterize(&s, st, w, h)? {
+                    raw.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+            std::fs::write(out.join("rasters.f32"), raw)?;
+            // the engine's own state encoding, so the trainer never re-implements it
+            let enc = nerve::encode::Encoder::new(&s)?;
+            let mut xs: Vec<u8> = Vec::new();
+            for st in &states {
+                for v in enc.state(&s, st)? {
+                    xs.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+            std::fs::write(out.join("x.f32"), xs)?;
+            let states_json: Vec<serde_json::Value> = states.iter().map(|st| s.state_json(st)).collect();
+            let meta = serde_json::json!({"spec": s.name, "w": w, "h": h, "scale": scale, "n": states.len(), "states": states_json,
+                "view": nerve::render::raster_view(s.scene.as_ref().unwrap(), w, h), "state_dim": nerve::encode::Encoder::new(&s)?.state_dim});
+            std::fs::write(out.join("meta.json"), serde_json::to_string(&meta)?)?;
+            println!("wrote {} rasters of {w}x{h} to {}", states.len(), out.display());
+        }
+        Cmd::EvalShader { spec, dir } => {
+            let s = Spec::load(&spec)?;
+            let sh = nerve::shader::Shader::load(s.clone(), &dir.join(&s.name), &candle_core::Device::Cpu)?;
+            let states = nerve::picture::training_states(&s, 256, 0)?;
+            println!("{}", serde_json::to_string_pretty(&sh.evaluate(&states)?)?);
         }
         Cmd::Picture { spec, out, state } => {
             let s = Spec::load(&spec)?;

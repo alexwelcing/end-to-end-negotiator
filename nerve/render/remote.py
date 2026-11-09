@@ -54,5 +54,8 @@ def _wait(api, job_id, run, out_dir, repo, token, timeout_s=3 * 3600):
     out = Path(out_dir)
     for f in local.iterdir():
         (out / f.name).write_bytes(f.read_bytes())
-    ev = json.loads((out / "eval.json").read_text())
-    return {"job": job_id, "run": run, "out": str(out), **{k: ev[k] for k in ("train", "heldout", "seconds", "params")}, "minutes_wall": round((time.time() - t0) / 60, 1)}
+    if (out / "eval.json").exists():
+        ev = json.loads((out / "eval.json").read_text())
+        return {"job": job_id, "run": run, "out": str(out), **{k: ev[k] for k in ("train", "heldout", "seconds", "params")}, "minutes_wall": round((time.time() - t0) / 60, 1)}
+    meta = json.loads((out / "shader.json").read_text())
+    return {"job": job_id, "run": run, "out": str(out), "eval": meta.get("eval"), "minutes_wall": round((time.time() - t0) / 60, 1)}
