@@ -1,0 +1,32 @@
+# A seesaw (docs/rube-goldberg.md, stage 16): a plank on a fulcrum. A weight dropped on one end tips it
+# that way and fires `tipped_left` or `tipped_right`; `reset` levels it.
+nerve: 1
+name: seesaw
+state:
+  tilt: {type: enum, values: [left, level, right]}
+actions:
+  drop_left: {}
+  drop_right: {}
+  reset: {}
+transitions:
+  drop_left: { tilt: "'left'", emits: { tipped_left: "old.tilt != 'left'" } }
+  drop_right: { tilt: "'right'", emits: { tipped_right: "old.tilt != 'right'" } }
+  reset: { tilt: "'level'" }
+ensures:
+  - { after: drop_left, holds: "tilt == 'left'" }
+  - { after: drop_right, holds: "tilt == 'right'" }
+scene:
+  box: [0, 0, 200, 80]
+  shapes:
+    - {rect: [100, 68, 16, 20], r: 2, color: line}
+    - {line: [20, 40, 180, 40], color: track, width: 6, when: "tilt == 'level'"}
+    - {line: [20, 20, 180, 60], color: track, width: 6, when: "tilt == 'right'"}
+    - {line: [20, 60, 180, 20], color: track, width: 6, when: "tilt == 'left'"}
+ports:
+  drop_left: [20, 0]
+  drop_right: [180, 0]
+  tipped_left: [0, 60]
+  tipped_right: [200, 60]
+render:
+  weight: { x: "180 if tilt == 'right' else 20 if tilt == 'left' else 100", y: "52 if tilt != 'level' else 32", shape: {rect: [0, 0, 22, 14], r: 3, color: f3, stroke: ink, width: 1.5, when: "tilt != 'level'"} }
+initial: {tilt: level}

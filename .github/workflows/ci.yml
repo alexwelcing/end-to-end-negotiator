@@ -22,6 +22,14 @@ jobs:
         run: cargo build --release --workspace
       - name: Tests
         run: cargo test --release --workspace
+        # The acceptance runs (Predictions 2 to 7) are long on a two-core runner: CI runs each at a fifth
+        # of its size; the full counts run locally and their numbers are in docs/machine-room.md.
+        env:
+          NERVE_BALL_RUNS: "40"
+          NERVE_SCENE_RUNS: "20"
+          NERVE_LIGHT_RUNS: "20"
+          NERVE_LIGHT_SABOTAGE_RUNS: "20"
+          NERVE_REPLAY_TRACES: "200"
       - name: Every spec and machine passes its own check
         run: |
           for s in specs/*.nerve machines/*.nerve; do

@@ -1,0 +1,47 @@
+# The marble that starts the Rube Goldberg machine (docs/rube-goldberg.md, stage 1): a continuous block
+# with a position and a speed. `drop` sets it rolling at the top of the ramp (and emits `dropped`, which arms the machine's relay for it), every `advance` moves it by
+# its speed and the ramp adds 2 to the speed (up to 24), and `exit` fires as it leaves the bottom, where
+# the next block's `move` takes over. `set` is the grab: a hand can put the marble anywhere on the ramp.
+nerve: 1
+name: marble
+state:
+  pos: {type: float, range: [0, 264]}
+  v: {type: float, range: [0, 26]}    # the ramp caps the speed at 24; the type has slack past the rule, so a network can reach the cap
+  rolling: {type: bool}
+actions:
+  drop: {}
+  advance: {}
+  set: {params: {to: {type: float, range: [0, 264]}}}
+transitions:
+  drop: { pos: "0", v: "4", rolling: "True", emits: { dropped: "not old.rolling" } }   # a marble put on the ramp; one already rolling is just put back
+  advance:
+    when: rolling
+    pos: "pos + v"
+    v: "min(v + 2, 24)"
+    rolling: "pos + v < 240"
+    emits: { exit: "old.rolling and not rolling" }   # the marble left the ramp: a discrete flip, which the checks compare exactly
+  set: { when: rolling, pos: "clamp(to, 0, 239)" }   # a hand can move the marble, never off the ramp
+invariants:
+  - "0 <= pos <= 264"
+  - "0 <= v <= 26"
+  - "not rolling or pos < 240"   # a rolling marble is still on the ramp
+ensures:
+  - { after: advance, holds: "not old.rolling or abs(pos - old.pos - old.v) < 0.5" }   # it moves by its speed
+  - { after: advance, holds: "not old.rolling or abs(v - min(old.v + 2, 24)) < 0.5" }   # and speeds up
+  - { after: advance, holds: "old.rolling or (pos == old.pos and not rolling)" }         # a marble that left stays left
+  - { after: drop, holds: "pos < 0.5 and rolling" }
+scene:
+  box: [-20, -44, 290, 36]
+  shapes:
+    - {line: [0, -20, 240, 12], color: track, width: 8}   # the ramp, falling 32 over 240
+    - {rect: [-8, -32, 6, 28], r: 2, color: line}         # the stop at the top
+    - {label: ramp, at: [120, 26], color: mute, size: 1.5}
+ports:
+  drop: [0, -20]
+  exit: [240, 12]
+render:
+  ball: { x: "pos", y: "pos * 32 / 240 - 20", shape: {circle: [0, 0, 11], color: f1, stroke: ink, width: 1.5, when: rolling} }
+futures:
+  # the grab: slide the marble anywhere along the ramp
+  drag_ball: { kind: vary, over: pos, grab: ball, action: set, param: to }
+initial: {pos: 0, v: 0, rolling: false}

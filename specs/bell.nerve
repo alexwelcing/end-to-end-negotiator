@@ -1,0 +1,30 @@
+# The bell at the end of the Rube Goldberg machine (docs/rube-goldberg.md, stage 20). `ring` strikes it
+# and `rang` fires; it remembers how many times it rang, up to nine; `reset` quiets it.
+nerve: 1
+name: bell
+state:
+  rings: {type: int, range: [0, 9]}
+actions:
+  ring: {}
+  reset: {}
+transitions:
+  ring: { rings: "min(rings + 1, 9)", emits: { rang: "True" } }
+  reset: { rings: "0" }
+invariants:
+  - "0 <= rings <= 9"
+ensures:
+  - { after: ring, holds: "rings == old.rings + 1 or old.rings == 9" }
+scene:
+  box: [0, 0, 100, 100]
+  shapes:
+    - {rect: [50, 8, 10, 10], r: 2, color: ink}
+    - {circle: [50, 44, 30], color: f4}
+    - {rect: [50, 68, 70, 10], r: 3, color: f4}
+    - {label: ding, at: [86, 24], color: acc, size: 1.8, when: "rings > 0"}
+    - {text: rings, at: [14, 90], color: mute, size: 1.6}
+ports:
+  ring: [0, 50]
+  rang: [100, 50]
+render:
+  clapper: { x: "50 + 8 * (rings % 2)", y: 82, shape: {circle: [0, 0, 6], color: ink} }
+initial: {rings: 0}

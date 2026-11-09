@@ -207,7 +207,8 @@ fn rush_hour_legal_moves_are_dragologys_moves() {
     // Every (board, slide) cell that changes the board is one of Dragology's stops, and back.
     let sp = spec();
     let o = Oracle::new(&sp);
-    let actions = sp.action_instances().unwrap();
+    // The slides only: `hint` is a learned hole, which answers with one of these slides by example.
+    let actions: Vec<_> = sp.action_instances().unwrap().into_iter().filter(|a| a.name != "hint").collect();
     let mut spec_moves = 0;
     let mut dragology_moves = 0;
     for b in all_boards() {

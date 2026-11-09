@@ -57,6 +57,7 @@ svg#stage { width: 100%; height: 360px; display: block; touch-action: none; user
 .wire, .frame { vector-effect: non-scaling-stroke; }
 .frame { fill: none; stroke-width: 1.5; }
 .frame.lit { stroke: var(--ok); } .frame.bad { stroke: var(--bad); } .frame.held { stroke: var(--hold); stroke-dasharray: 6 4; }
+.wire.pulse { stroke: var(--line); stroke-width: 1; opacity: 0.5; }
 .scenetext { fill: var(--mute); font-weight: 600; }
 .stop { border-left: 4px solid var(--bad); padding-left: 10px; margin: 10px 0; }
 .trace { max-height: 320px; overflow: auto; font-size: 13px; }
@@ -96,18 +97,25 @@ pre { white-space: pre-wrap; margin: 8px 0 0; }
     <span class="pill" id="mspill">— ms/tick</span>
     <span class="pill hold" id="holdpill" hidden></span>
     <span id="inputs"></span>
+    <button class="ctl" id="breakBtn" title="Corrupt a random block's network (B): the checks must catch what it gets wrong">Break a block</button>
+    <button class="ctl" id="healBtn" title="Restore every broken block (H)" hidden>Heal</button>
     <button class="ctl" id="share" hidden title="Open this machine in a shared room: everyone with the link sees and drives the same machine">Share this machine</button>
     <span class="pill" id="roompill" hidden></span>
   </div>
   <div class="layout">
     <div class="stack">
       <section class="card"><svg id="stage" role="img" aria-label="The machine"></svg><div id="stop"></div><p class="note" id="hint">Press Run, or drag a list item or the switch knob.</p></section>
-      <details class="card" id="srcCard"><summary>The machine document <span id="srcLines" class="note"></span></summary><pre class="mono" id="src"></pre></details>
+      <details class="card" id="srcCard"><summary>The machine document <span id="srcLines" class="note"></span></summary>
+        <p class="note">Edit it and apply: the runtime re-parses the document and the edited machine runs on the next tick. Edits stay in this browser; a shared room keeps its own document.</p>
+        <textarea class="mono" id="src" spellcheck="false" rows="24" style="width:100%;box-sizing:border-box;font-size:12px;line-height:1.35;border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--card);color:var(--ink)"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button class="ctl" id="applySrc">Apply the document</button><span class="note" id="srcStatus"></span></div>
+      </details>
     </div>
     <aside class="stack">
       <div class="card"><h2>This tick</h2><div id="last" class="trace"></div></div>
       <div class="card"><h2>Derived</h2><div class="derived mono" id="derived"></div></div>
       <div class="card"><h2>Trace</h2><p class="note">Newest first. Each line is one tick: the external action, then every delivery along a wire.</p><div class="trace" id="trace"></div></div>
+      <div class="card" hidden><h2>Runs</h2><p class="note">Every run of this machine that rang its bell, in this browser, fewest ticks first. Hands (grabs, keys, buttons) and broken blocks count against a run.</p><div class="trace" id="runs"></div></div>
     </aside>
   </div>
 </main>
@@ -120,6 +128,9 @@ let layout = null, running = false, timer = null, busy = false, tick = 0, stats 
 let lastPos = {};   // where each block's elements were last drawn, so a tick is seen as motion
 let pictures = {};  // per block: the render network's picture of its current state
 let backdrops = {}; // per machine: its own scene, rasterised once by the render oracle
+let broken = [];    // blocks a visitor broke: their networks run as corrupted copies, and the checks must catch it
+let hands = 0, runDone = false;   // the scoreboard: how many times a hand touched this run, and whether its bell has rung
+let queued = [];   // inputs (keys, buttons) that arrived while a tick was in flight: they ride on the next tick
 /** A raster from the API (RGB bytes, base64) as a data URL the stage can show. */
 function rgbToUrl(b64, w, h) {
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -168,11 +179,20 @@ const text = (x, y, s, cls, parent) => { const t = el("text", {x, y, class: cls}
 async function init() {
   machines = await api("/api/machines");
   if (!machines.length) { $("who").textContent = "no machines"; $("hint").textContent = "No machine documents were loaded (pass --machines)."; return; }
-  const tabs = $("tabs");
-  for (const m of machines) { const b = document.createElement("button"); b.className = "tab"; b.role = "tab"; b.textContent = m.name; b.onclick = () => select(m.name); tabs.append(b); }
+  buildTabs();
+  $("applySrc").onclick = applyDocument;
   $("run").onclick = () => shared ? send({type: running ? "pause" : "run"}) : running ? pause() : start();
   $("step").onclick = () => doTick();
   $("reset").onclick = () => shared ? send({type: "reset"}) : select(M.name);
+  $("breakBtn").onclick = () => breakOne();
+  $("healBtn").onclick = () => heal();
+  window.addEventListener("keydown", e => {
+    if (!M || e.ctrlKey || e.metaKey || e.altKey || ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
+    const key = e.key === " " ? "Space" : e.key;
+    if (!(M.bindings || []).some(b => b.key.toLowerCase() === key.toLowerCase())) return;
+    e.preventDefault();
+    applyKey(key);
+  });
   $("rate").oninput = () => { $("rateval").textContent = `${$("rate").value}/s`; if (shared) send({type: "rate", rate: Number($("rate").value)}); else if (running) { pause(); start(); } };
   canShare = await fetch("/room/_health").then(r => r.ok).catch(() => false);
   if (canShare) {
@@ -188,11 +208,12 @@ function select(name) {
   pause();
   M = machines.find(m => m.name === name);
   for (const t of $("tabs").children) t.setAttribute("aria-selected", t.textContent === name);
-  state = structuredClone(M.initial); pending = []; detached = []; drag = null; tick = 0; last = null; lastFired = new Set(); lastPos = {}; pictures = {};
+  state = structuredClone(M.initial); pending = []; detached = []; drag = null; tick = 0; last = null; lastFired = new Set(); lastPos = {}; pictures = {}; broken = []; $("healBtn").hidden = true;
+  hands = 0; runDone = false; queued = []; renderRuns();
   stats = {ticks: 0, agree: 0, viol: 0, ms: []};
   const nets = M.blocks.filter(b => b.network).length;
-  $("who").textContent = `${M.blocks.length} blocks · ${nets} networks · ${M.wires.length} wires · ${M.states.toLocaleString()} states`;
-  $("src").textContent = M.source; $("srcLines").textContent = `— ${M.source.trimEnd().split("\n").length} lines, and nothing else joins these blocks.`;
+  $("who").textContent = `${M.blocks.length} blocks · ${nets} networks · ${M.wires.length} wires · ${M.states ? `${M.states.toLocaleString()} states` : "continuous"}`;
+  $("src").value = M.source; $("srcStatus").textContent = ""; $("srcLines").textContent = `— ${M.source.trimEnd().split("\n").length} lines, and nothing else joins these blocks.`;
   $("trace").innerHTML = ""; $("last").innerHTML = ""; $("stop").innerHTML = "";
   // What a hand can do here: each block's grabs, merged across the instances of one type.
   const grabs = new Map();
@@ -203,6 +224,7 @@ function select(name) {
   const list = xs => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}` : xs[0];
   const can = [...grabs].map(([what, insts]) => `${what} ${list(insts)}`);
   $("hint").textContent = can.length ? `Press Run, or drag ${list(can)} while it runs.` : "Press Run.";
+  if ((M.bindings || []).length) $("hint").textContent += ` Keys: ${M.bindings.map(b => `${b.key} = ${b.does}`).join(", ")}.`;
   layout = computeLayout();
   // The other parameterless inputs (dropping the ball, say) as buttons; the clock's input is the Run button.
   const drive = new Set(driveInputs().map(i => `${i.block}.${i.action}`));
@@ -257,15 +279,86 @@ function driveInputs() {
   return d.map(i => ({block: i.block, action: i.action, params: i.params}));
 }
 
+function buildTabs() {
+  const tabs = $("tabs"); tabs.innerHTML = "";
+  for (const m of machines) { const b = document.createElement("button"); b.className = "tab"; b.role = "tab"; b.textContent = m.name; b.onclick = () => select(m.name); tabs.append(b); }
+}
+
+/** The document editor: the runtime re-parses the text, the edited machine replaces the old one and runs on
+ *  the next tick. Local to this browser; a shared room keeps its own document. */
+async function applyDocument() {
+  if (shared) { $("srcStatus").textContent = "A shared room keeps its own document; leave the room to edit."; return; }
+  try {
+    pause();
+    const r = await api("/api/machines", {source: $("src").value});
+    machines = await api("/api/machines");
+    buildTabs();
+    select(r.name);
+    $("srcCard").open = true;
+    $("srcStatus").textContent = `Applied: ${r.name} runs the edited document from its initial state.`;
+  } catch (err) { $("srcStatus").innerHTML = `<span class="err">${err.message}</span>`; }
+}
+
+/** The scoreboard: a run is over when the machine's `rang` (or `lit`) derived value first comes true; it is kept
+ *  in this browser with its ticks, hands and broken blocks, and the runs are ranked by ticks. */
+function runsKey() { return `nerve-runs-${M.name}`; }
+function loadRuns() { try { return JSON.parse(localStorage.getItem(runsKey()) || "[]"); } catch { return []; } }
+function checkFinished() {
+  if (runDone || !derived) return;
+  const over = Number(derived.rang) > 0 || derived.lit === true;
+  if (!over) return;
+  runDone = true;
+  const run = {at: new Date().toISOString(), ticks: tick, hands, broken: broken.length, room: shared ? shared.room || true : false};
+  try { localStorage.setItem(runsKey(), JSON.stringify([...loadRuns(), run].slice(-50))); } catch {}
+  $("hint").textContent = `The bell rang after ${tick} ticks, ${hands} hand${hands === 1 ? "" : "s"} on the way${broken.length ? `, ${broken.length} broken block${broken.length === 1 ? "" : "s"}` : ""}.`;
+  renderRuns();
+}
+function renderRuns() {
+  const box = $("runs"); if (!box) return;
+  const runs = loadRuns().sort((a, b) => a.ticks - b.ticks || a.hands - b.hands).slice(0, 10);
+  if (!(M.derived || []).includes("rang") && !(M.derived || []).includes("lit")) { box.parentElement.hidden = true; return; }
+  box.parentElement.hidden = false;
+  box.innerHTML = runs.length ? runs.map((r, i) => `<div><b>${i + 1}.</b> ${r.ticks} ticks · ${r.hands} hand${r.hands === 1 ? "" : "s"}${r.broken ? ` · ${r.broken} broken` : ""}${r.room ? " · in a room" : ""} <span class="note">${r.at.slice(0, 16).replace("T", " ")}</span></div>`).join("") : '<span class="note">No run has rung the bell yet. Fewest ticks wins; hands and broken blocks count against you.</span>';
+}
+
+/** Break it: a random networked block runs a corrupted copy of its network from now on; the checks must catch it. */
+function breakOne() {
+  if (shared) { send({type: "key", key: "b"}); return; }
+  const can = M.blocks.filter(b => b.network && !broken.includes(b.instance)).map(b => b.instance);
+  if (!can.length) return;
+  broken = [...broken, can[Math.floor(Math.random() * can.length)]];
+  $("healBtn").hidden = false;
+  $("hint").textContent = `${broken[broken.length - 1]} is broken: its network's weights are corrupted. Run, and watch the checks.`;
+  draw();
+}
+/** Heal: every block runs its real network again. */
+function heal() {
+  if (shared) { send({type: "key", key: "h"}); return; }
+  broken = []; $("healBtn").hidden = true; $("stop").innerHTML = ""; $("hint").textContent = "Every block healed."; draw();
+}
+/** A key, as the machine document binds it: an action with its payload evaluated over the machine now, or a verb. */
+async function applyKey(key) {
+  if (shared) { send({type: "key", key}); return; }
+  const r = await api(`/api/machine/${M.name}/binding`, {state, key});
+  if (!r) return;
+  if (r.verb === "reset") select(M.name);
+  else if (r.verb === "break") breakOne();
+  else if (r.verb === "heal") heal();
+  else if (r.block) { hands += 1; await doTick([{block: r.block, action: r.action, params: r.params}]); }
+}
+
 async function doTick(external = driveInputs()) {
   if (shared) { send({type: "step"}); return; }
-  if (busy) return; busy = true;
+  // An input that arrives while a tick is in flight is not dropped: it rides on the next tick.
+  if (busy) { queued = [...queued, ...external]; return; }
+  busy = true;
+  external = [...external, ...queued]; queued = [];
   try {
-    const r = await api(`/api/machine/${M.name}/tick`, {state, external, pending, detached});
+    const r = await api(`/api/machine/${M.name}/tick`, {state, external, pending, detached, broken});
     tick += 1; stats.ticks += 1; if (r.agrees) stats.agree += 1; stats.viol += r.violations.length; stats.ms.push(r.ms); if (stats.ms.length > 60) stats.ms.shift();
     state = r.state; pending = r.pending; positions = r.positions; derived = r.derived; last = r;
     lastFired = new Set(r.steps.filter(s => s.via).map(s => `${s.via.block}.${s.via.event}>${s.block}.${s.action}`));
-    logTick(r); updatePills(); draw();
+    logTick(r); updatePills(); draw(); checkFinished();
     if (!r.agrees || r.violations.length) { pause(); showStop(r); }
   } catch (err) { pause(); $("hint").innerHTML = `<span class="err">${err.message}</span>`; }
   busy = false;
@@ -300,6 +393,8 @@ function connect() {
 }
 function applyStatus(m) {
   if (m.holds) { shared.holds = m.holds; detached = [...new Set(Object.values(m.holds))]; }
+  if (m.broken) { broken = m.broken; $("healBtn").hidden = !broken.length; }
+  if (m.hands !== undefined) hands = m.hands;
   if (m.viewers !== undefined) shared.viewers = m.viewers;
   if (m.stats) stats = m.stats;
   if (m.tick !== undefined) tick = m.tick;
@@ -315,7 +410,7 @@ async function handleRoom(m) {
       if (m.stopped) showStop(m.stopped);
       await view(); updatePills(); break;
     case "tick":
-      state = m.state; pending = m.pending; positions = m.positions; derived = m.derived; last = m; applyStatus(m);
+      state = m.state; pending = m.pending; positions = m.positions; derived = m.derived; last = m; applyStatus(m); checkFinished();
       lastFired = new Set(m.steps.filter(s => s.via).map(s => `${s.via.block}.${s.via.event}>${s.block}.${s.action}`));
       logTick(m); updatePills(); draw();
       if (!m.agrees || m.violations.length) showStop(m);
@@ -389,7 +484,7 @@ function draw() {
     const stepped = last ? last.steps.filter(s => s.block === inst) : [];
     const bad = stepped.some(s => s.violations.length || !s.agrees);
     el("rect", {x: p.x, y: p.y, width: p.w, height: p.h, rx: 10, class: "panel" + (isHeld ? " held" : bad ? " bad" : stepped.length ? " lit" : "")}, svg);
-    text(p.x + 12, p.y + 20, inst, "title", svg);
+    text(p.x + 12, p.y + 20, `${inst}${broken.includes(inst) ? " · broken" : ""}`, "title", svg);
     text(p.x + 12, p.y + 35, `${b.type}${b.network ? " · network" : " · spec only"}`, "type", svg);
     el("circle", {cx: p.x + p.w - 14, cy: p.y + 16, r: LIGHT_R, class: "light", fill: bad ? "var(--bad)" : stepped.length ? "var(--ok)" : "var(--line)"}, svg);
     if (isHeld) text(p.x + p.w - 26, p.y + 20, "held", "type", svg).setAttribute("text-anchor", "end");
@@ -468,8 +563,11 @@ function drawScene() {
     if (Math.hypot(dx, dy) < 1) { const m = 14 / k; d = `M${x1},${y1 - m} L${x1},${y1 + m}`; lx = x1; ly = y1 - m - 6 / k; }
     else if (dx >= 0) { const mx = (x1 + x2) / 2; d = `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`; lx = mx; ly = Math.min(y1, y2) - 8 / k; }
     else { const drop = 60 / k + Math.abs(dx) * 0.08; d = `M${x1},${y1} C${x1},${y1 + drop} ${x2},${y2 + drop} ${x2},${y2}`; lx = (x1 + x2) / 2; ly = Math.max(y1, y2) + drop * 0.75 + 12 / k; }
-    el("path", {d, class: "wire" + (live ? " live" : "") + (heldWire ? " held" : "")}, svg);
-    text(lx, ly, `${w.event} → ${w.action}${Object.keys(w.with).length ? "(…)" : ""}`, "wirelabel" + (live ? " live" : ""), svg).style.fontSize = fs(10);
+    // The clock's wires are the heartbeat: they fire every tick, so they are drawn faint and never labelled.
+    const heartbeat = (M.blocks.find(b => b.instance === w.from) || {}).type === "clock";
+    el("path", {d, class: "wire" + (heartbeat ? " pulse" : "") + (live && !heartbeat ? " live" : "") + (heldWire ? " held" : "")}, svg);
+    // In one scene a wire names itself only while it fires or holds a delivery: a contraption has dozens.
+    if ((live && !heartbeat) || heldWire) text(lx, ly, `${w.event} → ${w.action}${Object.keys(w.with).length ? "(…)" : ""}`, "wirelabel" + (live ? " live" : ""), svg).style.fontSize = fs(10);
   }
   for (const b of M.blocks) {
     const p = layout.panels[b.instance]; if (!p) continue;
@@ -483,7 +581,7 @@ function drawScene() {
     if (pic) el("image", {href: pic.url, x: pic.view[0], y: pic.view[1], width: pic.view[2], height: pic.view[3], preserveAspectRatio: "none", class: "pic"}, bg);
     // The check as a thin frame while the block has just stepped, is held or is wrong; the name small above.
     if (isHeld || bad || stepped.length) el("rect", {x: bx, y: by, width: bw, height: bh, rx: 4, class: "frame" + (isHeld ? " held" : bad ? " bad" : " lit")}, svg);
-    text(bx, by - 4 / k, `${inst}${isHeld ? " · held" : ""}`, "scenetext", svg).style.fontSize = fs(11);
+    text(bx, by - 4 / k, `${inst}${isHeld ? " · held" : ""}${broken.includes(inst) ? " · broken" : ""}`, "scenetext", svg).style.fontSize = fs(11);
     el("circle", {cx: bx + bw - 5 / k, cy: by - 8 / k, r: 3.5 / k, class: "light", fill: bad ? "var(--bad)" : stepped.length ? "var(--ok)" : "var(--line)"}, svg);
     const pos = (drag && drag.block === inst && drag.preview) ? drag.preview : (positions[inst] || {});
     if (drag && drag.block === inst && drag.candidates) for (const c of drag.candidates) el("circle", {cx: c.x, cy: c.y, r: 9, class: "el ghost"}, bg);
@@ -525,6 +623,7 @@ async function startDrag(e, b, g, p) {
   }
   try {
     const s = await api(`/api/${b.type}/drag`, {gesture: g.name, state: state[inst]});
+    hands += 1;
     drag = {block: inst, type: b.type, gesture: g.name, sid: s.session, candidates: s.candidates, preview: null, panel: p, busy: false, queued: null};
     detached = [...detached, inst];
     $("hint").textContent = `${inst} is held: ${g.name} (${g.kind} over ${g.field}). Events for it queue until you let go.`;

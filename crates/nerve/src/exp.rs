@@ -64,7 +64,10 @@ pub fn record(spec_path: &Path, model_dir: &Path, tag: &str, log: &Path) -> Resu
     }
     let mut blob = String::new();
     for r in &rows {
-        let mut line = json!({"round": 2, "tag": tag});
+        // The checkpoint's own fingerprint names the rules it was trained on (checkpoints written before
+        // fingerprints have none), so a later retraining of a changed spec outranks it when the served set
+        // is picked.
+        let mut line = json!({"round": 2, "tag": tag, "spec_fingerprint": meta.get("spec_fingerprint").cloned().unwrap_or(J::Null)});
         for (k, v) in r.as_object().into_iter().flatten() {
             line[k] = v.clone();
         }
@@ -96,21 +99,55 @@ fn latest(rows: Vec<J>) -> BTreeMap<String, J> {
     out
 }
 
-/// Builds `models/served` from the log: for each spec, the full-spec seed with the highest score
-/// (spec-assisted exact for finite specs, within-tolerance for continuous ones; fewest violations,
-/// then the lowest seed, on ties) is copied unchanged. The choice is written to `served.json`.
+/// Builds `models/served` from the log: for each spec, the full-spec run with the highest score
+/// (a run recorded against the spec as it is now, by its fingerprint, over one recorded before the spec
+/// changed; then spec-assisted exact for finite specs, within-tolerance for continuous ones; fewest
+/// violations; the lowest seed on ties) whose checkpoint still loads against the spec is copied
+/// unchanged. A spec whose rules changed is retrained; its older checkpoints either no longer load or
+/// rank below the run that knows the new rules. The choice is written to `served.json`.
+/// A run's rank in `serve_set`: recorded against the current spec, exactness, fewer violations, a step head, the lower seed.
+type Rank = (f64, f64, f64, f64, f64);
+
 pub fn serve_set(log: &Path, root: &Path, served: &Path, manifest: &Path) -> Result<()> {
     let rows = latest(read_log(log)?);
-    let mut best: BTreeMap<String, (J, (f64, f64, f64))> = BTreeMap::new();
+    let mut candidates: BTreeMap<String, Vec<(J, Rank)>> = BTreeMap::new();
+    let mut specs: BTreeMap<String, Spec> = BTreeMap::new();
     for r in rows.values() {
         if r["tag"] != "full" || !(r["mode"] == "spec-assisted" || r["mode"] == "network") {
             continue;
         }
-        let score = (r["all"]["exact"].as_f64().unwrap_or(0.0), -r["all"]["violation_rate"].as_f64().unwrap_or(1.0), -r["seed"].as_f64().unwrap_or(0.0));
-        let spec = r["spec"].as_str().unwrap_or("").to_string();
-        let better = best.get(&spec).is_none_or(|(_, s)| score > *s);
-        if better {
-            best.insert(spec, (r.clone(), score));
+        let name = r["spec"].as_str().unwrap_or("").to_string();
+        if !specs.contains_key(&name) {
+            specs.insert(name.clone(), Spec::load(&root.join("specs").join(format!("{name}.nerve")))?);
+        }
+        let current = f64::from(r["spec_fingerprint"].as_str() == Some(specs[&name].fingerprint().as_str()));
+        // A continuous network with a step head answers in one pass instead of descent: at equal
+        // exactness it is the one to serve.
+        let head = f64::from(r["head"].is_object());
+        let score = (current, r["all"]["exact"].as_f64().unwrap_or(0.0), -r["all"]["violation_rate"].as_f64().unwrap_or(1.0), head, -r["seed"].as_f64().unwrap_or(0.0));
+        candidates.entry(name).or_default().push((r.clone(), score));
+    }
+    ensure!(!candidates.is_empty(), "no full-spec runs in {}", log.display());
+    let mut best: BTreeMap<String, (J, Rank)> = BTreeMap::new();
+    for (spec, mut cs) in candidates {
+        cs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let sp = specs[&spec].clone();
+        let mut chosen = None;
+        for (r, s) in cs {
+            let dir = root.join(r["model"].as_str().unwrap_or("").replace('\\', "/"));
+            match crate::train::load_learned(sp.clone(), &dir, &Device::Cpu) {
+                Ok(_) => {
+                    chosen = Some((r, s));
+                    break;
+                }
+                Err(e) => println!("{spec:<18} skipping seed {} ({}): {e:#}", r["seed"], dir.display()),
+            }
+        }
+        match chosen {
+            Some(c) => {
+                best.insert(spec, c);
+            }
+            None => println!("{spec:<18} no checkpoint loads against the current spec"),
         }
     }
     ensure!(!best.is_empty(), "no full-spec runs in {}", log.display());
@@ -208,20 +245,15 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let log = root.join("experiments/round2/results.jsonl");
         let manifest: J = serde_json::from_str(&std::fs::read_to_string(root.join("experiments/round2/served.json")).unwrap()).unwrap();
-        let rows = latest(read_log(&log).unwrap());
-        let mut best: BTreeMap<String, (String, (f64, f64, f64))> = BTreeMap::new();
-        for r in rows.values() {
-            if r["tag"] != "full" || !(r["mode"] == "spec-assisted" || r["mode"] == "network") {
-                continue;
-            }
-            let score = (r["all"]["exact"].as_f64().unwrap_or(0.0), -r["all"]["violation_rate"].as_f64().unwrap_or(1.0), -r["seed"].as_f64().unwrap_or(0.0));
-            let spec = r["spec"].as_str().unwrap().to_string();
-            if best.get(&spec).is_none_or(|(_, s)| score > *s) {
-                best.insert(spec, (r["model"].as_str().unwrap().replace('\\', "/"), score));
-            }
-        }
+        // The committed served set is what `serve_set` picks from the committed log today: the best run
+        // per spec whose checkpoint loads against the spec as it is now, the newest on ties.
+        let tmp = std::env::temp_dir().join(format!("nerve-served-test-{}", std::process::id()));
+        let picked_manifest = tmp.join("served.json");
+        serve_set(&log, &root, &tmp.join("served"), &picked_manifest).unwrap();
+        let picked: J = serde_json::from_str(&std::fs::read_to_string(&picked_manifest).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
         for (spec, entry) in manifest.as_object().unwrap() {
-            assert_eq!(best[spec].0, entry["model"].as_str().unwrap().replace('\\', "/"), "{spec}");
+            assert_eq!(picked[spec]["model"].as_str().unwrap().replace('\\', "/"), entry["model"].as_str().unwrap().replace('\\', "/"), "{spec}");
         }
         assert!(summarize(&log, &["toggle".to_string()]).unwrap().contains("| toggle | full spec | spec-assisted |"));
         assert_eq!(stat(&[Some(1.0), Some(0.5)]), "75.0 ± 35.4%");

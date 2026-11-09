@@ -60,7 +60,35 @@ pub struct MachineSpec {
     pub place: Vec<Option<Place>>,
     /// The machine's own backdrop (`scene:`), in machine coordinates.
     pub scene: Option<crate::render::Scene>,
+    /// Where the machine starts: each block's spec initial, with the document's `initial:` overrides.
+    pub start: MachineState,
+    /// What keys do (`bindings:`), interpreted by the runtime: the page or the room looks a key up here.
+    pub bindings: Vec<Binding>,
 }
+
+/// What a key does: a block's action with the document's payload expressions (evaluated over the
+/// machine when the key is pressed, like a wire's `with:`), or a runtime verb (`reset`, `break`, `heal`).
+#[derive(Debug, Clone)]
+pub enum BindingKind {
+    Action { block: usize, action: String, params: Vec<(String, Expr)> },
+    Verb(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct Binding {
+    pub key: String,
+    pub kind: BindingKind,
+}
+
+/// A binding resolved against a state: the action instance to apply, or the verb to perform.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Bound {
+    Action { block: usize, action: ActionInst },
+    Verb(String),
+}
+
+/// The runtime verbs a key may be bound to.
+pub const VERBS: [&str; 3] = ["reset", "break", "heal"];
 
 /// A block's placement in the machine's picture: a block point `(bx, by)` sits at
 /// `(x + scale * bx, y + scale * by)` in machine coordinates.
@@ -204,6 +232,33 @@ impl MachineSpec {
             wires.push(Wire { from_block, event, to_block, action, params });
         }
 
+        // `bindings:` name keys: `Space: marble.drop`, `g: {do: track.move, with: {t: "...", to: "..."}}`,
+        // `b: break`. The payload expressions are compiled like a wire's.
+        let mut bindings = Vec::new();
+        for (key, bv) in entries(get(&doc, "bindings"))? {
+            let action_binding = |target: &str, given: Vec<(String, Yaml)>| -> Result<BindingKind> {
+                let (b, action) = split(target)?;
+                let act = blocks[b].2.action(&action).with_context(|| format!("binding {key}: {}.{action}: no such action", names[b]))?;
+                for (k, _) in &given {
+                    ensure!(act.param(k).is_some(), "binding {key}: {}.{action}: no parameter {k:?}", names[b]);
+                }
+                let mut params = Vec::new();
+                for p in &act.params {
+                    let (_, v) = given.iter().find(|(k, _)| *k == p.name).with_context(|| format!("binding {key}: {}.{action}: parameter {} needs a `with:` expression", names[b], p.name))?;
+                    params.push((p.name.clone(), Expr::compile(&flatten(&expr_src(v)?, &names))?));
+                }
+                Ok(BindingKind::Action { block: b, action, params })
+            };
+            let kind = match &bv {
+                Yaml::String(s) if VERBS.contains(&s.as_str()) => BindingKind::Verb(s.clone()),
+                Yaml::String(s) => action_binding(s, Vec::new())?,
+                Yaml::Mapping(bm) => action_binding(&as_str(get(bm, "do").with_context(|| format!("binding {key}: needs `do: block.action`"))?)?, entries(get(bm, "with"))?)?,
+                other => bail!("binding {key}: must be `block.action`, one of {}, or {{do, with}}; got {other:?}", VERBS.join("/")),
+            };
+            ensure!(!bindings.iter().any(|b: &Binding| b.key.eq_ignore_ascii_case(&key)), "binding {key}: bound twice");
+            bindings.push(Binding { key, kind });
+        }
+
         let mut derived = Vec::new();
         for (k, v) in entries(get(&doc, "derived"))? {
             ensure!(block_idx(&k).is_none(), "derived {k:?} has the name of a block");
@@ -248,7 +303,54 @@ impl MachineSpec {
             ensure!(missing.is_empty(), "place: every block or none; not placed: {}", missing.join(", "));
         }
         ensure!(scene.is_none() || place.iter().any(Option::is_some), "a machine scene needs placed blocks");
-        Ok(Self { name, blocks, inputs, wires, derived, ensures, max_events, place, scene })
+
+        // `initial:` sets some of a block's fields for this machine (`initial: {list: {pa: 4, pb: 0}}`);
+        // the rest keep the spec's initial, and the result must still satisfy the block's invariants.
+        let mut start: MachineState = blocks.iter().map(|(_, _, s)| s.initial.clone()).collect();
+        for (inst, iv) in entries(get(&doc, "initial"))? {
+            let b = block_idx(&inst).with_context(|| format!("initial {inst:?}: unknown block"))?;
+            let spec = &blocks[b].2;
+            for (fname, fv) in entries(Some(&iv))? {
+                let fi = spec.field_index(&fname).with_context(|| format!("initial {inst}.{fname}: no such field"))?;
+                let f = &spec.fields[fi];
+                let v = f.canon(&Value::from_yaml(&fv)?);
+                ensure!(f.contains(&v), "initial {inst}.{fname}: {} is not in the field's type", v.repr());
+                start[b][fi] = v;
+            }
+            let bad = Oracle::new(spec).violations(&start[b], None, &start[b], 0.0);
+            ensure!(bad.is_empty(), "initial {inst}: the state breaks the block's rules: {}", bad.join("; "));
+        }
+        Ok(Self { name, blocks, inputs, wires, derived, ensures, max_events, place, scene, start, bindings })
+    }
+
+    /// What a key does from `state`: the bound action with its payload evaluated over the machine (and
+    /// checked against the action's types), the verb, or nothing when the key is not bound.
+    pub fn binding(&self, key: &str, state: &MachineState) -> Result<Option<Bound>> {
+        let Some(b) = self.bindings.iter().find(|b| b.key.eq_ignore_ascii_case(key)) else { return Ok(None) };
+        Ok(Some(match &b.kind {
+            BindingKind::Verb(v) => Bound::Verb(v.clone()),
+            BindingKind::Action { block, action, params } => {
+                let (_, _, spec) = &self.blocks[*block];
+                let act = spec.action(action).context("binding action vanished")?;
+                let scope = MachineScope { spec: self, cur: state, old: None };
+                let mut out = Vec::new();
+                for ((name, expr), p) in params.iter().zip(&act.params) {
+                    let v = p.canon(&expr.eval(&scope)?);
+                    ensure!(p.contains(&v), "key {}: {}.{action}: {name} = {} is outside its type", b.key, self.blocks[*block].0, v.repr());
+                    out.push((name.clone(), v));
+                }
+                Bound::Action { block: *block, action: ActionInst { name: action.clone(), params: out } }
+            }
+        }))
+    }
+
+    /// A binding as the page lists it: `marble.drop`, `track.move(t, to)` or a verb.
+    pub fn binding_label(&self, b: &Binding) -> String {
+        match &b.kind {
+            BindingKind::Verb(v) => v.clone(),
+            BindingKind::Action { block, action, params } if params.is_empty() => format!("{}.{action}", self.blocks[*block].0),
+            BindingKind::Action { block, action, params } => format!("{}.{action}({})", self.blocks[*block].0, params.iter().map(|(k, e)| format!("{k}: {}", e.source())).collect::<Vec<_>>().join(", ")),
+        }
     }
 
     /// Whether the document composes one picture (any block placed).
@@ -292,7 +394,7 @@ impl MachineSpec {
     }
 
     pub fn initial(&self) -> MachineState {
-        self.blocks.iter().map(|(_, _, s)| s.initial.clone()).collect()
+        self.start.clone()
     }
 
     pub fn block_index(&self, inst: &str) -> Option<usize> {
@@ -788,7 +890,7 @@ mod tests {
         assert_eq!(m.derived(&next, "home")?, Some(Value::Bool(true)));
         // The switch's wire turned it one place clockwise, b -> g, so it did not come home: no reset.
         assert_eq!(trace.steps[4].action.param("to"), Some(&Value::Str("g".into())));
-        assert!(trace.steps[4].events.is_empty());
+        assert_eq!(trace.steps[4].events, vec!["turned".to_string()]);
         assert_eq!(m.derived(&next, "count")?, Some(Value::Int(0)));
         Ok(())
     }

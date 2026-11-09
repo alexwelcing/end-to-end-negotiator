@@ -63,6 +63,31 @@ pub fn steppers<'a>(app: &'a App, m: &'a MachineSpec) -> (Vec<Box<dyn BlockStep 
     (out, learned)
 }
 
+/// The steppers for a machine with some blocks broken: those run corrupted copies of their networks.
+pub fn steppers_with_broken<'a>(app: &'a App, m: &'a MachineSpec, broken: &[usize]) -> (Vec<Box<dyn BlockStep + 'a>>, Vec<bool>) {
+    let (mut out, learned) = steppers(app, m);
+    for &b in broken {
+        if let Some(c) = app.corrupted(&m.blocks[b].1) {
+            out[b] = Box::new(NetworkStepper(c));
+        }
+    }
+    (out, learned)
+}
+
+impl App {
+    /// What a key does from this state: the bound action with its payload evaluated, a verb, or `null`.
+    pub fn machine_binding(&self, name: &str, req: &BindingReq) -> Result<J> {
+        let e = self.machine(name)?;
+        let m = &e.spec;
+        let s = state_from_json(m, &req.state)?;
+        Ok(match m.binding(&req.key, &s)? {
+            None => J::Null,
+            Some(crate::machine::Bound::Verb(v)) => json!({"verb": v}),
+            Some(crate::machine::Bound::Action { block, action }) => json!({"block": m.blocks[block].0, "action": action.name, "params": action.params_json()}),
+        })
+    }
+}
+
 /// The box every rendered element of a finite block can occupy over its valid states, so the page
 /// can give each block a panel that fits whatever it does.
 fn extent(spec: &Spec) -> Option<J> {
@@ -156,6 +181,16 @@ pub struct TickReq {
     /// Blocks a pointer holds: deliveries to them are held and returned.
     #[serde(default)]
     pub detached: Vec<String>,
+    /// Blocks a visitor broke: their networks are replaced by corrupted copies, and the checks must
+    /// catch what the copies get wrong.
+    #[serde(default)]
+    pub broken: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct BindingReq {
+    pub state: J,
+    pub key: String,
 }
 
 impl App {
@@ -205,6 +240,7 @@ impl App {
                     "holds": e.holds.source(),
                 })).collect::<Vec<_>>(),
                 "max_events": m.max_events,
+                "bindings": m.bindings.iter().map(|b| json!({"key": b.key, "does": m.binding_label(b)})).collect::<Vec<_>>(),
                 "states": m.state_space_size().unwrap_or(0),
                 "initial": state_json(m, &m.initial()),
             }));
@@ -251,8 +287,9 @@ impl App {
             })
             .collect::<Result<_>>()?;
         let detached: Vec<usize> = req.detached.iter().map(|b| m.block_index(b).with_context(|| format!("unknown block {b:?}"))).collect::<Result<_>>()?;
+        let broken: Vec<usize> = req.broken.iter().map(|b| m.block_index(b).with_context(|| format!("unknown block {b:?}"))).collect::<Result<_>>()?;
 
-        let (steps, learned) = steppers(self, m);
+        let (steps, learned) = steppers_with_broken(self, m, &broken);
         let networks = Machine::with_steppers(m, steps);
         let oracle = Machine::oracle(m);
         let input = || TickInput { external: &external, pending: pending.clone(), detached: &detached };

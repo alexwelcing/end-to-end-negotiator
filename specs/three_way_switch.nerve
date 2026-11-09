@@ -20,7 +20,7 @@ transitions:
     # clockwise only: the knob may move only to the next place clockwise
     when: "not clockwise_only or to == ('b' if name == 'r' else 'g' if name == 'b' else 'r')"
     name: "to"
-    emits: { home: "name == 'r' and old.name != 'r'" }   # the knob came back to the top
+    emits: { home: "name == 'r' and old.name != 'r'", turned: "name != old.name" }   # the knob came back to the top; the knob moved
   toggle_clockwise_only: { clockwise_only: "not clockwise_only" }
 ensures:
   # the knob lands where it was dropped, or (clockwise only) stays put

@@ -210,6 +210,13 @@ Each ships in the lab and on the site the day it passes, with its numbers in thi
   solved by its learned hints alone; in 100 further runs a scripted hand sabotages one stage (moves the
   track, flips the gate, moves the meeting back) and the composed oracle's prediction from the dropped
   state is matched at k = 1, 10, 100 ticks. **Falsifier:** any run that needs a line of code to finish.
+- **Status (2026-11-08): done; `docs/machine-room.md` has the engineering.** `machines/light.nerve` is
+  the document: 39 blocks, 65 wires, no code. Prediction 6: the bell rang in 100 of 100 runs (the puzzles
+  scrambled) after 124 to 140 ticks, with zero violations, the composed oracle agreeing at every tick and
+  every puzzle solved by its hints alone; in 100 sabotaged runs it still rang, the oracle's prediction from
+  the dropped state matched exactly 1 and 10 ticks later, and 100 ticks later every block was on the
+  predicted trajectory within a tick of schedule (the stages after the block on tracks one tick off in 93
+  of 95 checks, where the hand's landing left the exit line a margin of one unit; §6).
 
 ### M8. Keys, the editor and the crowd (R5)
 
@@ -218,12 +225,35 @@ Each ships in the lab and on the site the day it passes, with its numbers in thi
 - **Acceptance (Prediction 7, paper 2's board prediction):** runtime and composed oracle agree on
   1,000 replayed input traces of length 50, and every input is answered within the frame; a run edited
   in the textarea to skip to the bell runs on the next tick.
+- **Status (2026-11-08): done; `docs/machine-room.md` has the engineering.** Prediction 7: 1,000 traces
+  of 50 ticks replayed identically and agreed with the composed oracle at every tick, a tick 0.09 ms
+  typically and 0.42 ms at most against the 33.3 ms frame (the faster of two replays; no tick fell back
+  to descent once the slider had a step head); a document edited to start one tick from the bell rings it on the next
+  tick (`crates/nerve/tests/editor.rs`).
 
 ## 6. What could go wrong, and what we do about it
 
 - **Continuous exactness.** Linked sliders sit at 10% within tolerance; the contraption's continuous
   blocks keep one continuous field each (position) plus a small discrete one (speed class), the regime
   that reaches 99.6–100%. A block that needs two coupled continuous fields is split in two.
+  *Open problem (2026-11-08):* a second training of the linked sliders with the step head reached 7%
+  within tolerance, so stage 11 uses the plain continuous slider (which reaches 100%). Why a rule that
+  moves three continuous fields together by one clamped amount is not learned when the same trainer
+  learns the marble's position and speed is not known; it is the first thing to study after the write-up,
+  not routed around and forgotten. *Open problem (2026-11-08), smaller:* the step head undershoots a clamp
+  plateau by about 1% (the tracks network holds 176.7 for 180), so a block held against a clamp for many
+  ticks drifts out of tolerance, and a continuous grab to an arbitrary target lands within tolerance only
+  97.8% (tracks) and 96.7% (marble) of the time; a heavier or L1 head loss, or more epochs, is the first
+  thing to try, and the acceptance runs grab the finite blocks until it is tried.
+- **Prediction across a continuous stage.** The composed oracle predicts a run from any state, given the
+  inputs since. Where the run passes through a continuous stage, the networks' drift (within tolerance at
+  every tick) becomes a whole tick at the stage's threshold: the block on tracks crosses its exit line a
+  pulse early or late, and every stage after it then runs a tick off the oracle's arithmetic while the
+  odometer stays on the tick. *Limit (2026-11-08):* the hundred-tick check of Prediction 6 holds each
+  block to the predicted trajectory within two ticks of schedule (two continuous crossings lie in that
+  window) and the continuous blocks to within a tick of travel, and reports how often a stage ran a tick
+  off; exact prediction at long horizons needs the stages that gate timing to be finite, as the odometer
+  is, or a discrete event to put the clock back in step.
 - **Hints at scale.** Hanoi learned 81 examples perfectly; fifteen has 360, sokoban and Rush Hour fewer.
   If a puzzle's network misses examples, the lab says *misses example* at that move and the machine
   stops there, which is itself a demonstration; the fix is more capacity or the hole-oversampling knob,

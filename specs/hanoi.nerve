@@ -20,6 +20,13 @@ transitions:
     d2: "dst if (1 if d1 == src else 2 if d2 == src else 3 if d3 == src else 4 if d4 == src else 5) == 2 else d2"
     d3: "dst if (1 if d1 == src else 2 if d2 == src else 3 if d3 == src else 4 if d4 == src else 5) == 3 else d3"
     d4: "dst if (1 if d1 == src else 2 if d2 == src else 3 if d3 == src else 4 if d4 == src else 5) == 4 else d4"
+    emits: { solved: "d1 == 2 and d2 == 2 and d3 == 2 and d4 == 2 and not (old.d1 == 2 and old.d2 == 2 and old.d3 == 2 and old.d4 == 2)" }
+  hint:
+    d1: "d1"
+    d2: "d2"
+    d3: "d3"
+    d4: "d4"
+    emits: { solved: "d1 == 2 and d2 == 2 and d3 == 2 and d4 == 2 and not (old.d1 == 2 and old.d2 == 2 and old.d3 == 2 and old.d4 == 2)" }
 ensures:
   - { after: move, holds: "(int(d1 != old.d1) + int(d2 != old.d2) + int(d3 != old.d3) + int(d4 != old.d4)) <= 1 and (d1 == old.d1 or (True)) and (d2 == old.d2 or (old.d1 != old.d2 and old.d1 != d2)) and (d3 == old.d3 or (old.d1 != old.d3 and old.d1 != d3 and old.d2 != old.d3 and old.d2 != d3)) and (d4 == old.d4 or (old.d1 != old.d4 and old.d1 != d4 and old.d2 != old.d4 and old.d2 != d4 and old.d3 != old.d4 and old.d3 != d4))" }
   - { after: hint, holds: "(int(d1 != old.d1) + int(d2 != old.d2) + int(d3 != old.d3) + int(d4 != old.d4)) <= 1 and (d1 == old.d1 or (True)) and (d2 == old.d2 or (old.d1 != old.d2 and old.d1 != d2)) and (d3 == old.d3 or (old.d1 != old.d3 and old.d1 != d3 and old.d2 != old.d3 and old.d2 != d3)) and (d4 == old.d4 or (old.d1 != old.d4 and old.d1 != d4 and old.d2 != old.d4 and old.d2 != d4 and old.d3 != old.d4 and old.d3 != d4))" }   # a hint may only make a legal move

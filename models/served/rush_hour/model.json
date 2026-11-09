@@ -1,10 +1,11 @@
 {
   "spec": "rush_hour",
+  "spec_fingerprint": "8663382719450f40",
   "kind": "finite",
   "candidates": "valid",
   "jepa": {
     "state_dim": 79,
-    "action_dim": 25,
+    "action_dim": 26,
     "d": 64,
     "hidden": 128,
     "ema": 0.99,
@@ -56,8 +57,8 @@
     "hidden": 128,
     "ema": 0.99,
     "tau": 0.1,
-    "holdout": 0.0,
-    "seed": 0,
+    "holdout": 0.15,
+    "seed": 1,
     "hole_weight": 20,
     "negatives": 3,
     "weight_decay": 0.05,
@@ -78,12 +79,12 @@
       "violation_rate": 0.0
     },
     "seen": {
-      "n": 9000,
+      "n": 7634,
       "exact": 1.0,
       "violation_rate": 0.0
     },
     "heldout": {
-      "n": 9000,
+      "n": 1366,
       "exact": 1.0,
       "violation_rate": 0.0
     },
@@ -92,11 +93,25 @@
       "exact": 1.0,
       "violation_rate": 0.0
     },
+    "hole_examples": {
+      "n": 360,
+      "exact": 1.0,
+      "seen": {
+        "n": 297,
+        "exact": 1.0,
+        "violation_rate": 0.0
+      },
+      "heldout": {
+        "n": 63,
+        "exact": 1.0,
+        "violation_rate": 0.0
+      }
+    },
     "score": 1.0,
-    "train_pairs": 9000,
-    "negatives": 26995,
-    "seconds": 935.2,
-    "params": 139684,
+    "train_pairs": 13574,
+    "negatives": 22897,
+    "seconds": 936.4,
+    "params": 139748,
     "trained_on": "cuda"
   }
 }

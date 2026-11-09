@@ -69,7 +69,10 @@ pub fn spec() -> String {
         lines.push(format!("  move_{x}:"));
         lines.extend(ITEMS.iter().map(|&y| format!("    {}: \"{}\"", p(y), update(x, y))));
     }
-    lines.extend(ITEMS.iter().map(|&x| format!("  toggle_{x}: {{ {}: \"not {}\" }}", d(x), d(x))));
+    // Ticking a box emits `all_done` when it completes the last open card (the event a machine can wire).
+    let every_done = ITEMS.iter().map(|&y| d(y)).collect::<Vec<_>>().join(" and ");
+    let every_done_before = ITEMS.iter().map(|&y| format!("old.{}", d(y))).collect::<Vec<_>>().join(" and ");
+    lines.extend(ITEMS.iter().map(|&x| format!("  toggle_{x}: {{ {}: \"not {}\", emits: {{ all_done: \"{every_done} and not ({every_done_before})\" }} }}", d(x), d(x))));
     lines.push(l("invariants:"));
     lines.push(format!("  - \"{}\"", distinct.join(" and ")));
     lines.push(l("ensures:"));

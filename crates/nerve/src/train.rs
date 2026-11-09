@@ -226,6 +226,7 @@ impl Model {
     pub fn save(&self, dir: &Path, t: &TrainConfig, report: &J) -> Result<()> {
         let meta = json!({
             "spec": self.spec.name,
+            "spec_fingerprint": self.spec.fingerprint(),
             "kind": "finite",
             "candidates": self.candidates,
             "jepa": self.jepa.cfg,
@@ -256,7 +257,9 @@ impl Model {
     }
 
     fn from_parts(spec: Spec, meta: J, weights: HashMap<String, Tensor>, dev: &Device, candidates: Option<Candidates>) -> Result<Self> {
+        check_fingerprint(&spec, &meta)?;
         let cfg: JepaConfig = serde_json::from_value(meta["jepa"].clone())?;
+        check_dims(&spec, &cfg)?;
         let saved = match meta.get("candidates") {
             Some(c) => serde_json::from_value(c.clone())?,
             None => Candidates::All,
@@ -268,6 +271,35 @@ impl Model {
         m.meta = Some(meta);
         Ok(m)
     }
+}
+
+/// A checkpoint fits the spec it was trained on. A spec whose fields or actions changed since (a new
+/// action, a parameter's range) still has the same tensor shapes, and a network loaded against it would
+/// answer nonsense without a word, so checkpoints carry the spec's fingerprint and are refused when it
+/// differs. Older checkpoints without one load as before.
+pub(crate) fn check_fingerprint(spec: &Spec, meta: &J) -> Result<()> {
+    if let Some(saved) = meta.get("spec_fingerprint").and_then(J::as_str) {
+        let now = spec.fingerprint();
+        anyhow::ensure!(saved == now, "the checkpoint was trained on a different {} (its fields or actions have changed since); retrain it", spec.name);
+    }
+    Ok(())
+}
+
+/// A checkpoint's encoder sizes fit the spec's: a spec that gained an action or a field has a wider
+/// encoding than the checkpoint knows, and the mismatch would surface as an index error at the first
+/// step of the new action, not at load time, unless it is checked here.
+pub(crate) fn check_dims(spec: &Spec, cfg: &JepaConfig) -> Result<()> {
+    let enc = Encoder::new(spec)?;
+    anyhow::ensure!(
+        cfg.state_dim == enc.state_dim && cfg.action_dim == enc.action_dim(),
+        "the checkpoint was trained on a different {} ({} state and {} action features, now {} and {}); retrain it",
+        spec.name,
+        cfg.state_dim,
+        cfg.action_dim,
+        enc.state_dim,
+        enc.action_dim()
+    );
+    Ok(())
 }
 
 /// What a checkpoint says about its own training, for people looking at the served model:
@@ -340,6 +372,13 @@ pub fn load_learned_from_bytes(spec: Spec, meta_json: &str, weights: &[u8], dev:
 }
 
 impl LearnedEnergy for Model {
+    fn corrupted(&self, seed: u64) -> Result<Option<std::sync::Arc<dyn LearnedEnergy>>> {
+        let Some(meta) = self.meta.clone() else { return Ok(None) };
+        let dev = self.cand.device().clone();
+        let weights = crate::jepa::noisy_weights(&self.jepa, seed, &dev)?;
+        Ok(Some(std::sync::Arc::new(Model::from_parts(self.spec.clone(), meta, weights, &dev, Some(self.candidates))?)))
+    }
+
     /// How far a candidate is from the network's own best guess for this action; staying put costs nothing.
     fn energy(&self, start: &State, action: Option<&ActionInst>, cand: &State) -> Result<f64> {
         let Some(a) = action else { return Ok(0.0) };

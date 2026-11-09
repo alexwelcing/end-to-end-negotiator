@@ -19,6 +19,7 @@ transitions:
     v1: "clamp(v1 + clamp(to - v1, -min(v1, v2, v3), 240 - max(v1, v2, v3)), 0, 240)"
     v2: "clamp(v2 + clamp(to - v1, -min(v1, v2, v3), 240 - max(v1, v2, v3)), 0, 240)"
     v3: "clamp(v3 + clamp(to - v1, -min(v1, v2, v3), 240 - max(v1, v2, v3)), 0, 240)"
+    emits: { at_end: "max(v1, v2, v3) >= 240 and max(old.v1, old.v2, old.v3) < 240" }
   set_2:
     v2: "clamp(v2 + clamp(to - v2, -min(v2, v3), 240 - max(v2, v3)), 0, 240)"
     v3: "clamp(v3 + clamp(to - v2, -min(v2, v3), 240 - max(v2, v3)), 0, 240)"

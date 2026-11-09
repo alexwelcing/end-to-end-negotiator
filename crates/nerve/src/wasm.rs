@@ -45,13 +45,7 @@ impl Room {
 
     /// Adds a machine from its document; its block types must already be added as specs.
     pub fn add_machine(&mut self, text: &str) -> Result<String, JsError> {
-        let spec = {
-            let app = &self.app;
-            MachineSpec::parse(text, &|ty| Ok(app.entry(ty)?.spec.clone())).map_err(js)?
-        };
-        let name = spec.name.clone();
-        self.app.add_machine(MachineEntry { spec, source: text.to_string() });
-        Ok(name)
+        self.app.add_machine_text(text).map_err(js)
     }
 
     /// Whether an interface has a network loaded.

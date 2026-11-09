@@ -1,0 +1,215 @@
+# The Most Complicated Way to Turn On a Light (docs/rube-goldberg.md, §2): twenty stages, thirty-nine
+# blocks, one machine document, no code. A visitor drops the marble; it rolls down its ramp into the block
+# on tracks, which slides to the end and tips the dominoes; the last domino arms the Tower of Hanoi, which
+# solves itself from learned hints, then the sliding puzzle, Sokoban and Rush Hour do the same; the red car
+# drives into the kanban board, whose shipped card ticks the last todo; that starts the negotiation, whose
+# deal moves a meeting into the wrong room; the double booking shoves the linked sliders to the end of their
+# tracks, which turns the switch, which sends the banana back to the toolbar, which rotates the list home,
+# which tips the seesaw, which loads the catapult, which fires into the bucket, which fills on the ninth
+# tick and flips the light on, which rings the bell. The odometer counts every tick along the way.
+#
+# Each stage that needs a beat per tick has a relay: a bool and a pulse. The stage before arms it, the clock
+# ticks it, its pulse drives the stage (a puzzle's `hint`, a counter's `inc`), the stage's completion
+# disarms it. The marble has one too, so the clock drives it only while it rolls: a network's identity is
+# approximate, and a stopped block that is still stepped every tick drifts. Wires carry the spec's canonical
+# values; a `with:` is the document's arithmetic over the whole machine when the event is raised.
+nerve: 1
+machine: light
+blocks:
+  clock: clock
+  marble: marble
+  r_marble: relay
+  r_track: relay
+  track: tracks
+  r_dom: relay
+  dominoes: dominoes
+  r_hanoi: relay
+  hanoi: hanoi
+  r_fifteen: relay
+  fifteen: fifteen
+  r_sokoban: relay
+  sokoban: sokoban
+  r_rush: relay
+  rush: rush_hour
+  r_kanban: relay
+  kanban: kanban
+  todo: todo
+  r_deal: relay
+  deal: negotiate
+  scheduler: scheduler
+  r_sliders: relay
+  sliders: slider_continuous   # the linked sliders' network does not learn its coupled rule (7% within tolerance after two trainings); the plain continuous slider stands in
+  switch: three_way_switch
+  fruit: insert_remove
+  list: reorder
+  d0: digit
+  d1: digit
+  d2: digit
+  d3: digit
+  d4: digit
+  d5: digit
+  seesaw: seesaw
+  r_fire: relay
+  catapult: catapult
+  r_bucket: relay
+  bucket: counter
+  light: toggle
+  bell: bell
+# What the outside world may do: advance the clock, drop the marble. Grabs reach every block through the
+# drag API, as external actions with the value the drag committed to.
+inputs: [clock.advance, marble.drop]
+# Where this machine starts, where it differs from the specs' own initial states: three of the four todos
+# are already done, the list is one move from home, and the bucket waits unarmed.
+initial:
+  todo: {da: true, db: true, dc: true, dd: false}
+  list: {pa: 4, pb: 0, pc: 1, pd: 2, pe: 3}
+  bucket: {count: 0, armed: false}
+wires:
+  # The clock drives the odometer and every relay; the marble's relay drives the marble while it rolls.
+  - { on: clock.tick, do: d0.inc }
+  - { on: d0.wrap, do: d1.inc }
+  - { on: d1.wrap, do: d2.inc }
+  - { on: d2.wrap, do: d3.inc }
+  - { on: d3.wrap, do: d4.inc }
+  - { on: d4.wrap, do: d5.inc }
+  - { on: clock.tick, do: r_marble.tick }
+  - { on: clock.tick, do: r_track.tick }
+  - { on: clock.tick, do: r_dom.tick }
+  - { on: clock.tick, do: r_hanoi.tick }
+  - { on: clock.tick, do: r_fifteen.tick }
+  - { on: clock.tick, do: r_sokoban.tick }
+  - { on: clock.tick, do: r_rush.tick }
+  - { on: clock.tick, do: r_kanban.tick }
+  - { on: clock.tick, do: r_deal.tick }
+  - { on: clock.tick, do: r_sliders.tick }
+  - { on: clock.tick, do: r_fire.tick }
+  - { on: clock.tick, do: r_bucket.tick }
+  # 1: the drop arms the marble's relay, whose pulse rolls the marble a tick at a time; leaving the ramp
+  # disarms it, so a stopped marble is not stepped again (a network's identity is approximate: it would drift).
+  - { on: marble.dropped, do: r_marble.arm }
+  - { on: r_marble.pulse, do: marble.advance }
+  - { on: marble.exit, do: r_marble.disarm }
+  # 1 -> 2: the marble leaves the ramp; the block on tracks slides 7 a tick along whatever track it is on,
+  # to that track's end (the middle track stops at 180, so a block dragged there stalls until someone puts
+  # it back). Seven, not eight, so the block crosses the last stretch's line instead of landing on it.
+  - { on: marble.exit, do: r_track.arm }
+  - { on: r_track.pulse, do: track.move, with: { t: "track.track", to: "min(track.pos + 7, 180 if track.track == 1 else 240)" } }
+  - { on: track.exit, do: r_track.disarm }
+  # 2 -> 3: the dominoes fall one a tick.
+  - { on: track.exit, do: dominoes.tip }
+  - { on: track.exit, do: r_dom.arm }
+  - { on: r_dom.pulse, do: dominoes.advance }
+  - { on: dominoes.last_falls, do: r_dom.disarm }
+  # 3 -> 7: four puzzles solve themselves from learned hints, one move a tick.
+  - { on: dominoes.last_falls, do: r_hanoi.arm }
+  - { on: r_hanoi.pulse, do: hanoi.hint }
+  - { on: hanoi.solved, do: r_hanoi.disarm }
+  - { on: hanoi.solved, do: r_fifteen.arm }
+  - { on: r_fifteen.pulse, do: fifteen.hint }
+  - { on: fifteen.solved, do: r_fifteen.disarm }
+  - { on: fifteen.solved, do: r_sokoban.arm }
+  - { on: r_sokoban.pulse, do: sokoban.hint }
+  - { on: sokoban.solved, do: r_sokoban.disarm }
+  - { on: sokoban.solved, do: r_rush.arm }
+  - { on: r_rush.pulse, do: rush.hint }
+  - { on: rush.escaped, do: r_rush.disarm }
+  # 8: card a crosses the kanban board one column a tick, to the bottom of the next column.
+  - { on: rush.escaped, do: r_kanban.arm }
+  - { on: r_kanban.pulse, do: kanban.move_a, with: { to: "(kanban.sa // 4 + 1) * 4 + int(kanban.sb // 4 == kanban.sa // 4 + 1) + int(kanban.sc // 4 == kanban.sa // 4 + 1) + int(kanban.sd // 4 == kanban.sa // 4 + 1)" } }
+  - { on: kanban.shipped, do: r_kanban.disarm }
+  - { on: kanban.shipped, do: todo.toggle_d }
+  # 9 -> 10: the agents negotiate one move a tick from a learned policy; the deal moves meeting 1 to room 0,
+  # where it overlaps meeting 0.
+  - { on: todo.all_done, do: r_deal.arm }
+  - { on: r_deal.pulse, do: deal.auto }
+  - { on: deal.deal, do: r_deal.disarm }
+  - { on: deal.deal, do: scheduler.set_room1, with: { to: 0 } }
+  # 11 -> 14: the slider steps to the end of its track, the switch turns, the banana goes back to the
+  # toolbar, the list comes home.
+  - { on: scheduler.double_booking, do: r_sliders.arm }
+  - { on: r_sliders.pulse, do: sliders.step_right }
+  - { on: sliders.at_end, do: r_sliders.disarm }
+  - { on: sliders.at_end, do: switch.set, with: { to: "'b'" } }
+  - { on: switch.turned, do: fruit.move_c, with: { to: 4 } }
+  - { on: fruit.shrank, do: list.move, with: { item: "'a'", to: 0 } }
+  # 16 -> 20: the seesaw tips, the catapult loads and fires on the next tick, the bucket counts to nine,
+  # the light comes on, the bell rings.
+  - { on: list.home, do: seesaw.drop_right }
+  - { on: seesaw.tipped_right, do: catapult.load }
+  - { on: seesaw.tipped_right, do: r_fire.arm }
+  - { on: r_fire.pulse, do: catapult.fire }
+  - { on: catapult.launch, do: r_fire.disarm }
+  - { on: catapult.launch, do: bucket.arm }
+  - { on: catapult.launch, do: r_bucket.arm }
+  - { on: r_bucket.pulse, do: bucket.inc }
+  - { on: bucket.full, do: r_bucket.disarm }
+  - { on: bucket.full, do: light.flip }
+  - { on: light.turned_on, do: bell.ring }
+# Keys (paper 2 §5.2): the runtime interprets this table; a bound action's payload is evaluated over the
+# machine when the key is pressed, like a wire's `with:`.
+bindings:
+  Space: marble.drop
+  g: { do: track.move, with: { t: "1 if track.track == 0 else 0", to: "clamp(track.pos, 60, 180) if track.track == 0 else track.pos" } }   # the gate: on or off the middle track, within its reach
+  ArrowLeft: { do: marble.set, with: { to: "max(0, marble.pos - 8)" } }
+  ArrowRight: { do: marble.set, with: { to: "min(239, marble.pos + 8)" } }
+  b: break
+  h: heal
+  r: reset
+derived:
+  ticks: "d0.d + 10 * d1.d + 100 * d2.d + 1000 * d3.d + 10000 * d4.d + 100000 * d5.d"
+  lit: "light.status == 'on'"
+  rang: "bell.rings"
+  stage: "20 if bell.rings > 0 else 19 if light.status == 'on' else 18 if r_bucket.armed else 17 if r_fire.armed or catapult.arm == 'up' else 16 if seesaw.tilt == 'right' else 11 if r_sliders.armed else 9 if r_deal.armed else 8 if r_kanban.armed else 7 if r_rush.armed else 6 if r_sokoban.armed else 5 if r_fifteen.armed else 4 if r_hanoi.armed else 3 if r_dom.armed else 2 if r_track.armed else 1 if marble.rolling else 0"
+ensures:
+  - { after: bell.ring, holds: "light.status == 'on'" }   # the bell rings only once the light is on
+# One scene: four rows, left to right then down, every stage at a size that fits, the odometer and the
+# finale along the bottom.
+place:
+  marble: {x: 0, y: 0}
+  r_marble: {x: 0, y: 20}
+  r_track: {x: 300, y: -20}
+  track: {x: 380, y: -60, scale: 0.6}
+  r_dom: {x: 560, y: -20}
+  dominoes: {x: 600, y: -10}
+  r_hanoi: {x: 880, y: -20}
+  hanoi: {x: 920, y: -45, scale: 0.6}
+  r_fifteen: {x: 0, y: 200}
+  fifteen: {x: 40, y: 200, scale: 0.7}
+  r_sokoban: {x: 220, y: 200}
+  sokoban: {x: 260, y: 200, scale: 0.6}
+  r_rush: {x: 480, y: 200}
+  rush: {x: 520, y: 190, scale: 0.5}
+  r_kanban: {x: 720, y: 200}
+  kanban: {x: 760, y: 200, scale: 0.5}
+  todo: {x: 1000, y: 190, scale: 0.5}
+  r_deal: {x: 0, y: 380}
+  deal: {x: 40, y: 370, scale: 0.7}
+  scheduler: {x: 260, y: 360, scale: 0.4}
+  r_sliders: {x: 440, y: 380}
+  sliders: {x: 480, y: 370, scale: 0.6}
+  switch: {x: 690, y: 360, scale: 0.6}
+  fruit: {x: 830, y: 370, scale: 0.6}
+  list: {x: 1000, y: 380, scale: 0.6}
+  d5: {x: 0, y: 540, scale: 0.6}
+  d4: {x: 40, y: 540, scale: 0.6}
+  d3: {x: 80, y: 540, scale: 0.6}
+  d2: {x: 120, y: 540, scale: 0.6}
+  d1: {x: 160, y: 540, scale: 0.6}
+  d0: {x: 200, y: 540, scale: 0.6}
+  seesaw: {x: 280, y: 540, scale: 0.8}
+  r_fire: {x: 470, y: 560}
+  catapult: {x: 510, y: 520, scale: 0.8}
+  r_bucket: {x: 640, y: 560}
+  bucket: {x: 680, y: 540, scale: 0.8}
+  light: {x: 890, y: 550, scale: 0.8}
+  bell: {x: 1020, y: 520, scale: 0.8}
+  clock: {x: 1140, y: 540, scale: 0.6}
+scene:
+  box: [-40, -110, 1260, 640]
+  shapes:
+    - {label: "THE MOST COMPLICATED WAY TO TURN ON A LIGHT", at: [610, -90], color: ink, size: 2.2}
+    - {label: "thirty-nine blocks, one document, no code", at: [610, -68], color: mute, size: 1.5}
+    - {line: [-20, 150, 1240, 150], color: line, width: 1}
+    - {line: [-20, 340, 1240, 340], color: line, width: 1}
+    - {line: [-20, 500, 1240, 500], color: line, width: 1}
+    - {label: "ticks", at: [120, 612], color: mute, size: 1.5}

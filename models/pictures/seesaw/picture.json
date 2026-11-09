@@ -1,0 +1,39 @@
+{
+  "spec": "seesaw",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 64,
+    "state_dim": 3,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 1000,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 200
+  },
+  "eval": {
+    "n": 3,
+    "mae": 0.012246512187023958,
+    "worst_mae": 0.01313760131597519,
+    "worst_state": "('left',)",
+    "w": 192,
+    "h": 64,
+    "loss": 0.003826982108876109,
+    "seconds": 47.4776159,
+    "trained_on": "cuda",
+    "params": 253115
+  }
+}

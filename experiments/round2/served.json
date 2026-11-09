@@ -1,4 +1,18 @@
 {
+  "bell": {
+    "model": "runs/round2/bell/full-s0/bell",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 20
+  },
+  "catapult": {
+    "model": "runs/round2/catapult/full-s0/catapult",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 12
+  },
   "clock": {
     "model": "runs\\round2\\clock\\full-s0\\clock",
     "seed": 0,
@@ -20,9 +34,16 @@
     "violation_rate": 0.0,
     "cells": 20
   },
+  "dominoes": {
+    "model": "runs/round2/dominoes/full-s2/dominoes",
+    "seed": 2,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 39
+  },
   "fifteen": {
-    "model": "runs\\round2\\fifteen\\full-s0\\fifteen",
-    "seed": 0,
+    "model": "runs/round2/fifteen/full-s1/fifteen",
+    "seed": 1,
     "exact": 1.0,
     "violation_rate": 0.0,
     "cells": 7920
@@ -49,15 +70,22 @@
     "cells": 17280
   },
   "linked_sliders": {
-    "model": "runs\\round2\\linked_sliders\\full-s0\\linked_sliders",
+    "model": "runs/round2/linked_sliders/full-s0/linked_sliders",
     "seed": 0,
     "exact": 0.104,
     "violation_rate": 0.896,
     "cells": 1000
   },
-  "negotiate": {
-    "model": "runs\\round2\\negotiate\\full-s0\\negotiate",
+  "marble": {
+    "model": "runs/round2/marble/full-s0/marble",
     "seed": 0,
+    "exact": 0.985,
+    "violation_rate": 0.0,
+    "cells": 1000
+  },
+  "negotiate": {
+    "model": "runs/round2/negotiate/full-s1/negotiate",
+    "seed": 1,
     "exact": 1.0,
     "violation_rate": 0.0,
     "cells": 2376
@@ -69,6 +97,13 @@
     "violation_rate": 0.0,
     "cells": 1000
   },
+  "relay": {
+    "model": "runs/round2/relay/full-s0/relay",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 6
+  },
   "reorder": {
     "model": "runs\\round2\\reorder\\full-s0\\reorder",
     "seed": 0,
@@ -77,8 +112,8 @@
     "cells": 3000
   },
   "rush_hour": {
-    "model": "runs\\round2\\rush_hour\\full-s0\\rush_hour",
-    "seed": 0,
+    "model": "runs/round2/rush_hour/full-s1/rush_hour",
+    "seed": 1,
     "exact": 1.0,
     "violation_rate": 0.0,
     "cells": 9000
@@ -90,6 +125,13 @@
     "violation_rate": 0.0,
     "cells": 41472
   },
+  "seesaw": {
+    "model": "runs/round2/seesaw/full-s0/seesaw",
+    "seed": 0,
+    "exact": 1.0,
+    "violation_rate": 0.0,
+    "cells": 9
+  },
   "slider": {
     "model": "runs\\round2\\slider\\full-s0\\slider",
     "seed": 0,
@@ -98,15 +140,15 @@
     "cells": 1450
   },
   "slider_continuous": {
-    "model": "runs\\round2\\slider_continuous\\full-s0\\slider_continuous",
-    "seed": 0,
-    "exact": 1.0,
-    "violation_rate": 0.0,
+    "model": "runs/round2/slider_continuous/full-s1/slider_continuous",
+    "seed": 1,
+    "exact": 0.999,
+    "violation_rate": 0.001,
     "cells": 1000
   },
   "sokoban": {
-    "model": "runs\\round2\\sokoban\\full-s0\\sokoban",
-    "seed": 0,
+    "model": "runs/round2/sokoban/full-s2/sokoban",
+    "seed": 2,
     "exact": 1.0,
     "violation_rate": 0.0,
     "cells": 3960
@@ -133,10 +175,10 @@
     "cells": 2
   },
   "tracks": {
-    "model": "runs\\round2\\tracks\\full-s0\\tracks",
-    "seed": 0,
-    "exact": 0.996,
-    "violation_rate": 0.001,
+    "model": "runs/round2/tracks/full-s3/tracks",
+    "seed": 3,
+    "exact": 0.986,
+    "violation_rate": 0.071,
     "cells": 1000
   }
 }

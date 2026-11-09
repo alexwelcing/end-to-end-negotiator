@@ -1,0 +1,39 @@
+{
+  "spec": "bell",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 192,
+    "state_dim": 19,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 1000,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 200
+  },
+  "eval": {
+    "n": 10,
+    "mae": 0.019385264627635478,
+    "worst_mae": 0.019876673817634583,
+    "worst_state": "(3,)",
+    "w": 192,
+    "h": 192,
+    "loss": 0.00826457142829895,
+    "seconds": 135.2355054,
+    "trained_on": "cuda",
+    "params": 651963
+  }
+}

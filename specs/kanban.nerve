@@ -22,24 +22,28 @@ transitions:
     sb: "(sb - 1 if sb // 4 == sa // 4 and sb > sa else sb) + 1 if (sb - 1 if sb // 4 == sa // 4 and sb > sa else sb) // 4 == to // 4 and (sb - 1 if sb // 4 == sa // 4 and sb > sa else sb) >= to else (sb - 1 if sb // 4 == sa // 4 and sb > sa else sb)"
     sc: "(sc - 1 if sc // 4 == sa // 4 and sc > sa else sc) + 1 if (sc - 1 if sc // 4 == sa // 4 and sc > sa else sc) // 4 == to // 4 and (sc - 1 if sc // 4 == sa // 4 and sc > sa else sc) >= to else (sc - 1 if sc // 4 == sa // 4 and sc > sa else sc)"
     sd: "(sd - 1 if sd // 4 == sa // 4 and sd > sa else sd) + 1 if (sd - 1 if sd // 4 == sa // 4 and sd > sa else sd) // 4 == to // 4 and (sd - 1 if sd // 4 == sa // 4 and sd > sa else sd) >= to else (sd - 1 if sd // 4 == sa // 4 and sd > sa else sd)"
+    emits: { shipped: "sa // 4 == 2 and old.sa // 4 != 2" }
   move_b:
     when: "to % 4 <= (int(sa // 4 == to // 4) + int(sc // 4 == to // 4) + int(sd // 4 == to // 4))"
     sa: "(sa - 1 if sa // 4 == sb // 4 and sa > sb else sa) + 1 if (sa - 1 if sa // 4 == sb // 4 and sa > sb else sa) // 4 == to // 4 and (sa - 1 if sa // 4 == sb // 4 and sa > sb else sa) >= to else (sa - 1 if sa // 4 == sb // 4 and sa > sb else sa)"
     sb: "to"
     sc: "(sc - 1 if sc // 4 == sb // 4 and sc > sb else sc) + 1 if (sc - 1 if sc // 4 == sb // 4 and sc > sb else sc) // 4 == to // 4 and (sc - 1 if sc // 4 == sb // 4 and sc > sb else sc) >= to else (sc - 1 if sc // 4 == sb // 4 and sc > sb else sc)"
     sd: "(sd - 1 if sd // 4 == sb // 4 and sd > sb else sd) + 1 if (sd - 1 if sd // 4 == sb // 4 and sd > sb else sd) // 4 == to // 4 and (sd - 1 if sd // 4 == sb // 4 and sd > sb else sd) >= to else (sd - 1 if sd // 4 == sb // 4 and sd > sb else sd)"
+    emits: { shipped: "sb // 4 == 2 and old.sb // 4 != 2" }
   move_c:
     when: "to % 4 <= (int(sa // 4 == to // 4) + int(sb // 4 == to // 4) + int(sd // 4 == to // 4))"
     sa: "(sa - 1 if sa // 4 == sc // 4 and sa > sc else sa) + 1 if (sa - 1 if sa // 4 == sc // 4 and sa > sc else sa) // 4 == to // 4 and (sa - 1 if sa // 4 == sc // 4 and sa > sc else sa) >= to else (sa - 1 if sa // 4 == sc // 4 and sa > sc else sa)"
     sb: "(sb - 1 if sb // 4 == sc // 4 and sb > sc else sb) + 1 if (sb - 1 if sb // 4 == sc // 4 and sb > sc else sb) // 4 == to // 4 and (sb - 1 if sb // 4 == sc // 4 and sb > sc else sb) >= to else (sb - 1 if sb // 4 == sc // 4 and sb > sc else sb)"
     sc: "to"
     sd: "(sd - 1 if sd // 4 == sc // 4 and sd > sc else sd) + 1 if (sd - 1 if sd // 4 == sc // 4 and sd > sc else sd) // 4 == to // 4 and (sd - 1 if sd // 4 == sc // 4 and sd > sc else sd) >= to else (sd - 1 if sd // 4 == sc // 4 and sd > sc else sd)"
+    emits: { shipped: "sc // 4 == 2 and old.sc // 4 != 2" }
   move_d:
     when: "to % 4 <= (int(sa // 4 == to // 4) + int(sb // 4 == to // 4) + int(sc // 4 == to // 4))"
     sa: "(sa - 1 if sa // 4 == sd // 4 and sa > sd else sa) + 1 if (sa - 1 if sa // 4 == sd // 4 and sa > sd else sa) // 4 == to // 4 and (sa - 1 if sa // 4 == sd // 4 and sa > sd else sa) >= to else (sa - 1 if sa // 4 == sd // 4 and sa > sd else sa)"
     sb: "(sb - 1 if sb // 4 == sd // 4 and sb > sd else sb) + 1 if (sb - 1 if sb // 4 == sd // 4 and sb > sd else sb) // 4 == to // 4 and (sb - 1 if sb // 4 == sd // 4 and sb > sd else sb) >= to else (sb - 1 if sb // 4 == sd // 4 and sb > sd else sb)"
     sc: "(sc - 1 if sc // 4 == sd // 4 and sc > sd else sc) + 1 if (sc - 1 if sc // 4 == sd // 4 and sc > sd else sc) // 4 == to // 4 and (sc - 1 if sc // 4 == sd // 4 and sc > sd else sc) >= to else (sc - 1 if sc // 4 == sd // 4 and sc > sd else sc)"
     sd: "to"
+    emits: { shipped: "sd // 4 == 2 and old.sd // 4 != 2" }
 invariants:
   - "sa != sb and sa != sc and sa != sd and sb != sc and sb != sd and sc != sd"
   - "sa % 4 < (int(sa // 4 == sa // 4) + int(sb // 4 == sa // 4) + int(sc // 4 == sa // 4) + int(sd // 4 == sa // 4)) and sb % 4 < (int(sa // 4 == sb // 4) + int(sb // 4 == sb // 4) + int(sc // 4 == sb // 4) + int(sd // 4 == sb // 4)) and sc % 4 < (int(sa // 4 == sc // 4) + int(sb // 4 == sc // 4) + int(sc // 4 == sc // 4) + int(sd // 4 == sc // 4)) and sd % 4 < (int(sa // 4 == sd // 4) + int(sb // 4 == sd // 4) + int(sc // 4 == sd // 4) + int(sd // 4 == sd // 4))"

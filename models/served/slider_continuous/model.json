@@ -1,5 +1,6 @@
 {
   "spec": "slider_continuous",
+  "spec_fingerprint": "d979ed50aaa00d8d",
   "kind": "continuous",
   "jepa": {
     "state_dim": 11,
@@ -25,7 +26,7 @@
     "ema": 0.99,
     "tau": 0.1,
     "holdout": 0.15,
-    "seed": 0,
+    "seed": 1,
     "hole_weight": 20,
     "negatives": 3,
     "weight_decay": 0.05,
@@ -33,7 +34,7 @@
     "fact_weight": 10.0,
     "holdout_salt": "nerve",
     "log_every": 100,
-    "cont_pairs": 8000,
+    "cont_pairs": 4000,
     "cont_negatives": 16,
     "eval_samples": 1000,
     "candidates": "valid",
@@ -42,66 +43,74 @@
   "eval": {
     "all": {
       "n": 1000,
-      "exact": 1.0,
-      "violation_rate": 0.0,
+      "exact": 0.999,
+      "violation_rate": 0.001,
       "per_action": {
         "grab": 1.0,
-        "move": 1.0,
+        "move": 0.9948979591836735,
         "release": 1.0,
         "step_left": 1.0,
         "step_right": 1.0
       },
-      "mean_abs_err_frac": 0.000864305046184088,
+      "mean_abs_err_frac": 0.001025894169720558,
       "tol": 0.01
     },
     "seen": {
       "n": 1000,
-      "exact": 1.0,
-      "violation_rate": 0.0,
+      "exact": 0.999,
+      "violation_rate": 0.001,
       "per_action": {
         "grab": 1.0,
-        "move": 1.0,
+        "move": 0.9948979591836735,
         "release": 1.0,
         "step_left": 1.0,
         "step_right": 1.0
       },
-      "mean_abs_err_frac": 0.000864305046184088,
+      "mean_abs_err_frac": 0.001025894169720558,
       "tol": 0.01
     },
     "heldout": {
       "n": 1000,
-      "exact": 1.0,
-      "violation_rate": 0.0,
+      "exact": 0.999,
+      "violation_rate": 0.001,
       "per_action": {
         "grab": 1.0,
-        "move": 1.0,
+        "move": 0.9948979591836735,
         "release": 1.0,
         "step_left": 1.0,
         "step_right": 1.0
       },
-      "mean_abs_err_frac": 0.000864305046184088,
+      "mean_abs_err_frac": 0.001025894169720558,
       "tol": 0.01
     },
     "learned_only": {
       "n": 1000,
-      "exact": 1.0,
-      "violation_rate": 0.0,
+      "exact": 0.999,
+      "violation_rate": 0.001,
       "per_action": {
         "grab": 1.0,
-        "move": 1.0,
+        "move": 0.9948979591836735,
         "release": 1.0,
         "step_left": 1.0,
         "step_right": 1.0
       },
-      "mean_abs_err_frac": 0.000864305046184088,
+      "mean_abs_err_frac": 0.001025894169720558,
       "tol": 0.01
     },
     "continuous": true,
-    "score": 1.0,
-    "train_pairs": 8000,
-    "negatives": 128000,
-    "seconds": 2323.6,
-    "params": 67968,
+    "score": 0.999,
+    "head": {
+      "n": 1000,
+      "exact": 0.987,
+      "agrees_with_descent": 0.982,
+      "violation_rate": 0.013,
+      "ms_per_step": 0.03362400000000001
+    },
+    "train_pairs": 4000,
+    "negatives": 64000,
+    "seconds": 333.5,
+    "params": 87171,
     "trained_on": "cuda"
-  }
+  },
+  "head": true
 }

@@ -59,6 +59,8 @@ pub fn spec() -> String {
         // the drop position may be at most one past the other cards already in that column
         lines.push(format!("    when: \"to % {DEPTH} <= {}\"", count_in_column(&format!("to // {DEPTH}"), Some(c))));
         lines.extend(CARDS.iter().map(|&x| format!("    {}: \"{}\"", s(x), update(c, x))));
+        // The event a machine can wire: this card reached the last column.
+        lines.push(format!("    emits: {{ shipped: \"{} // {DEPTH} == {} and old.{} // {DEPTH} != {}\" }}", s(c), COLS - 1, s(c), COLS - 1));
     }
     lines.push(l("invariants:"));
     lines.push(format!("  - \"{}\"", distinct.join(" and ")));

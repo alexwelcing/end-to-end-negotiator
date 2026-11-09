@@ -243,6 +243,19 @@ A machine can be one picture. Specs declare `ports:` (the rail's `exit` at `[240
 wires running port to port. The ball machine's rails sit end to end, so the ball leaves one rail's picture
 where the next begins; `crates/nerve/tests/one_scene.rs` finds the ball in the rasters at every hand-off.
 
+`machines/light.nerve` is **The Most Complicated Way to Turn On a Light** (`docs/rube-goldberg.md`): thirty-nine
+blocks, sixty-five wires, one document, no code. Press Space (or drop the marble) in the machine room and the
+marble rolls into the block on tracks, which tips twelve dominoes; the Tower of Hanoi, the sliding puzzle,
+Sokoban and Rush Hour solve themselves from learned hints; the red car drives into the kanban board, whose
+shipped card ticks the last todo; two agents negotiate from a learned policy and their deal moves a meeting
+into the wrong room; the double booking steps a slider to the end of its track, which turns the switch, which
+sends the banana back to the toolbar, which rotates the list home, which tips the seesaw, which loads the
+catapult, which fires into the bucket, which fills on the ninth tick and flips the light on, which rings the
+bell, while the odometer counts the ticks. Twelve `relay` blocks (a bool and a pulse) conduct it, one of them the marble's, so the clock drives it only while it rolls. Keys come
+from the document's `bindings:`; **Break a block** corrupts a random network's weights so the checks can catch
+it; the document is a textarea, and an edited machine runs on the next tick; the runs that rang the bell are
+kept and ranked. `crates/nerve/tests/light_machine.rs`, `replays.rs` and `editor.rs` are its acceptance.
+
 ## Paper
 
 `docs/paper/` holds the manuscript (NeurIPS format, 9 pages + appendix), its sources, the CPU sweep that re-derives

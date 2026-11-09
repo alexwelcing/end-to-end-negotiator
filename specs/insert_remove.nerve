@@ -27,24 +27,28 @@ transitions:
     pb: "(pb - 1 if pa < pb < 4 else pb) + 1 if to <= (pb - 1 if pa < pb < 4 else pb) < 4 else (pb - 1 if pa < pb < 4 else pb)"
     pc: "(pc - 1 if pa < pc < 4 else pc) + 1 if to <= (pc - 1 if pa < pc < 4 else pc) < 4 else (pc - 1 if pa < pc < 4 else pc)"
     pd: "(pd - 1 if pa < pd < 4 else pd) + 1 if to <= (pd - 1 if pa < pd < 4 else pd) < 4 else (pd - 1 if pa < pd < 4 else pd)"
+    emits: { shrank: "(int(pa < 4) + int(pb < 4) + int(pc < 4) + int(pd < 4)) < (int(old.pa < 4) + int(old.pb < 4) + int(old.pc < 4) + int(old.pd < 4))" }
   move_b:
     when: "to == 4 or to <= (int(pa < 4) + int(pc < 4) + int(pd < 4))"
     pa: "(pa - 1 if pb < pa < 4 else pa) + 1 if to <= (pa - 1 if pb < pa < 4 else pa) < 4 else (pa - 1 if pb < pa < 4 else pa)"
     pb: "to"
     pc: "(pc - 1 if pb < pc < 4 else pc) + 1 if to <= (pc - 1 if pb < pc < 4 else pc) < 4 else (pc - 1 if pb < pc < 4 else pc)"
     pd: "(pd - 1 if pb < pd < 4 else pd) + 1 if to <= (pd - 1 if pb < pd < 4 else pd) < 4 else (pd - 1 if pb < pd < 4 else pd)"
+    emits: { shrank: "(int(pa < 4) + int(pb < 4) + int(pc < 4) + int(pd < 4)) < (int(old.pa < 4) + int(old.pb < 4) + int(old.pc < 4) + int(old.pd < 4))" }
   move_c:
     when: "to == 4 or to <= (int(pa < 4) + int(pb < 4) + int(pd < 4))"
     pa: "(pa - 1 if pc < pa < 4 else pa) + 1 if to <= (pa - 1 if pc < pa < 4 else pa) < 4 else (pa - 1 if pc < pa < 4 else pa)"
     pb: "(pb - 1 if pc < pb < 4 else pb) + 1 if to <= (pb - 1 if pc < pb < 4 else pb) < 4 else (pb - 1 if pc < pb < 4 else pb)"
     pc: "to"
     pd: "(pd - 1 if pc < pd < 4 else pd) + 1 if to <= (pd - 1 if pc < pd < 4 else pd) < 4 else (pd - 1 if pc < pd < 4 else pd)"
+    emits: { shrank: "(int(pa < 4) + int(pb < 4) + int(pc < 4) + int(pd < 4)) < (int(old.pa < 4) + int(old.pb < 4) + int(old.pc < 4) + int(old.pd < 4))" }
   move_d:
     when: "to == 4 or to <= (int(pa < 4) + int(pb < 4) + int(pc < 4))"
     pa: "(pa - 1 if pd < pa < 4 else pa) + 1 if to <= (pa - 1 if pd < pa < 4 else pa) < 4 else (pa - 1 if pd < pa < 4 else pa)"
     pb: "(pb - 1 if pd < pb < 4 else pb) + 1 if to <= (pb - 1 if pd < pb < 4 else pb) < 4 else (pb - 1 if pd < pb < 4 else pb)"
     pc: "(pc - 1 if pd < pc < 4 else pc) + 1 if to <= (pc - 1 if pd < pc < 4 else pc) < 4 else (pc - 1 if pd < pc < 4 else pc)"
     pd: "to"
+    emits: { shrank: "(int(pa < 4) + int(pb < 4) + int(pc < 4) + int(pd < 4)) < (int(old.pa < 4) + int(old.pb < 4) + int(old.pc < 4) + int(old.pd < 4))" }
 invariants:
   - "(pa == 4 or pa != pb) and (pa == 4 or pa != pc) and (pa == 4 or pa != pd) and (pb == 4 or pb != pc) and (pb == 4 or pb != pd) and (pc == 4 or pc != pd)"   # no two tiles share an index
   - "(pa == 4 or pa < (int(pa < 4) + int(pb < 4) + int(pc < 4) + int(pd < 4))) and (pb == 4 or pb < (int(pa < 4) + int(pb < 4) + int(pc < 4) + int(pd < 4))) and (pc == 4 or pc < (int(pa < 4) + int(pb < 4) + int(pc < 4) + int(pd < 4))) and (pd == 4 or pd < (int(pa < 4) + int(pb < 4) + int(pc < 4) + int(pd < 4)))"   # the list is packed from index 0

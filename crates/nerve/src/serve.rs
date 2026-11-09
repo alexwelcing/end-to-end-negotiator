@@ -39,6 +39,11 @@ pub trait LearnedEnergy: Send + Sync {
     fn step(&self, _start: &State, _action: &ActionInst) -> Result<Option<State>> {
         Ok(None)
     }
+    /// A copy of this network with its weights corrupted (noise the size of the weights' own spread),
+    /// for "break it": the checks must catch it. `None` when the network cannot copy itself.
+    fn corrupted(&self, _seed: u64) -> Result<Option<Arc<dyn LearnedEnergy>>> {
+        Ok(None)
+    }
 }
 
 pub struct Entry {
@@ -62,9 +67,12 @@ struct Session {
 
 pub struct App {
     specs: Vec<Entry>,
-    machines: Vec<MachineEntry>,
+    /// The machines, behind a lock so a document edited in the page can replace one while the lab runs.
+    machines: std::sync::RwLock<Vec<Arc<MachineEntry>>>,
     sessions: Mutex<HashMap<String, Session>>,
     counter: Mutex<u64>,
+    /// Corrupted copies of the served networks, by spec name, made on first demand for "break it".
+    corrupted: Mutex<HashMap<String, Arc<dyn LearnedEnergy>>>,
     /// Weight of the learned term relative to the pixel gap.
     pub lambda: f64,
 }
@@ -124,13 +132,37 @@ impl FieldReq {
 
 impl App {
     pub fn new(specs: Vec<Entry>, lambda: f64) -> Self {
-        Self { specs, machines: Vec::new(), sessions: Mutex::new(HashMap::new()), counter: Mutex::new(0), lambda }
+        Self { specs, machines: std::sync::RwLock::new(Vec::new()), sessions: Mutex::new(HashMap::new()), counter: Mutex::new(0), corrupted: Mutex::new(HashMap::new()), lambda }
+    }
+
+    /// A corrupted copy of a spec's served network ("break it"): the same architecture with noise the
+    /// size of the weights added, so its answers are wrong and the checks must say so. Made once per
+    /// spec; `None` when the spec has no network or the network cannot copy itself.
+    pub fn corrupted(&self, spec: &str) -> Option<Arc<dyn LearnedEnergy>> {
+        if let Some(c) = self.corrupted.lock().ok()?.get(spec) {
+            return Some(c.clone());
+        }
+        let seed = spec.bytes().fold(0xB0_B5u64, |h, b| h.wrapping_mul(131).wrapping_add(u64::from(b)));
+        let made = self.entry(spec).ok()?.model.as_ref()?.corrupted(seed).ok()??;
+        self.corrupted.lock().ok()?.insert(spec.to_string(), made.clone());
+        Some(made)
     }
 
     /// The machines the lab serves alongside the single interfaces (see `machine_api`).
-    pub fn with_machines(mut self, machines: Vec<MachineEntry>) -> Self {
-        self.machines = machines;
+    pub fn with_machines(self, machines: Vec<MachineEntry>) -> Self {
+        for m in machines {
+            self.add_machine(m);
+        }
         self
+    }
+
+    /// Adds a machine from its document text, replacing one of the same name; its block types must be
+    /// interfaces this lab serves. The page's document editor and the browser build's `Room` use it.
+    pub fn add_machine_text(&self, text: &str) -> Result<String> {
+        let spec = crate::machine::MachineSpec::parse(text, &|ty| Ok(self.entry(ty)?.spec.clone()))?;
+        let name = spec.name.clone();
+        self.add_machine(MachineEntry { spec, source: text.to_string() });
+        Ok(name)
     }
 
     /// Adds an interface, replacing one of the same name.
@@ -154,9 +186,10 @@ impl App {
     }
 
     /// Adds a machine, replacing one of the same name.
-    pub fn add_machine(&mut self, m: MachineEntry) {
-        self.machines.retain(|x| x.spec.name != m.spec.name);
-        self.machines.push(m);
+    pub fn add_machine(&self, m: MachineEntry) {
+        let mut machines = self.machines.write().unwrap_or_else(|e| e.into_inner());
+        machines.retain(|x| x.spec.name != m.spec.name);
+        machines.push(Arc::new(m));
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -167,12 +200,12 @@ impl App {
         self.specs.iter().find(|e| e.spec.name == name).with_context(|| format!("unknown spec {name:?}"))
     }
 
-    pub fn machines(&self) -> &[MachineEntry] {
-        &self.machines
+    pub fn machines(&self) -> Vec<Arc<MachineEntry>> {
+        self.machines.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    pub fn machine(&self, name: &str) -> Result<&MachineEntry> {
-        self.machines.iter().find(|m| m.spec.name == name).with_context(|| format!("unknown machine {name:?}"))
+    pub fn machine(&self, name: &str) -> Result<Arc<MachineEntry>> {
+        self.machines.read().unwrap_or_else(|e| e.into_inner()).iter().find(|m| m.spec.name == name).cloned().with_context(|| format!("unknown machine {name:?}"))
     }
 
     fn energy_fn(&self, entry: &Entry) -> Option<Box<crate::drag::EnergyFn<'_>>> {
@@ -199,7 +232,11 @@ impl App {
         }
         Ok(match parts.as_slice() {
             ["api", "specs"] => self.list_specs(),
-            ["api", "machines"] => self.machines_json(),
+            // The listing; or, with a document in the body, a machine added from it (the editor).
+            ["api", "machines"] => match body.get("source").and_then(J::as_str) {
+                Some(src) => json!({"name": self.add_machine_text(src)?}),
+                None => self.machines_json(),
+            },
             ["api", "drag", sid, "frame"] => {
                 let r: PointReq = parse(body)?;
                 self.drag_frame(sid, (r.x, r.y))?
@@ -209,6 +246,7 @@ impl App {
                 self.drag_release(sid, (r.x, r.y))?
             }
             ["api", "machine", name, "backdrop"] => self.machine_backdrop(name)?,
+            ["api", "machine", name, "binding"] => self.machine_binding(name, &parse(body)?)?,
             ["api", "machine", name, "view"] => {
                 let r: ViewReq = parse(body)?;
                 self.machine_view(name, &r.state)?
@@ -628,8 +666,9 @@ mod http {
             .route("/", get(|| async { Html(INDEX) }))
             .route("/machine", get(|| async { Html(MACHINE_PAGE) }))
             .route("/api/specs", get(list_specs))
-            .route("/api/machines", get(list_machines))
+            .route("/api/machines", get(list_machines).post(add_machine))
             .route("/api/machine/{name}/backdrop", get(machine_backdrop))
+            .route("/api/machine/{name}/binding", post(machine_binding))
             .route("/api/machine/{name}/view", post(machine_view))
             .route("/api/machine/{name}/tick", post(machine_tick))
             .route("/api/{spec}/view", post(view))
@@ -686,6 +725,19 @@ mod http {
 
     async fn machine_backdrop(AxState(app): S, Path(name): Path<String>) -> ApiResult {
         Ok(Json(app.machine_backdrop(&name)?))
+    }
+
+    #[derive(Deserialize)]
+    struct DocumentReq {
+        source: String,
+    }
+
+    async fn add_machine(AxState(app): S, Json(req): Json<DocumentReq>) -> ApiResult {
+        Ok(Json(json!({"name": app.add_machine_text(&req.source)?})))
+    }
+
+    async fn machine_binding(AxState(app): S, Path(name): Path<String>, Json(req): Json<crate::machine_api::BindingReq>) -> ApiResult {
+        Ok(Json(app.machine_binding(&name, &req)?))
     }
 
     async fn machine_tick(AxState(app): S, Path(name): Path<String>, Json(req): Json<TickReq>) -> ApiResult {

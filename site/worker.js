@@ -71,7 +71,7 @@ export class MachineRoom {
   }
 
   fresh(machine) {
-    return { machine, tick: 0, state: this.core.listing.initial, pending: [], running: false, rate: 6, holds: {}, stats: { ticks: 0, agree: 0, viol: 0, ms: 0 }, stopped: null };
+    return { machine, tick: 0, state: this.core.listing.initial, pending: [], running: false, rate: 6, holds: {}, broken: [], stats: { ticks: 0, agree: 0, viol: 0, ms: 0 }, stopped: null };
   }
 
   /** The core and the snapshot, after a cold start or a wake from hibernation. */
@@ -104,7 +104,7 @@ export class MachineRoom {
   }
 
   status() {
-    return { type: "status", running: this.snap.running, rate: this.snap.rate, holds: this.snap.holds, viewers: this.viewers(), tick: this.snap.tick, stats: this.snap.stats };
+    return { type: "status", running: this.snap.running, rate: this.snap.rate, holds: this.snap.holds, broken: this.snap.broken || [], hands: this.snap.hands || 0, viewers: this.viewers(), tick: this.snap.tick, stats: this.snap.stats };
   }
 
   async fetch(request) {
@@ -138,7 +138,7 @@ export class MachineRoom {
   async tick(external = driveInputs(this.core.listing)) {
     const detached = [...new Set(Object.values(this.snap.holds))];
     const t0 = Date.now();
-    const r = JSON.parse(this.core.room.call(`/api/machine/${this.snap.machine}/tick`, JSON.stringify({ state: this.snap.state, external, pending: this.snap.pending, detached })));
+    const r = JSON.parse(this.core.room.call(`/api/machine/${this.snap.machine}/tick`, JSON.stringify({ state: this.snap.state, external, pending: this.snap.pending, detached, broken: this.snap.broken || [] })));
     r.ms = Date.now() - t0;
     const s = this.snap;
     s.tick += 1;
@@ -154,7 +154,7 @@ export class MachineRoom {
       s.stopped = { tick: s.tick, steps: r.steps, violations: r.violations, agrees: r.agrees };
     }
     await this.save();
-    this.broadcast({ type: "tick", tick: s.tick, running: s.running, holds: s.holds, stats: s.stats, viewers: this.viewers(), ...r });
+    this.broadcast({ type: "tick", tick: s.tick, running: s.running, holds: s.holds, broken: s.broken || [], hands: s.hands || 0, stats: s.stats, viewers: this.viewers(), ...r });
   }
 
   async alarm() {
@@ -186,6 +186,8 @@ export class MachineRoom {
       return;
     }
     const s = this.snap;
+    // The room's scoreboard counts every hand on the machine: grabs, keys and the input buttons.
+    if (["grab", "key", "external"].includes(msg.type)) s.hands = (s.hands || 0) + 1;
     switch (msg.type) {
       case "run":
         s.running = true;
@@ -211,6 +213,33 @@ export class MachineRoom {
           break;
         }
         await this.tick([{ block, action, params: {} }]);
+        break;
+      }
+      case "break": {
+        // A visitor breaks a random networked block: its network runs as a corrupted copy from now on.
+        const can = this.core.listing.blocks.filter((b) => b.network && !(s.broken || []).includes(b.instance)).map((b) => b.instance);
+        if (can.length) {
+          s.broken = [...(s.broken || []), can[Math.floor(Math.random() * can.length)]];
+          await this.ctx.storage.put("snap", s);
+        }
+        this.broadcast(this.status());
+        break;
+      }
+      case "heal":
+        s.broken = [];
+        s.stopped = null;
+        await this.ctx.storage.put("snap", s);
+        this.broadcast(this.status());
+        break;
+      case "key": {
+        // A key as the machine document binds it, resolved by the core over the room's state right now.
+        const r = JSON.parse(this.core.room.call(`/api/machine/${s.machine}/binding`, JSON.stringify({ state: s.state, key: String(msg.key) })));
+        if (!r) break;
+        if (r.verb) {
+          await this.webSocketMessage(ws, JSON.stringify({ type: r.verb }));
+          break;
+        }
+        await this.tick([{ block: r.block, action: r.action, params: r.params }]);
         break;
       }
       case "rate":

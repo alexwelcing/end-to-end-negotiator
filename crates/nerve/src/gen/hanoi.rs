@@ -113,6 +113,14 @@ pub fn spec() -> String {
     lines.push(l("  move:"));
     lines.push(format!("    when: \"{} < {NONE} and {} < {}\"", top_expr("src"), top_expr("src"), top_expr("dst")));
     lines.extend((1..=DISKS).map(|k| format!("    {}: \"dst if {} == {k} else {}\"", f(k), top_expr("src"), f(k))));
+    // The event a machine can wire: the last disk reached the right peg. `hint` has a transition of its
+    // own (the identity, which the learned hole overrides where it has an example) so it can emit it too.
+    let solved = (1..=DISKS).map(|k| format!("{} == {}", f(k), PEGS - 1)).collect::<Vec<_>>().join(" and ");
+    let solved_before = (1..=DISKS).map(|k| format!("old.{} == {}", f(k), PEGS - 1)).collect::<Vec<_>>().join(" and ");
+    lines.push(format!("    emits: {{ solved: \"{solved} and not ({solved_before})\" }}"));
+    lines.push(l("  hint:"));
+    lines.extend((1..=DISKS).map(|k| format!("    {}: \"{}\"", f(k), f(k))));
+    lines.push(format!("    emits: {{ solved: \"{solved} and not ({solved_before})\" }}"));
     lines.push(l("ensures:"));
     lines.push(format!("  - {{ after: move, holds: \"{}\" }}", legal_single_move()));
     lines.push(format!("  - {{ after: hint, holds: \"{}\" }}   # a hint may only make a legal move", legal_single_move()));

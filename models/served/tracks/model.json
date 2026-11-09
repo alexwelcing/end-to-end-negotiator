@@ -1,5 +1,6 @@
 {
   "spec": "tracks",
+  "spec_fingerprint": "2915bfaf673b001f",
   "kind": "continuous",
   "jepa": {
     "state_dim": 21,
@@ -25,7 +26,7 @@
     "ema": 0.99,
     "tau": 0.1,
     "holdout": 0.15,
-    "seed": 0,
+    "seed": 3,
     "hole_weight": 20,
     "negatives": 3,
     "weight_decay": 0.05,
@@ -42,50 +43,58 @@
   "eval": {
     "all": {
       "n": 1000,
-      "exact": 0.996,
-      "violation_rate": 0.001,
+      "exact": 0.986,
+      "violation_rate": 0.071,
       "per_action": {
-        "move": 0.996
+        "move": 0.986
       },
-      "mean_abs_err_frac": 0.002821284962937719,
+      "mean_abs_err_frac": 0.002049194588804797,
       "tol": 0.01
     },
     "seen": {
       "n": 1000,
-      "exact": 0.996,
-      "violation_rate": 0.001,
+      "exact": 0.986,
+      "violation_rate": 0.071,
       "per_action": {
-        "move": 0.996
+        "move": 0.986
       },
-      "mean_abs_err_frac": 0.002821284962937719,
+      "mean_abs_err_frac": 0.002049194588804797,
       "tol": 0.01
     },
     "heldout": {
       "n": 1000,
-      "exact": 0.996,
-      "violation_rate": 0.001,
+      "exact": 0.986,
+      "violation_rate": 0.071,
       "per_action": {
-        "move": 0.996
+        "move": 0.986
       },
-      "mean_abs_err_frac": 0.002821284962937719,
+      "mean_abs_err_frac": 0.002049194588804797,
       "tol": 0.01
     },
     "learned_only": {
       "n": 1000,
-      "exact": 0.996,
-      "violation_rate": 0.001,
+      "exact": 0.986,
+      "violation_rate": 0.071,
       "per_action": {
-        "move": 0.996
+        "move": 0.986
       },
-      "mean_abs_err_frac": 0.002821284962937719,
+      "mean_abs_err_frac": 0.002049194588804797,
       "tol": 0.01
     },
     "continuous": true,
-    "score": 0.9966,
+    "score": 0.9746,
+    "head": {
+      "n": 1000,
+      "exact": 0.983,
+      "agrees_with_descent": 0.986,
+      "violation_rate": 0.089,
+      "ms_per_step": 0.04198850000000006
+    },
     "train_pairs": 8000,
     "negatives": 128000,
-    "seconds": 2388.8,
-    "params": 69120,
+    "seconds": 2659.4,
+    "params": 89476,
     "trained_on": "cuda"
-  }
+  },
+  "head": true
 }

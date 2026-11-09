@@ -22,3 +22,6 @@ docs/paper2/fig_cost.tex
 /target-cuda/
 /site/dist/
 /target-cuda2/
+
+# the agents' worktrees
+/.claude/worktrees/

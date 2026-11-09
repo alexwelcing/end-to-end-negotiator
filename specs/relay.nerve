@@ -1,0 +1,31 @@
+# The conductor of the Rube Goldberg machine (docs/rube-goldberg.md): a bool and a pulse, and nothing
+# else. A stage's event arms it, the clock ticks it, and while it is armed every tick emits `pulse`,
+# which the machine document wires to the next stage's action (a puzzle's `hint`, a counter's `inc`);
+# the stage's own completion disarms it. The only new block whose job is plumbing.
+nerve: 1
+name: relay
+state:
+  armed: {type: bool}
+actions:
+  arm: {}
+  disarm: {}
+  tick: {}
+transitions:
+  arm: { armed: "True" }
+  disarm: { armed: "False" }
+  tick: { armed: "armed", emits: { pulse: "armed" } }   # a tick changes nothing; an armed relay pulses
+ensures:
+  - { after: tick, holds: "armed == old.armed" }
+scene:
+  box: [0, 0, 60, 40]
+  shapes:
+    - {rect: [30, 20, 54, 30], r: 6, color: panel, stroke: line, width: 1.5}
+    - {label: relay, at: [38, 20], color: mute, size: 1.4}
+ports:
+  arm: [0, 20]
+  disarm: [30, 0]
+  tick: [30, 40]
+  pulse: [60, 20]
+render:
+  lamp: { x: 16, y: 20, shapes: [{circle: [0, 0, 6], color: ok, when: armed}, {circle: [0, 0, 6], color: none, stroke: line, width: 1.5, when: "not armed"}] }
+initial: {armed: false}

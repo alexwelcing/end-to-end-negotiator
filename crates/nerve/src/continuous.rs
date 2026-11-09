@@ -290,21 +290,22 @@ impl ContinuousModel {
     /// discrete guess can be wrong, and a wrong guess must not leave the block. Networks saved
     /// without a head step by descent alone.
     pub fn step(&self, s: &State, a: &ActionInst) -> Result<State> {
-        if !self.head_trained {
-            return self.step_descent(s, a);
-        }
         let oracle = Oracle::new(&self.spec);
-        let fast = self.step_head(s, a)?;
-        if oracle.violations(s, Some(a), &fast, TOLERANCE).is_empty() {
-            return Ok(fast);
+        if self.head_trained {
+            let fast = self.step_head(s, a)?;
+            if oracle.violations(s, Some(a), &fast, TOLERANCE).is_empty() {
+                return Ok(fast);
+            }
         }
+        // Descent's answers in energy order, the first the spec accepts (its best regardless when it
+        // accepts none): the same rule for a network without a head and for a head the spec rejected.
         let (best, mut all) = self.step_all(s, a)?;
         all.sort_by(|x, y| x.1.total_cmp(&y.1));
         Ok(all.into_iter().map(|(st, _)| st).find(|st| oracle.violations(s, Some(a), st, TOLERANCE).is_empty()).unwrap_or(best))
     }
 
     pub fn save(&self, dir: &Path, t: &TrainConfig, report: &J) -> Result<()> {
-        save_checkpoint(dir, &self.jepa, json!({"spec": self.spec.name, "kind": "continuous", "jepa": self.jepa.cfg, "train": t, "eval": report, "head": self.head_trained}))
+        save_checkpoint(dir, &self.jepa, json!({"spec": self.spec.name, "spec_fingerprint": self.spec.fingerprint(), "kind": "continuous", "jepa": self.jepa.cfg, "train": t, "eval": report, "head": self.head_trained}))
     }
 
     pub fn load(spec: Spec, dir: &Path, dev: &Device) -> Result<Self> {
@@ -322,7 +323,9 @@ impl ContinuousModel {
     /// A checkpoint from before the head has no `head.*` tensors: it loads, and steps by descent.
     fn from_parts(spec: Spec, meta: J, weights: std::collections::HashMap<String, Tensor>, dev: &Device) -> Result<Self> {
         ensure!(meta["kind"] == "continuous", "the checkpoint does not hold a continuous model");
+        crate::train::check_fingerprint(&spec, &meta)?;
         let cfg: JepaConfig = serde_json::from_value(meta["jepa"].clone())?;
+        crate::train::check_dims(&spec, &cfg)?;
         let mut m = Self::new(spec, cfg, dev)?;
         let mut head_found = 0;
         for (name, var, _) in &m.jepa.store.vars {
@@ -342,6 +345,18 @@ impl ContinuousModel {
 }
 
 impl LearnedEnergy for ContinuousModel {
+    fn corrupted(&self, seed: u64) -> Result<Option<std::sync::Arc<dyn LearnedEnergy>>> {
+        let dev = self.device().clone();
+        let noisy = crate::jepa::noisy_weights(&self.jepa, seed, &dev)?;
+        let m = self.on_device(&dev)?;
+        for (name, var, _) in &m.jepa.store.vars {
+            if let Some(w) = noisy.get(name) {
+                var.set(w)?;
+            }
+        }
+        Ok(Some(std::sync::Arc::new(m)))
+    }
+
     /// How surprised the network is by `cand` as the successor of `start -action->`: one forward
     /// pass, no descent, so a drag can afford it for every probe. Staying put costs nothing.
     fn energy(&self, start: &State, action: Option<&ActionInst>, cand: &State) -> Result<f64> {
@@ -637,7 +652,8 @@ mod tests {
         let m = ContinuousModel::new(sp.clone(), ContinuousModel::config_for(&sp, &small())?, &Device::Cpu)?;
         let s = sp.state_from_json(&json!({"track": 2, "pos": 150.0}))?;
         let want = m.enc.state(&sp, &s)?;
-        let u = Tensor::new(&[[150f32 / 240.0]], &Device::Cpu)?;
+        let (lo, hi) = sp.fields[1].range();
+        let u = Tensor::new(&[[((150.0 - lo) / (hi - lo)) as f32]], &Device::Cpu)?;
         let combo = m.combos.iter().position(|c| c[0] == Value::Int(2)).unwrap() as u32;
         let row = Tensor::new(&[combo], &Device::Cpu)?;
         let mut parts = vec![m.disc.index_select(&row, 0)?, cont_features(&u)?];
@@ -680,7 +696,8 @@ mod tests {
         m.save(&dir, &cfg, &report)?;
         let back = ContinuousModel::load(sp.clone(), &dir, &Device::Cpu)?;
         assert!(back.head_trained);
-        assert_eq!(back.step(&s, &a)?, fast, "the fast path round-trips");
+        assert_eq!(back.step_head(&s, &a)?, fast, "the fast path round-trips");
+        assert_eq!(back.step(&s, &a)?, m.step(&s, &a)?, "the checked step round-trips");
         assert_eq!(back.step_descent(&s, &a)?, pred);
         assert_eq!(back.energy(&s, Some(&a), &pred)?, m.energy(&s, Some(&a), &pred)?);
         assert!(crate::train::load_learned(sp, &dir, &Device::Cpu)?.describe()["kind"] == "jepa-continuous");

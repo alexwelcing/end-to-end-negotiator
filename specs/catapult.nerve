@@ -1,0 +1,32 @@
+# A catapult (docs/rube-goldberg.md, stage 17). `load` puts a marble in the cup; `fire` throws it, the arm
+# snaps up and `launch` fires; `reset` lowers the arm.
+nerve: 1
+name: catapult
+state:
+  loaded: {type: bool}
+  arm: {type: enum, values: [down, up]}
+actions:
+  load: {}
+  fire: {}
+  reset: {}
+transitions:
+  load: { loaded: "True" }
+  fire: { when: loaded, loaded: "False", arm: "'up'", emits: { launch: "True" } }
+  reset: { arm: "'down'", loaded: "False" }
+ensures:
+  - { after: fire, holds: "not old.loaded or (not loaded and arm == 'up')" }
+  - { after: fire, holds: "old.loaded or (loaded == old.loaded and arm == old.arm)" }
+scene:
+  box: [0, 0, 120, 100]
+  shapes:
+    - {rect: [40, 88, 70, 14], r: 3, color: line}
+    - {rect: [36, 78, 8, 16], r: 2, color: line}
+    - {line: [30, 80, 100, 70], color: track, width: 6, when: "arm == 'down'"}
+    - {line: [30, 80, 60, 10], color: track, width: 6, when: "arm == 'up'"}
+ports:
+  load: [0, 70]
+  fire: [60, 100]
+  launch: [100, 0]
+render:
+  cup: { x: "100 if arm == 'down' else 60", y: "62 if arm == 'down' else 2", shape: {circle: [0, 0, 8], color: f1, stroke: ink, width: 1.5, when: loaded} }
+initial: {loaded: false, arm: down}

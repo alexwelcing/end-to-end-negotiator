@@ -90,6 +90,28 @@ pub fn run(base: &str) -> Result<()> {
     }
     println!("{TICKS} ticks agree with the composed oracle; wires fired: {}", fired.iter().cloned().collect::<Vec<_>>().join(", "));
     ensure!(!fired.is_empty(), "no wire fired");
+
+    // The light machine, when the lab serves it: every block networked, the keys bound, a backdrop, and
+    // sixty ticks from the drop within tolerance of the composed oracle.
+    if let Some(light) = machines.as_array().and_then(|ms| ms.iter().find(|m| m["name"] == "light")) {
+        let blocks = light["blocks"].as_array().cloned().unwrap_or_default();
+        let unnetworked: Vec<&str> = blocks.iter().filter(|b| !b["network"].as_bool().unwrap_or(false)).filter_map(|b| b["instance"].as_str()).collect();
+        ensure!(unnetworked.is_empty(), "light blocks without a network: {}", unnetworked.join(", "));
+        ensure!(light["bindings"].as_array().is_some_and(|b| !b.is_empty()), "the light machine binds no keys");
+        let bd = http(base, "GET", "/api/machine/light/backdrop", None)?;
+        ensure!(bd["w"].as_u64().is_some() && bd["rgb"].is_string(), "no backdrop for the light machine");
+        let mut state = http(base, "POST", "/api/machine/light/tick", Some(&json!({"state": light["initial"], "external": [{"block": "marble", "action": "drop", "params": {}}]})))?["state"].clone();
+        let mut ms = 0.0;
+        for i in 0..60 {
+            let t = http(base, "POST", "/api/machine/light/tick", Some(&json!({"state": state, "external": advance})))?;
+            ensure!(t["agrees"].as_bool() == Some(true), "light tick {}: the networks disagree with the composed oracle: {}", i + 1, t["steps"]);
+            ensure!(t["violations"].as_array().is_some_and(Vec::is_empty), "light tick {}: {}", i + 1, t["violations"]);
+            ms += t["ms"].as_f64().unwrap_or(0.0);
+            state = t["state"].clone();
+        }
+        let v = http(base, "POST", "/api/machine/light/view", Some(&json!({"state": state})))?;
+        println!("light: {} blocks, 60 ticks from the drop within tolerance of the composed oracle, {:.1} ms per tick, at stage {}", blocks.len(), ms / 60.0, v["derived"]["stage"]);
+    }
     println!("smoke ok");
     Ok(())
 }

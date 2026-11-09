@@ -73,6 +73,12 @@ pub fn spec() -> String {
     for i in 0..N {
         lines.push(format!("  set_{}:", i + 1));
         lines.extend(group(i).iter().map(|w| format!("    {w}: \"clamp({w} + {}, 0, {W})\"", delta(i))));
+        if i == 0 {
+            // The event a machine can wire: the whole group has just reached the right end of its tracks.
+            let all = group(0).join(", ");
+            let all_before = group(0).iter().map(|w| format!("old.{w}")).collect::<Vec<_>>().join(", ");
+            lines.push(format!("    emits: {{ at_end: \"max({all}) >= {W} and max({all_before}) < {W}\" }}"));
+        }
     }
     lines.push(l("invariants:"));
     lines.push(format!("  - \"{}\"", on_tracks.join(" and ")));

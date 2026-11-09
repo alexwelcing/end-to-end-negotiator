@@ -20,7 +20,7 @@ transitions:
     when: rolling
     pos: "pos + 8"
     rolling: "pos + 8 < 240"
-    emits: { exit: "pos >= 240 and old.pos < 240" }
+    emits: { exit: "old.rolling and not rolling" }   # the ball left the rail: a discrete flip, which the checks compare exactly
   set: { when: rolling, pos: "clamp(to, 0, 239)" }   # a hand can move the ball, never off the rail
 invariants:
   - "0 <= pos <= 248"

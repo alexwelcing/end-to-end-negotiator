@@ -1,10 +1,11 @@
 {
   "spec": "negotiate",
+  "spec_fingerprint": "30ac212cfae8095f",
   "kind": "finite",
   "candidates": "valid",
   "jepa": {
     "state_dim": 42,
-    "action_dim": 11,
+    "action_dim": 12,
     "d": 64,
     "hidden": 128,
     "ema": 0.99,
@@ -51,8 +52,8 @@
     "hidden": 128,
     "ema": 0.99,
     "tau": 0.1,
-    "holdout": 0.0,
-    "seed": 0,
+    "holdout": 0.15,
+    "seed": 1,
     "hole_weight": 20,
     "negatives": 3,
     "weight_decay": 0.05,
@@ -73,12 +74,12 @@
       "violation_rate": 0.0
     },
     "seen": {
-      "n": 2376,
+      "n": 2009,
       "exact": 1.0,
       "violation_rate": 0.0
     },
     "heldout": {
-      "n": 2376,
+      "n": 367,
       "exact": 1.0,
       "violation_rate": 0.0
     },
@@ -87,11 +88,25 @@
       "exact": 1.0,
       "violation_rate": 0.0
     },
+    "hole_examples": {
+      "n": 216,
+      "exact": 1.0,
+      "seen": {
+        "n": 181,
+        "exact": 1.0,
+        "violation_rate": 0.0
+      },
+      "heldout": {
+        "n": 35,
+        "exact": 1.0,
+        "violation_rate": 0.0
+      }
+    },
     "score": 1.0,
-    "train_pairs": 2376,
-    "negatives": 7098,
-    "seconds": 669.5,
-    "params": 109746,
+    "train_pairs": 5629,
+    "negatives": 5994,
+    "seconds": 1387.9,
+    "params": 109810,
     "trained_on": "cuda"
   }
 }

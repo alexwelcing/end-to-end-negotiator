@@ -107,6 +107,9 @@ pub fn spec() -> String {
         // an insert index may be at most the length of the list without this tile
         lines.push(format!("    when: \"to == {OUT} or to <= {}\"", in_list_count(Some(t))));
         lines.extend(TILES.iter().map(|&x| format!("    {}: \"{}\"", p(x), update(t, x))));
+        // The event a machine can wire: a tile went back to the toolbar and the list got shorter.
+        let before: Vec<String> = TILES.iter().map(|&x| format!("int(old.{} < {OUT})", p(x))).collect();
+        lines.push(format!("    emits: {{ shrank: \"{} < ({})\" }}", in_list_count(None), before.join(" + ")));
     }
     lines.push(l("invariants:"));
     lines.push(format!("  - \"{}\"   # no two tiles share an index", distinct.join(" and ")));

@@ -11,7 +11,7 @@ actions:
   set: {params: {to: {type: int, range: [0, 9]}}}
   nudge: {}          # behaviour given only by examples (see `learn`)
 transitions:
-  inc: { when: "armed", count: "min(count + 1, 9)" }
+  inc: { when: "armed", count: "min(count + 1, 9)", emits: { full: "count == 9 and old.count == 8" } }   # the bucket fills on the ninth
   dec: { when: "armed", count: "max(count - 1, 0)" }
   arm: { armed: "not armed" }
   set: { count: "to" }

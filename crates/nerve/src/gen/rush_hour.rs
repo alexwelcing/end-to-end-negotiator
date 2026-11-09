@@ -220,6 +220,8 @@ fn hints(boards: &[Board], dist: &HashMap<Board, usize>) -> Vec<(Board, Board)> 
     for s in boards {
         let Some(&d) = dist.get(s) else { continue };
         if d == 0 {
+            // The car is out: the hint is to stay put (a hole action gets no other training signal there).
+            out.push((*s, *s));
             continue;
         }
         let moved = |n: &Board| (0..CARS.len()).find(|&i| n[i] != s[i]).expect("a slide moves one car");
@@ -275,7 +277,7 @@ pub fn spec() -> String {
         l("# stops (`between`); here the drop snaps to the closest one."),
         format!("# `hint` is the way out, given only by example as hanoi's is: for each of the {} boards the red car can", hints.len()),
         format!("# still leave, the board after the first slide of a shortest escape ({longest} slides at most). The other"),
-        format!("# {rest} get no example, and a hint leaves them as they are."),
+        format!("# {rest} have the identity as their example: a hint leaves them as they are."),
         l("# A machine pulsing `hint` every tick drives the red car off the board; `escaped` fires as it leaves."),
         generated_by("rush_hour"),
         l("nerve: 1"),
@@ -350,12 +352,15 @@ mod tests {
         let o = Oracle::new(&sp);
         let hole = sp.holes.iter().find(|h| h.name == "solve").expect("the solve hole");
         assert_eq!(hole.action, "hint");
-        let (boards, dist) = search();
-        let out = boards.iter().filter(|b| b[0] == W).count();
-        assert_eq!(hole.examples.len(), dist.len() - out, "one example per board the red car can still leave");
+        let (_, dist) = search();
+        assert_eq!(hole.examples.len(), dist.len(), "one example per board the red car can get out from, the ones out staying put");
         let hint = ActionInst::new("hint");
         for ex in &hole.examples {
-            assert_ne!(ex.state, ex.next, "a hint moves a car");
+            if ex.state[0] == crate::value::Value::Int(W as i64) {
+                assert_eq!(ex.state, ex.next, "a car that is out stays put");
+            } else {
+                assert_ne!(ex.state, ex.next, "a hint moves a car");
+            }
             let v = o.violations(&ex.state, Some(&hint), &ex.next, 0.01);
             assert!(v.is_empty(), "{} -> {}: {v:?}", sp.state_key(&ex.state), sp.state_key(&ex.next));
         }

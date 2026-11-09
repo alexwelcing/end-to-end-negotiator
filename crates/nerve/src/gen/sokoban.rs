@@ -160,7 +160,11 @@ fn solve(lv: &Level) -> Solution {
     let next = boards
         .iter()
         .filter_map(|b| {
-            let d = *dist.get(b).filter(|&&d| d > 0)?;
+            let d = *dist.get(b)?;
+            if d == 0 {
+                // A solved board's hint is to stay put: a hole action gets no other training signal there.
+                return Some((b.clone(), b.clone()));
+            }
             let closer = DIRS.iter().filter_map(|&(_, dx, dy)| lv.step(b, dx, dy)).find(|n| dist.get(n) == Some(&(d - 1)));
             Some((b.clone(), closer.expect("a board d moves from solved has a move to one d - 1 away")))
         })
@@ -367,8 +371,8 @@ pub fn spec() -> String {
     lines.push(l("# are Dragology's box objects in reading order. One drag is one step: Dragology's `chain: true`"));
     lines.push(l("# (keep walking within one drag) has no Nerve counterpart yet."));
     lines.push(format!("# {} cell tuples, {} of them boards (every object on floor, none sharing a cell).", commas(tuples), commas(valid)));
-    lines.push(l("# `hint` is the next move of a shortest solution, given only by example (one per board that can still"));
-    lines.push(format!("# be solved: {} examples; the other {} boards cannot be, a box stuck against the walls or the two", commas(sol.next.len()), commas(sol.unsolvable)));
+    lines.push(l("# `hint` is the next move of a shortest solution, given only by example (one per board that can be"));
+    lines.push(format!("# solved, the solved ones staying put: {} examples; the other {} boards cannot be, a box stuck against the walls or the two", commas(sol.next.len()), commas(sol.unsolvable)));
     lines.push(format!("# blocking each other). The longest solution takes {} moves, the initial board's {}.", sol.longest, sol.from_initial));
     lines.push(generated_by("sokoban"));
     lines.push(l("nerve: 1"));
@@ -433,7 +437,7 @@ pub fn spec() -> String {
     lines.push(l("learn:"));
     lines.push(l("  - name: solve"));
     lines.push(l("    action: hint"));
-    lines.push(l("    # the fallback is the `hint` transition above (stay put); solved and unsolvable boards have no example"));
+    lines.push(l("    # the fallback is the `hint` transition above (stay put); a solved board's example is to stay put, unsolvable boards have none"));
     lines.push(l("    examples:"));
     lines.extend(sol.next.iter().map(|(b, nx)| format!("      - {{ state: {}, next: {} }}", g.board_text(b), g.board_text(nx))));
     lines.push(format!("initial: {}", g.board_text(&g.lv.initial())));
@@ -477,11 +481,14 @@ mod tests {
         assert!(!sol.next.is_empty() && sol.from_initial > 0 && sol.from_initial <= sol.longest);
         let hint = ActionInst { name: l("hint"), params: Vec::new() };
         for (b, nx) in &sol.next {
-            assert!(!lv.solved(b), "{b:?} is solved and has an example");
-            assert!(DIRS.iter().any(|&(_, dx, dy)| lv.step(b, dx, dy).as_ref() == Some(nx)), "{b:?} -> {nx:?} is not one move");
+            if lv.solved(b) {
+                assert_eq!(b, nx, "a solved board stays put");
+            } else {
+                assert!(DIRS.iter().any(|&(_, dx, dy)| lv.step(b, dx, dy).as_ref() == Some(nx)), "{b:?} -> {nx:?} is not one move");
+            }
             let v = o.violations(&state(b), Some(&hint), &state(nx), 0.01);
             assert!(v.is_empty(), "{b:?} -> {nx:?}: {v:?}");
         }
-        assert_eq!(sol.next.len() + sol.unsolvable + lv.boards().iter().filter(|b| lv.solved(b)).count(), lv.boards().len());
+        assert_eq!(sol.next.len() + sol.unsolvable, lv.boards().len(), "every board is solvable (with an example) or not");
     }
 }

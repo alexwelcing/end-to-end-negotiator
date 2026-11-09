@@ -41,6 +41,14 @@ impl<'a> Oracle<'a> {
 
     pub fn step(&self, state: &State, action: &ActionInst) -> Result<State> {
         let sp = self.spec;
+        // A `learn` hole is behaviour the spec shows rather than writes: where it shows this very step,
+        // the oracle answers what it showed, so a machine's checks can hold a network to the examples it
+        // learned from; everywhere else the hole's fallback transition stands.
+        for h in sp.holes.iter().filter(|h| h.action == action.name) {
+            if let Some(ex) = h.examples.iter().find(|ex| ex.state == *state && ex.params == action.params) {
+                return Ok(ex.next.clone());
+            }
+        }
         let t = sp.transition(&action.name).with_context(|| format!("unknown action {:?}", action.name))?;
         let scope = StateScope { spec: sp, cur: state, params: &action.params, old: Some(state) };
         if let Some(when) = &t.when {
@@ -144,6 +152,10 @@ impl<'a> Oracle<'a> {
     pub fn self_check<R: Rng>(&self, rng: &mut R) -> Result<Vec<String>> {
         let sp = self.spec;
         let mut problems = Vec::new();
+        // The initial state is a state: it keeps the types and the invariants like any other.
+        for v in self.violations(&sp.initial, None, &sp.initial, 0.0) {
+            problems.push(format!("initial state: {v}"));
+        }
         let mut check = |s: &State, a: &ActionInst| -> Result<()> {
             let n = self.step(s, a)?;
             self.events(s, a, &n)?; // a bad `emits` predicate fails here, before any training

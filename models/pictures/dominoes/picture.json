@@ -1,0 +1,39 @@
+{
+  "spec": "dominoes",
+  "kind": "picture",
+  "picture": {
+    "w": 192,
+    "h": 32,
+    "state_dim": 22,
+    "hidden": 256,
+    "base": 64,
+    "channels": [
+      48,
+      32,
+      24,
+      16,
+      16
+    ]
+  },
+  "train": {
+    "epochs": 1000,
+    "batch": 32,
+    "lr": 0.002,
+    "weight_decay": 0.01,
+    "seed": 0,
+    "samples": 512,
+    "log_every": 200
+  },
+  "eval": {
+    "n": 13,
+    "mae": 0.013143752701580524,
+    "worst_mae": 0.017199598252773285,
+    "worst_state": "(1,)",
+    "w": 192,
+    "h": 32,
+    "loss": 0.004716083873063326,
+    "seconds": 53.6088448,
+    "trained_on": "cuda",
+    "params": 159291
+  }
+}

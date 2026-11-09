@@ -61,8 +61,20 @@ pub fn spec() -> String {
         lines.push(format!("  set_end{i}: {{params: {{to: {{type: int, range: [{MIN_LEN}, {SLOTS}]}}}}}}   # drag its right dot"));
     }
     lines.push(l("transitions:"));
+    // Two meetings in one room whose times overlap: Dragology marks it in red; here it is the event a
+    // machine can wire, raised when a room change creates the first double booking.
+    let overlap = |prefix: &str| -> String {
+        let mut pairs = Vec::new();
+        for i in 0..MEETINGS {
+            for j in i + 1..MEETINGS {
+                pairs.push(format!("({prefix}room{i} == {prefix}room{j} and {prefix}start{i} < {prefix}end{j} and {prefix}start{j} < {prefix}end{i})"));
+            }
+        }
+        pairs.join(" or ")
+    };
+    let (booked, booked_before) = (overlap(""), overlap("old."));
     for i in 0..MEETINGS {
-        lines.push(format!("  set_room{i}: {{ room{i}: \"to\" }}"));
+        lines.push(format!("  set_room{i}: {{ room{i}: \"to\", emits: {{ double_booking: \"({booked}) and not ({booked_before})\" }} }}"));
         lines.push(format!("  set_start{i}: {{ when: \"to + {MIN_LEN} <= end{i}\", start{i}: \"to\" }}"));
         lines.push(format!("  set_end{i}: {{ when: \"start{i} + {MIN_LEN} <= to\", end{i}: \"to\" }}"));
     }

@@ -48,10 +48,10 @@ transitions:
     pb: "pb - 1 if pd < pb <= to else (pb + 1 if to <= pb < pd else pb)"
     pc: "pc - 1 if pd < pc <= to else (pc + 1 if to <= pc < pd else pc)"
     pd: "to"
-  toggle_a: { da: "not da" }
-  toggle_b: { db: "not db" }
-  toggle_c: { dc: "not dc" }
-  toggle_d: { dd: "not dd" }
+  toggle_a: { da: "not da", emits: { all_done: "da and db and dc and dd and not (old.da and old.db and old.dc and old.dd)" } }
+  toggle_b: { db: "not db", emits: { all_done: "da and db and dc and dd and not (old.da and old.db and old.dc and old.dd)" } }
+  toggle_c: { dc: "not dc", emits: { all_done: "da and db and dc and dd and not (old.da and old.db and old.dc and old.dd)" } }
+  toggle_d: { dd: "not dd", emits: { all_done: "da and db and dc and dd and not (old.da and old.db and old.dc and old.dd)" } }
 invariants:
   - "pa != pb and pa != pc and pa != pd and pb != pc and pb != pd and pc != pd"
 ensures:

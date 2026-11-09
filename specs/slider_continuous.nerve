@@ -14,13 +14,16 @@ transitions:
   grab:       { grabbed: "True" }
   release:    { grabbed: "False" }
   move:       { when: "grabbed", value: "clamp(to, 0, 240)" }
-  step_right: { value: "min(value + 10, 240)" }
+  step_right: { value: "min(value + 10, 240)", emits: { at_end: "value >= 235 and old.value < 235" } }   # the event a machine can wire: the handle enters its last stretch. A line crossed with margin (the last pulse lands at 240, the one before at 230), not `value >= 240`: a network's answer sits near the end, not on it
   step_left:  { value: "max(value - 10, 0)" }
 invariants:
   - "0 <= value <= 240"
 ensures:
   - { after: move, holds: "value == to or not old.grabbed" }
   - { after: release, holds: "not grabbed" }
+ports:
+  step_right: [0, 0]   # a machine's wire into the slider
+  at_end: [240, 0]     # and out of it
 scene:
   box: [-14, -34, 254, 30]
   shapes:

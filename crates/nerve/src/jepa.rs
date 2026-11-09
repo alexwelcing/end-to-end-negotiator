@@ -56,6 +56,20 @@ pub struct Store {
     pub vars: Vec<(String, Var, bool)>,
 }
 
+/// Every weight plus gaussian noise as large as the weight's own spread: the weights of a corrupted
+/// copy of a network, for "break it" (a visitor breaks a block and the checks must catch it).
+pub(crate) fn noisy_weights(jepa: &Jepa, seed: u64, dev: &Device) -> Result<std::collections::HashMap<String, Tensor>> {
+    dev.set_seed(seed)?;
+    let mut out = std::collections::HashMap::new();
+    for (name, var, _) in &jepa.store.vars {
+        let t = var.as_tensor();
+        let spread = f64::from(t.sqr()?.mean_all()?.sqrt()?.to_scalar::<f32>()?) + 1e-3;
+        let noise = (Tensor::randn(0f32, 1f32, t.shape(), dev)? * (0.75 * spread))?;
+        out.insert(name.clone(), (t + noise)?);
+    }
+    Ok(out)
+}
+
 impl Store {
     pub(crate) fn add(&mut self, name: String, t: Tensor, trainable: bool) -> Result<Var> {
         let v = Var::from_tensor(&t)?;

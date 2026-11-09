@@ -271,6 +271,24 @@ impl Spec {
         self.fields.iter().position(|f| f.name == name)
     }
 
+    /// What a network sees of this spec: its fields and its actions' parameters, with their kinds,
+    /// ranges, steps and values, hashed. A checkpoint carries it, so a change to any of them (a new
+    /// action, a narrower range) refuses the old network instead of letting it answer nonsense.
+    pub fn fingerprint(&self) -> String {
+        let field = |f: &FieldType| format!("{}:{:?}:{:?}:{:?}:{:?}:{}", f.name, f.kind, f.lo, f.hi, f.step, f.values.join(","));
+        let mut text = self.fields.iter().map(field).collect::<Vec<_>>().join(";");
+        for a in &self.actions {
+            text.push_str(&format!("|{}({})", a.name, a.params.iter().map(field).collect::<Vec<_>>().join(";")));
+        }
+        // FNV-1a, 64 bits: stable across platforms and versions, and no dependency.
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in text.bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        format!("{h:016x}")
+    }
+
     pub fn action(&self, name: &str) -> Option<&Action> {
         self.actions.iter().find(|a| a.name == name)
     }
@@ -688,12 +706,25 @@ fn parse_doc(doc: &Yaml) -> Result<Spec> {
         ports.push((pname.clone(), (num(&xy[0])?, num(&xy[1])?)));
     }
 
-    let init_map = key(doc, "initial").and_then(Yaml::as_mapping).cloned().unwrap_or_default();
+    // A spec without `initial:` starts at the first value of every field's type; one with `initial:`
+    // names every field and nothing else (a missing field used to default silently, which let a
+    // malformed initial state through).
+    let init_map = match key(doc, "initial") {
+        Some(Yaml::Mapping(m)) => Some(m.clone()),
+        Some(other) => bail!("initial must be a mapping of the fields, got {other:?}"),
+        None => None,
+    };
+    if let Some(m) = &init_map {
+        for (k, _) in m {
+            let k = k.as_str().unwrap_or_default();
+            ensure!(fields.iter().any(|f| f.name == k), "initial names unknown field {k:?}");
+        }
+    }
     let initial = fields
         .iter()
         .map(|f| {
-            let v = match key(&init_map, &f.name) {
-                Some(v) => Value::from_yaml(v)?,
+            let v = match &init_map {
+                Some(m) => Value::from_yaml(key(m, &f.name).with_context(|| format!("initial is missing field {}", f.name))?)?,
                 None if f.finite() || f.step.is_some() => f.domain()?.remove(0),
                 None => f.lo.map_or(Value::Int(0), Value::Float),
             };

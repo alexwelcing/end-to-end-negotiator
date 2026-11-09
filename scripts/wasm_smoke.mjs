@@ -157,6 +157,26 @@ if (ball && ball.blocks.every(b => b.network)) {
   console.log(`${TICKS} ball ticks within tolerance of the composed oracle, ${(ms / TICKS).toFixed(2)} ms per tick in wasm (three rails stepped by their head)`);
 }
 
+// The light machine (docs/rube-goldberg.md): thirty-eight blocks, all by their networks, from the drop for
+// sixty ticks, within tolerance of the composed oracle, timing a tick of the whole contraption in wasm.
+const light = machines.find(m => m.name === "light");
+if (light && light.blocks.every(b => b.network)) {
+  const LIGHT_TICKS = 60;
+  let ls = wasm("/api/machine/light/tick", { state: light.initial, external: [{ block: "marble", action: "drop" }] }).state;
+  let ms = 0, agreed = 0;
+  for (let i = 0; i < LIGHT_TICKS; i++) {
+    const t0 = performance.now();
+    const t = wasm("/api/machine/light/tick", { state: ls, external: advance });
+    ms += performance.now() - t0;
+    if (t.violations.length) throw new Error(`light tick ${i + 1}: ${JSON.stringify(t.violations)}`);
+    agreed += t.agrees ? 1 : 0;
+    ls = t.state;
+  }
+  if (agreed < LIGHT_TICKS) throw new Error(`light: only ${agreed}/${LIGHT_TICKS} ticks within tolerance of the composed oracle`);
+  const stage = wasm("/api/machine/light/view", { state: ls }).derived.stage;
+  console.log(`${LIGHT_TICKS} light ticks within tolerance of the composed oracle, ${(ms / LIGHT_TICKS).toFixed(2)} ms per tick in wasm (${light.blocks.length} blocks), at stage ${stage}`);
+}
+
 if (NATIVE) console.log(`parity: ${compared} answers compared, ${failures} differ`);
 if (failures) process.exit(1);
 console.log("wasm smoke ok");
