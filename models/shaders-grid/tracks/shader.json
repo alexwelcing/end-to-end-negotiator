@@ -1,0 +1,46 @@
+{
+ "spec": "tracks",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 640,
+  "state_dim": 21,
+  "cond": 128,
+  "hidden": 64,
+  "layers": 2,
+  "octaves": 4,
+  "kind": "grid",
+  "grid_levels": [
+   [
+    19,
+    16
+   ],
+   [
+    77,
+    64
+   ]
+  ],
+  "grid_channels": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 48,
+  "mae": 0.009713342054358995,
+  "worst_mae": 0.011080783791840076,
+  "w": 768,
+  "h": 640,
+  "loss": 0.008037841878831387,
+  "seconds": 120.1,
+  "trained_on": "cuda",
+  "params": 124163,
+  "steps": 20000
+ }
+}

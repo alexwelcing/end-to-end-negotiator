@@ -1,0 +1,46 @@
+{
+ "spec": "sokoban",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 512,
+  "state_dim": 72,
+  "cond": 128,
+  "hidden": 64,
+  "layers": 2,
+  "octaves": 4,
+  "kind": "grid",
+  "grid_levels": [
+   [
+    24,
+    16
+   ],
+   [
+    96,
+    64
+   ]
+  ],
+  "grid_channels": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 48,
+  "mae": 0.005098053234784554,
+  "worst_mae": 0.005692141596227884,
+  "w": 768,
+  "h": 512,
+  "loss": 0.002594116609543562,
+  "seconds": 112.4,
+  "trained_on": "cuda",
+  "params": 147587,
+  "steps": 20000
+ }
+}

@@ -1,0 +1,46 @@
+{
+ "spec": "slider_continuous",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 128,
+  "state_dim": 11,
+  "cond": 128,
+  "hidden": 64,
+  "layers": 2,
+  "octaves": 4,
+  "kind": "grid",
+  "grid_levels": [
+   [
+    96,
+    16
+   ],
+   [
+    384,
+    64
+   ]
+  ],
+  "grid_channels": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 48,
+  "mae": 0.006151117743380989,
+  "worst_mae": 0.01156808901578188,
+  "w": 768,
+  "h": 128,
+  "loss": 0.004600914195179939,
+  "seconds": 129.0,
+  "trained_on": "cuda",
+  "params": 288643,
+  "steps": 20000
+ }
+}
