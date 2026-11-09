@@ -1,0 +1,40 @@
+{
+ "spec": "clock",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 256,
+  "state_dim": 19,
+  "cond": 128,
+  "hidden": 128,
+  "layers": 4,
+  "octaves": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 10,
+  "mae": 0.0037997163133695723,
+  "worst_mae": 0.003818592755123973,
+  "w": 768,
+  "h": 256,
+  "loss": 0.0033046789467334747,
+  "seconds": 114.7,
+  "trained_on": "cuda",
+  "params": 241027,
+  "steps": 20000,
+  "mae_native": 0.00518928337842226,
+  "worst_state": "(0,)",
+  "native_w": 192,
+  "native_h": 64,
+  "mae_native_point": 0.011571228224784135,
+  "supersample": 4
+ }
+}

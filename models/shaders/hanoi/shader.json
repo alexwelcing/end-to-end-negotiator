@@ -1,0 +1,40 @@
+{
+ "spec": "hanoi",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 256,
+  "state_dim": 48,
+  "cond": 128,
+  "hidden": 128,
+  "layers": 4,
+  "octaves": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 48,
+  "mae": 0.0012157447118726042,
+  "worst_mae": 0.0072108786553144455,
+  "w": 768,
+  "h": 256,
+  "loss": 0.0003095310239586979,
+  "seconds": 115.4,
+  "trained_on": "cuda",
+  "params": 248451,
+  "steps": 20000,
+  "mae_native": 0.005542996121041569,
+  "worst_state": "(1, 1, 1, 1)",
+  "native_w": 192,
+  "native_h": 64,
+  "mae_native_point": 0.03632637862989932,
+  "supersample": 4
+ }
+}

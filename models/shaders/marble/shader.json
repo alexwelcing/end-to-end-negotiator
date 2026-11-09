@@ -1,0 +1,40 @@
+{
+ "spec": "marble",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 256,
+  "state_dim": 20,
+  "cond": 128,
+  "hidden": 128,
+  "layers": 4,
+  "octaves": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 48,
+  "mae": 0.0051725313091992575,
+  "worst_mae": 0.018535565584897995,
+  "w": 768,
+  "h": 256,
+  "loss": 0.0009147163946181536,
+  "seconds": 115.3,
+  "trained_on": "cuda",
+  "params": 241283,
+  "steps": 20000,
+  "mae_native": 0.005813752313088116,
+  "mae_native_point": 0.014508479351206915,
+  "worst_state": "(145.84273516131117, 13.047140154202472, True)",
+  "native_w": 192,
+  "native_h": 64,
+  "supersample": 4
+ }
+}

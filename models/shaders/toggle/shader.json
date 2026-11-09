@@ -1,0 +1,40 @@
+{
+ "spec": "toggle",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 384,
+  "state_dim": 2,
+  "cond": 128,
+  "hidden": 128,
+  "layers": 4,
+  "octaves": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 2,
+  "mae": 0.0002783011441351846,
+  "worst_mae": 0.00030256755417212844,
+  "w": 768,
+  "h": 384,
+  "loss": 9.480320295551792e-05,
+  "seconds": 85.6,
+  "trained_on": "cuda",
+  "params": 236675,
+  "steps": 20000,
+  "mae_native": 0.002307770773768425,
+  "mae_native_point": 0.0024673115694895387,
+  "worst_state": "('off',)",
+  "native_w": 192,
+  "native_h": 96,
+  "supersample": 4
+ }
+}

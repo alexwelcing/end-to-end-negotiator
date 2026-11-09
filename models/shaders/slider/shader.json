@@ -1,0 +1,40 @@
+{
+ "spec": "slider",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 128,
+  "state_dim": 36,
+  "cond": 128,
+  "hidden": 128,
+  "layers": 4,
+  "octaves": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 48,
+  "mae": 0.0011412343417759984,
+  "worst_mae": 0.00611921539530158,
+  "w": 768,
+  "h": 128,
+  "loss": 0.00039143970934674144,
+  "seconds": 114.2,
+  "trained_on": "cuda",
+  "params": 245379,
+  "steps": 20000,
+  "mae_native": 0.007296778643503785,
+  "mae_native_point": 0.038729755468666555,
+  "worst_state": "(200, False)",
+  "native_w": 192,
+  "native_h": 32,
+  "supersample": 4
+ }
+}

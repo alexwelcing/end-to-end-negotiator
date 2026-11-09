@@ -1,0 +1,40 @@
+{
+ "spec": "bell",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 768,
+  "state_dim": 19,
+  "cond": 128,
+  "hidden": 128,
+  "layers": 4,
+  "octaves": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 10,
+  "mae": 0.00039342604868579655,
+  "worst_mae": 0.00047685528988949955,
+  "w": 768,
+  "h": 768,
+  "loss": 0.00014685108908452094,
+  "seconds": 117.3,
+  "trained_on": "cuda",
+  "params": 241027,
+  "steps": 20000,
+  "mae_native": 0.0017585072899237275,
+  "worst_state": "(7,)",
+  "native_w": 192,
+  "native_h": 192,
+  "mae_native_point": 0.002666412410326302,
+  "supersample": 4
+ }
+}
