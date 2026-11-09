@@ -36,7 +36,13 @@ def main() -> int:
     work = Path(tempfile.mkdtemp())
     src = Path(a.local_src) if a.local_src else work / "src"
     if not a.local_src:
-        subprocess.run(["git", "clone", "--depth", "1", "--branch", a.branch, a.git, str(src)], check=True)
+        if len(a.branch) == 40 and all(c in "0123456789abcdef" for c in a.branch):
+            # an exact commit: the launcher pins the code the job runs to the code it pushed
+            src.mkdir(parents=True)
+            for cmd in (["git", "init", "-q"], ["git", "remote", "add", "origin", a.git], ["git", "fetch", "-q", "--depth", "1", "origin", a.branch], ["git", "checkout", "-q", "FETCH_HEAD"]):
+                subprocess.run(cmd, cwd=src, check=True)
+        else:
+            subprocess.run(["git", "clone", "--depth", "1", "--branch", a.branch, a.git, str(src)], check=True)
     sys.path.insert(0, str(src))
 
     from huggingface_hub import HfApi, snapshot_download

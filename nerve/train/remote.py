@@ -72,7 +72,7 @@ def train_remote(spec_path: str, log_path: str, out_dir: str, cfg: TrainConfig, 
     for p, dest in ((spec_path, "spec.nerve"), (log_path, "episodes.v1.jsonl")):
         api.upload_file(path_or_fileobj=p, path_in_repo=f"runs/{run}/in/{dest}", repo_id=repo, repo_type="dataset")
     api.upload_file(path_or_fileobj=json.dumps(c).encode(), path_in_repo=f"runs/{run}/in/config.json", repo_id=repo, repo_type="dataset")
-    job = run_uv_job(JOB_SCRIPT, script_args=["--repo", repo, "--run", run], flavor=flavor, secrets={"HF_TOKEN": token}, token=token)
+    job = run_uv_job(job_script_url(), script_args=["--repo", repo, "--run", run, "--branch", __import__("subprocess").run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()], flavor=flavor, secrets={"HF_TOKEN": token}, token=token)
     print(f"[remote] job {job.id} on {flavor}: {getattr(job, 'url', '')}  (run {run})", flush=True)
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     (Path(out_dir) / "job.json").write_text(json.dumps({"job": job.id, "run": run, "flavor": flavor, "repo": repo}))
