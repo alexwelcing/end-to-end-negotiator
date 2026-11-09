@@ -197,6 +197,9 @@ enum Cmd {
         spec: PathBuf,
         #[arg(long, default_value = "models/shaders")]
         dir: PathBuf,
+        /// How many states to score (a 4x supersampled oracle per state is the slow part).
+        #[arg(long, default_value_t = 256)]
+        states: usize,
     },
     /// Write the render oracle's picture of a spec's initial state (or `--state` JSON) as a PPM file.
     Picture {
@@ -348,10 +351,10 @@ fn main() -> Result<()> {
             std::fs::write(out.join("meta.json"), serde_json::to_string(&meta)?)?;
             println!("wrote {} rasters of {w}x{h} to {}", states.len(), out.display());
         }
-        Cmd::EvalShader { spec, dir } => {
+        Cmd::EvalShader { spec, dir, states } => {
             let s = Spec::load(&spec)?;
             let sh = nerve::shader::Shader::load(s.clone(), &dir.join(&s.name), &candle_core::Device::Cpu)?;
-            let states = nerve::picture::training_states(&s, 256, 0)?;
+            let states = nerve::picture::training_states(&s, states, 0)?;
             println!("{}", serde_json::to_string_pretty(&sh.evaluate(&states)?)?);
         }
         Cmd::Picture { spec, out, state } => {
