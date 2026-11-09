@@ -385,7 +385,7 @@ function renderNetwork() {
   const where = t.trained_on === "cuda" ? "the local GPU" : t.trained_on ? "the CPU" : "this machine";
   const pic = cur.picture;
   const pe = pic && pic.trained && pic.trained.eval ? pic.trained.eval : null;
-  const shFacts = cur.shader ? `<br>And the shader: ${cur.shader.params.toLocaleString()} parameters that answer "what colour is this point?", so your GPU draws the interface at any resolution${cur.shader.trained && cur.shader.trained.eval ? ` (${(100 * cur.shader.trained.eval.mae).toFixed(1)}% pixel error at ${cur.shader.trained.eval.w}×${cur.shader.trained.eval.h})` : ""}.` : "";
+  const shFacts = cur.shader ? `<br>And the shader: ${cur.shader.params.toLocaleString()} parameters that answer "what colour is this point?", so your GPU draws the interface at any resolution${cur.shader.trained && cur.shader.trained.eval ? ` (${(100 * cur.shader.trained.eval.mae).toFixed(2)}% pixel error at ${cur.shader.trained.eval.w}×${cur.shader.trained.eval.h})` : ""}.` : "";
   const picFacts = pic ? `<br>The picture too: a render network of ${pic.params.toLocaleString()} parameters draws the ${pic.w}×${pic.h} pixels you see${pe ? `, ${(100 * pe.mae).toFixed(1)}% mean pixel error against the spec's own drawing over ${pe.n} states` : ""}.` : cur.scene ? "<br>The picture is the spec's own drawing (no render network loaded)." : "";
   const picFactsAll = picFacts + shFacts;
   box.innerHTML = `${big ? `<div class="big">${big}</div><div>${caption}</div>` : ""}
@@ -573,8 +573,8 @@ function picPill() {
   if (!cur.picture) { p.textContent = "picture: spec (no render network)"; p.className = "pill"; return; }
   if ($("showOracle").checked) { p.textContent = "picture: the spec's"; p.className = "pill"; return; }
   if (!picture.key) { p.textContent = "picture: loading the render network…"; p.className = "pill"; return; }
-  if (picture.gpu) { const ev = cur.shader && cur.shader.trained && cur.shader.trained.eval; const e = ev ? ` · ${(100 * ev.mae_native).toFixed(1)}% pixel error at the spec's raster, ${(100 * ev.mae).toFixed(1)}% at ${ev.w}×${ev.h}` : "";
-    p.textContent = `picture: the shader on your GPU, ${glsh.px[0]}×${glsh.px[1]} px in ${glsh.ms.toFixed(1)} ms${e}`; p.className = "pill" + (ev && ev.mae < 0.05 ? " ok" : ""); return; }
+  if (picture.gpu) { const ev = cur.shader && cur.shader.trained && cur.shader.trained.eval; const e = ev ? ` · ${(100 * (ev.mae_native ?? ev.mae)).toFixed(2)}% pixel error at the spec's raster, ${(100 * ev.mae).toFixed(2)}% at ${ev.w}×${ev.h}` : "";
+    p.textContent = `picture: the shader on your GPU, ${glsh.px[0]}×${glsh.px[1]} px in ${glsh.ms < 0.1 ? "<0.1" : glsh.ms.toFixed(1)} ms${e}`; p.className = "pill" + (ev && ev.mae < 0.05 ? " ok" : ""); return; }
   const e = picture.mae === null ? "" : ` · pixel error ${(100 * picture.mae).toFixed(1)}%`;
   p.textContent = `picture: drawn by the render network${e}`;
   p.className = "pill" + (picture.mae !== null && picture.mae < 0.05 ? " ok" : "");
