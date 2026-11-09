@@ -107,8 +107,12 @@ fn latest(rows: Vec<J>) -> BTreeMap<String, J> {
 /// rank below the run that knows the new rules. The choice is written to `served.json`.
 /// A run's rank in `serve_set`: recorded against the current spec, exactness, fewer violations, a step head, the lower seed.
 type Rank = (f64, f64, f64, f64, f64);
+/// Per spec: the spec as it is now, and its full-spec runs best first.
+type Ranked = BTreeMap<String, (Spec, Vec<(J, Rank)>)>;
 
-pub fn serve_set(log: &Path, root: &Path, served: &Path, manifest: &Path) -> Result<()> {
+/// Every full-spec run per spec in the log, best first, against the specs as they are now: recorded
+/// against the current spec, then exactness, fewer violations, a step head, the lower seed.
+fn ranked_runs(log: &Path, root: &Path) -> Result<Ranked> {
     let rows = latest(read_log(log)?);
     let mut candidates: BTreeMap<String, Vec<(J, Rank)>> = BTreeMap::new();
     let mut specs: BTreeMap<String, Spec> = BTreeMap::new();
@@ -128,10 +132,19 @@ pub fn serve_set(log: &Path, root: &Path, served: &Path, manifest: &Path) -> Res
         candidates.entry(name).or_default().push((r.clone(), score));
     }
     ensure!(!candidates.is_empty(), "no full-spec runs in {}", log.display());
+    Ok(candidates
+        .into_iter()
+        .map(|(spec, mut cs)| {
+            cs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let sp = specs.remove(&spec).expect("a spec per candidate");
+            (spec, (sp, cs))
+        })
+        .collect())
+}
+
+pub fn serve_set(log: &Path, root: &Path, served: &Path, manifest: &Path) -> Result<()> {
     let mut best: BTreeMap<String, (J, Rank)> = BTreeMap::new();
-    for (spec, mut cs) in candidates {
-        cs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        let sp = specs[&spec].clone();
+    for (spec, (sp, cs)) in ranked_runs(log, root)? {
         let mut chosen = None;
         for (r, s) in cs {
             let dir = root.join(r["model"].as_str().unwrap_or("").replace('\\', "/"));
@@ -245,15 +258,14 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let log = root.join("experiments/round2/results.jsonl");
         let manifest: J = serde_json::from_str(&std::fs::read_to_string(root.join("experiments/round2/served.json")).unwrap()).unwrap();
-        // The committed served set is what `serve_set` picks from the committed log today: the best run
-        // per spec whose checkpoint loads against the spec as it is now, the newest on ties.
-        let tmp = std::env::temp_dir().join(format!("nerve-served-test-{}", std::process::id()));
-        let picked_manifest = tmp.join("served.json");
-        serve_set(&log, &root, &tmp.join("served"), &picked_manifest).unwrap();
-        let picked: J = serde_json::from_str(&std::fs::read_to_string(&picked_manifest).unwrap()).unwrap();
-        let _ = std::fs::remove_dir_all(&tmp);
+        // The committed served set is the committed log's own best run per spec, by `serve_set`'s ranking
+        // against the specs as they are now. `serve_set` also skips a checkpoint that does not load, which
+        // the committed set never needs (its first-ranked run loads for every spec); the checkpoints are not
+        // in the repository, so this ranks without loading them.
+        let ranked = ranked_runs(&log, &root).unwrap();
         for (spec, entry) in manifest.as_object().unwrap() {
-            assert_eq!(picked[spec]["model"].as_str().unwrap().replace('\\', "/"), entry["model"].as_str().unwrap().replace('\\', "/"), "{spec}");
+            let top = &ranked[spec].1[0].0;
+            assert_eq!(top["model"].as_str().unwrap().replace('\\', "/"), entry["model"].as_str().unwrap().replace('\\', "/"), "{spec}");
         }
         assert!(summarize(&log, &["toggle".to_string()]).unwrap().contains("| toggle | full spec | spec-assisted |"));
         assert_eq!(stat(&[Some(1.0), Some(0.5)]), "75.0 ± 35.4%");
