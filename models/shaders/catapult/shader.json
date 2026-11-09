@@ -1,0 +1,40 @@
+{
+ "spec": "catapult",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 640,
+  "state_dim": 4,
+  "cond": 128,
+  "hidden": 128,
+  "layers": 4,
+  "octaves": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 4,
+  "mae": 0.0001275539198104525,
+  "worst_mae": 0.0001663168368395418,
+  "w": 768,
+  "h": 640,
+  "loss": 4.483059819904156e-05,
+  "seconds": 81.4,
+  "trained_on": "cuda",
+  "params": 237187,
+  "steps": 20000,
+  "mae_native": 0.00028849250156781636,
+  "mae_native_point": 0.0005245880602160469,
+  "worst_state": "(True, 'down')",
+  "native_w": 192,
+  "native_h": 160,
+  "supersample": 4
+ }
+}
