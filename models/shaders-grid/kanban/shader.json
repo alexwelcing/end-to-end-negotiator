@@ -1,0 +1,46 @@
+{
+ "spec": "kanban",
+ "kind": "shader",
+ "shader": {
+  "w": 768,
+  "h": 384,
+  "state_dim": 84,
+  "cond": 128,
+  "hidden": 64,
+  "layers": 2,
+  "octaves": 4,
+  "kind": "grid",
+  "grid_levels": [
+   [
+    32,
+    16
+   ],
+   [
+    128,
+    64
+   ]
+  ],
+  "grid_channels": 8
+ },
+ "train": {
+  "steps": 20000,
+  "batch_states": 8,
+  "pixels": 4096,
+  "lr": 0.001,
+  "seed": 0,
+  "log_every": 1000,
+  "device": "auto"
+ },
+ "eval": {
+  "n": 48,
+  "mae": 0.003346769852214493,
+  "worst_mae": 0.006051639560610056,
+  "w": 768,
+  "h": 384,
+  "loss": 0.0016269914340227842,
+  "seconds": 115.7,
+  "trained_on": "cuda",
+  "params": 168067,
+  "steps": 20000
+ }
+}

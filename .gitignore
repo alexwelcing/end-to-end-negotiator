@@ -20,6 +20,7 @@ docs/paper2/fig_cost.tex
 !models/served/**/*.safetensors
 !models/pictures/**/*.safetensors
 !models/shaders/**/*.safetensors
+!models/shaders-grid/**/*.safetensors
 /target-cuda/
 /site/dist/
 /target-cuda2/
