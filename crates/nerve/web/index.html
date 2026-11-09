@@ -517,6 +517,8 @@ function shaderReady(spec) {
     gl.uniform1i(gl.getUniformLocation(prog, "uW"), 0); gl.uniform1i(gl.getUniformLocation(prog, "uF"), 1);
     Object.assign(glsh, {gl, prog, cfg, canvas, filmTex, view: w.view, loc: {size: gl.getUniformLocation(prog, "uSize"), aspect: gl.getUniformLocation(prog, "uAspect")}});
     gl.uniform1f(glsh.loc.aspect, w.aspect);
+    glsh.timerExt = gl.getExtension("EXT_disjoint_timer_query_webgl2");
+    glsh.renderer = (() => { const d = gl.getExtension("WEBGL_debug_renderer_info"); return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); })();
     return true;
   })().catch(err => { console.warn("GPU shader unavailable:", err); return false; });
   return glsh.ready;
@@ -535,7 +537,20 @@ async function shaderDraw(spec, s) {
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, filmTex);
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, cfg.hidden / 4, 2 * cfg.layers, gl.RGBA, gl.FLOAT, new Float32Array(film));
   gl.uniform2f(loc.size, W, H);
-  const t0 = performance.now(); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.finish(); glsh.ms = performance.now() - t0; glsh.px = [W, H];
+  // Honest frame time. gl.finish() can return before the GPU is done (ANGLE on D3D11 does), so time the draw with
+  // EXT_disjoint_timer_query_webgl2 when the browser offers it, else by a 1x1 readPixels, which blocks until the
+  // frame is complete, minus the cost of the readback alone.
+  const tq = glsh.timerExt;
+  if (tq) {
+    const q = gl.createQuery(); gl.beginQuery(tq.TIME_ELAPSED_EXT, q); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.endQuery(tq.TIME_ELAPSED_EXT);
+    glsh.pendingQuery = q; glsh.px = [W, H];
+    setTimeout(() => { try { if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE) && !gl.getParameter(tq.GPU_DISJOINT_EXT)) { glsh.ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; picPill(); } } catch {} gl.deleteQuery(q); }, 120);
+  } else {
+    const px = new Uint8Array(4);
+    const t0 = performance.now(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); const read = performance.now() - t0;
+    const t1 = performance.now(); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    glsh.ms = Math.max(0, performance.now() - t1 - read); glsh.px = [W, H];
+  }
   return canvas.toDataURL();
 }
 
@@ -574,7 +589,9 @@ function picPill() {
   if ($("showOracle").checked) { p.textContent = "picture: the spec's"; p.className = "pill"; return; }
   if (!picture.key) { p.textContent = "picture: loading the render network…"; p.className = "pill"; return; }
   if (picture.gpu) { const ev = cur.shader && cur.shader.trained && cur.shader.trained.eval; const e = ev ? ` · ${(100 * (ev.mae_native ?? ev.mae)).toFixed(2)}% pixel error at the spec's raster, ${(100 * ev.mae).toFixed(2)}% at ${ev.w}×${ev.h}` : "";
-    p.textContent = `picture: the shader on your GPU, ${glsh.px[0]}×${glsh.px[1]} px in ${glsh.ms < 0.1 ? "<0.1" : glsh.ms.toFixed(1)} ms${e}`; p.className = "pill" + (ev && ev.mae < 0.05 ? " ok" : ""); return; }
+    const ms = glsh.ms == null ? "timing…" : `${glsh.ms.toFixed(1)} ms${glsh.timerExt ? "" : " (readback-timed)"}`;
+    p.textContent = `picture: the shader on your GPU, ${glsh.px[0]}×${glsh.px[1]} px in ${ms}${e}`; p.title = glsh.renderer || "";
+    p.className = "pill" + (ev && ev.mae < 0.05 && glsh.ms != null && glsh.ms < 16 ? " ok" : ""); return; }
   const e = picture.mae === null ? "" : ` · pixel error ${(100 * picture.mae).toFixed(1)}%`;
   p.textContent = `picture: drawn by the render network${e}`;
   p.className = "pill" + (picture.mae !== null && picture.mae < 0.05 ? " ok" : "");
