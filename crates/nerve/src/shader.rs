@@ -41,6 +41,21 @@ pub struct ShaderConfig {
     pub hidden: usize,
     pub layers: usize,
     pub octaves: usize,
+    /// `"mlp"`: every pixel runs the whole network (the first shaders). `"grid"`: most of the capacity is
+    /// a learned multi-resolution feature grid, sampled bilinearly (a hardware texture fetch on the GPU),
+    /// and the per-pixel network is small: about ten times fewer operations per pixel.
+    #[serde(default = "default_kind")]
+    pub kind: String,
+    /// Grid levels as `[width, height]` in cells, coarse to fine (grid kind only).
+    #[serde(default)]
+    pub grid_levels: Vec<[usize; 2]>,
+    /// Channels per grid cell (grid kind only).
+    #[serde(default)]
+    pub grid_channels: usize,
+}
+
+fn default_kind() -> String {
+    "mlp".to_string()
 }
 
 impl ShaderConfig {
@@ -48,7 +63,29 @@ impl ShaderConfig {
         let scene = spec.scene.as_ref().context("the spec has no scene to draw")?;
         let (w, h) = scene.raster_size();
         let enc = Encoder::new(spec)?;
-        Ok(Self { w: w * scale.max(1), h: h * scale.max(1), state_dim: enc.state_dim, cond: 128, hidden: 128, layers: 4, octaves: 8 })
+        Ok(Self { w: w * scale.max(1), h: h * scale.max(1), state_dim: enc.state_dim, cond: 128, hidden: 128, layers: 4, octaves: 8, kind: "mlp".into(), grid_levels: vec![], grid_channels: 0 })
+    }
+
+    /// The grid kind: feature grids of `bases` rows (columns follow the aspect), `channels` each, and a
+    /// small per-pixel network.
+    pub fn grid_for_spec(spec: &Spec, scale: usize, bases: &[usize], channels: usize) -> Result<Self> {
+        let mut c = Self::for_spec(spec, scale)?;
+        let aspect = c.aspect();
+        c.kind = "grid".into();
+        c.grid_levels = bases.iter().map(|&b| [((b as f64 * aspect).round() as usize).max(2), b.max(2)]).collect();
+        c.grid_channels = channels;
+        c.hidden = 64;
+        c.layers = 2;
+        c.octaves = 4;
+        Ok(c)
+    }
+
+    pub fn is_grid(&self) -> bool {
+        self.kind == "grid"
+    }
+
+    pub fn grid_dim(&self) -> usize {
+        if self.is_grid() { self.grid_levels.len() * self.grid_channels } else { 0 }
     }
 
     pub fn aspect(&self) -> f64 {
@@ -83,9 +120,31 @@ pub struct Shader {
     layers: Vec<Lin>,
     film: Vec<Lin>,
     out: Lin,
+    /// Feature grids, one per level, `[cells, channels]` (grid kind only).
+    grids: Vec<candle_core::Var>,
     enc: Encoder,
     dev: Device,
     pub meta: Option<J>,
+}
+
+/// Bilinear sampling of a `[gw, gh]` grid at normalised coordinates: the four corner cell indices and
+/// their weights for every pixel. Pixel coordinates are -1..1 (x right, y down); cell `i` sits at
+/// `i / (g - 1)` of the way across, so the grid's edges meet the raster's.
+fn bilinear(xy: &[f32], gw: usize, gh: usize) -> (Vec<u32>, Vec<f32>) {
+    let n = xy.len() / 2;
+    let (mut idx, mut wts) = (Vec::with_capacity(4 * n), Vec::with_capacity(4 * n));
+    for p in 0..n {
+        let u = ((xy[2 * p] + 1.0) * 0.5).clamp(0.0, 1.0) * (gw - 1) as f32;
+        let v = ((xy[2 * p + 1] + 1.0) * 0.5).clamp(0.0, 1.0) * (gh - 1) as f32;
+        let (x0, y0) = (u.floor().min((gw - 2) as f32), v.floor().min((gh - 2) as f32));
+        let (fx, fy) = (u - x0, v - y0);
+        let (x0, y0) = (x0 as usize, y0 as usize);
+        for (dx, dy, w) in [(0, 0, (1.0 - fx) * (1.0 - fy)), (1, 0, fx * (1.0 - fy)), (0, 1, (1.0 - fx) * fy), (1, 1, fx * fy)] {
+            idx.push(((y0 + dy) * gw + x0 + dx) as u32);
+            wts.push(w);
+        }
+    }
+    (idx, wts)
 }
 
 impl Shader {
@@ -95,7 +154,14 @@ impl Shader {
         ensure!(cfg.layers >= 1 && cfg.octaves >= 1, "a shader needs at least one layer and one octave");
         let mut st = Store::default();
         let cond = [Lin::new(&mut st, "cond.0", cfg.state_dim, 256, true, dev, true)?, Lin::new(&mut st, "cond.2", 256, cfg.cond, true, dev, true)?];
-        let inp = Lin::new(&mut st, "inp", 2 + 4 * cfg.octaves, cfg.hidden, true, dev, true)?;
+        let mut grids = Vec::new();
+        if cfg.is_grid() {
+            ensure!(cfg.grid_channels > 0 && !cfg.grid_levels.is_empty(), "the grid kind needs levels and channels");
+            for (l, [gw, gh]) in cfg.grid_levels.iter().enumerate() {
+                grids.push(st.add(format!("grid.{l}"), Tensor::rand(-0.1f32, 0.1f32, (gw * gh, cfg.grid_channels), dev)?, true)?);
+            }
+        }
+        let inp = Lin::new(&mut st, "inp", 2 + 4 * cfg.octaves + cfg.grid_dim(), cfg.hidden, true, dev, true)?;
         let mut layers = Vec::new();
         let mut film = Vec::new();
         for i in 0..cfg.layers {
@@ -103,7 +169,32 @@ impl Shader {
             film.push(Lin::new(&mut st, &format!("film.{i}"), cfg.cond, 2 * cfg.hidden, true, dev, true)?);
         }
         let out = Lin::new(&mut st, "out", cfg.hidden, 3, true, dev, true)?;
-        Ok(Self { spec, cfg, store: st, cond, inp, layers, film, out, enc, dev: dev.clone(), meta: None })
+        Ok(Self { spec, cfg, store: st, cond, inp, layers, film, out, grids, enc, dev: dev.clone(), meta: None })
+    }
+
+    /// Per-pixel inputs from raw coordinates: the `[B, P, 2]` tensor and, for the grid kind, each level's
+    /// bilinear corner indices `[B*P*4]` and weights `[B*P, 4]`.
+    fn inputs(&self, xy: &[f32], b: usize) -> Result<(Tensor, Vec<(Tensor, Tensor)>)> {
+        let p = xy.len() / 2 / b;
+        let t = Tensor::from_slice(xy, (b, p, 2), &self.dev)?;
+        let mut taps = Vec::new();
+        for [gw, gh] in &self.cfg.grid_levels {
+            let (idx, wts) = bilinear(xy, *gw, *gh);
+            taps.push((Tensor::from_vec(idx, b * p * 4, &self.dev)?, Tensor::from_vec(wts, (b * p, 4), &self.dev)?));
+        }
+        Ok((t, taps))
+    }
+
+    /// Grid features: `[B, P, levels * channels]`, bilinear over each level.
+    fn grid_features(&self, taps: &[(Tensor, Tensor)], b: usize, p: usize) -> Result<Tensor> {
+        let c = self.cfg.grid_channels;
+        let mut feats = Vec::new();
+        for (g, (idx, wts)) in self.grids.iter().zip(taps) {
+            let corners = g.as_tensor().index_select(idx, 0)?.reshape((b * p, 4, c))?;           // [B*P, 4, C]
+            let f = corners.broadcast_mul(&wts.unsqueeze(2)?)?.sum(1)?;                          // [B*P, C]
+            feats.push(f.reshape((b, p, c))?);
+        }
+        Ok(Tensor::cat(&feats.iter().collect::<Vec<_>>(), 2)?)
     }
 
     /// Fourier features of coordinates `xy` `[B, P, 2]` in -1..1 (x across the raster's width, y down
@@ -121,10 +212,15 @@ impl Shader {
         Ok(Tensor::cat(&[&xy, &sin, &cos], 2)?)
     }
 
-    /// `x` `[B, state_dim]`, `xy` `[B, P, 2]` -> `[B, P, 3]`, unclamped.
-    fn forward(&self, x: &Tensor, xy: &Tensor) -> Result<Tensor> {
+    /// `x` `[B, state_dim]`, `xy` `[B, P, 2]` (+ grid taps) -> `[B, P, 3]`, unclamped.
+    fn forward(&self, x: &Tensor, xy: &Tensor, taps: &[(Tensor, Tensor)]) -> Result<Tensor> {
         let c = self.cond[1].fwd(&self.cond[0].fwd(x, false)?.gelu_erf()?, false)?.gelu_erf()?; // [B, cond]
-        let mut h = self.inp.fwd_nd(&self.features(xy)?)?.gelu_erf()?; // [B, P, hidden]
+        let mut f = self.features(xy)?;
+        if self.cfg.is_grid() {
+            let (b, p) = (xy.dim(0)?, xy.dim(1)?);
+            f = Tensor::cat(&[&f, &self.grid_features(taps, b, p)?], 2)?;
+        }
+        let mut h = self.inp.fwd_nd(&f)?.gelu_erf()?; // [B, P, hidden]
         let nh = self.cfg.hidden;
         for (lin, film) in self.layers.iter().zip(&self.film) {
             let gb = film.fwd(&c, false)?; // [B, 2 * hidden]
@@ -178,8 +274,8 @@ impl Shader {
         let chunk = 16384;
         for start in (0..n).step_by(chunk) {
             let len = chunk.min(n - start);
-            let xy = Tensor::from_slice(&grid[2 * start..2 * (start + len)], (1, len, 2), &self.dev)?;
-            hwc.extend(self.forward(&x, &xy)?.clamp(0f32, 1f32)?.flatten_all()?.to_vec1::<f32>()?);
+            let (xy, taps) = self.inputs(&grid[2 * start..2 * (start + len)], 1)?;
+            hwc.extend(self.forward(&x, &xy, &taps)?.clamp(0f32, 1f32)?.flatten_all()?.to_vec1::<f32>()?);
         }
         let mut chw = vec![0f32; 3 * n];
         for i in 0..n {
@@ -242,7 +338,7 @@ impl Shader {
 
     pub fn describe(&self) -> J {
         json!({
-            "kind": "shader",
+            "kind": "shader", "variant": self.cfg.kind, "grid_levels": self.cfg.grid_levels, "grid_channels": self.cfg.grid_channels,
             "w": self.cfg.w, "h": self.cfg.h, "octaves": self.cfg.octaves, "hidden": self.cfg.hidden, "layers": self.cfg.layers, "cond": self.cfg.cond,
             "params": self.store.count_trainable(),
             "device": if self.dev.is_cuda() { "cuda" } else { "cpu" },
@@ -340,9 +436,9 @@ pub fn train_with(spec: &Spec, cfg: &ShaderTrainConfig, sc: ShaderConfig, dev: &
             }
         }
         let x = inputs.index_select(&Tensor::new(idx.as_slice(), dev)?, 0)?;
-        let xy = Tensor::from_vec(xy, (b, p, 2), dev)?;
+        let (xy, taps) = model.inputs(&xy, b)?;
         let y = Tensor::from_vec(y, (b, p, 3), dev)?;
-        let diff = (model.forward(&x, &xy)? - &y)?;
+        let diff = (model.forward(&x, &xy, &taps)? - &y)?;
         let loss = (diff.sqr()?.mean_all()? + (diff.abs()?.mean_all()? * 0.3)?)?;
         opt.backward_step(&loss)?;
         last = loss.to_scalar::<f32>()?;
@@ -362,6 +458,27 @@ pub fn train_with(spec: &Spec, cfg: &ShaderTrainConfig, sc: ShaderConfig, dev: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_grid_shader_trains_and_round_trips() -> Result<()> {
+        let spec = Spec::parse(TOGGLE_WITH_SCENE)?;
+        let cfg = ShaderTrainConfig { steps: 250, batch_states: 2, pixels: 1024, lr: 3e-3, log_every: 0, scale: 1, ..Default::default() };
+        let mut sc = ShaderConfig::grid_for_spec(&spec, 1, &[8, 32], 8)?;
+        sc.w = 64;
+        sc.h = 32;
+        sc.cond = 32;
+        let (sh, report) = train_with(&spec, &cfg, sc, &Device::Cpu)?;
+        assert!(report["mae"].as_f64().unwrap() < 0.12, "the grid shader should get close in 250 steps: {report}");
+        let states = training_states(&spec, 0, 0)?;
+        let a = sh.draw(&states[0], 64, 32)?;
+        let dir = std::env::temp_dir().join(format!("nerve-grid-shader-test-{}", std::process::id()));
+        sh.save(&dir, &cfg, &report)?;
+        let back = Shader::load(spec, &dir, &Device::Cpu)?;
+        assert!(back.cfg.is_grid() && back.cfg.grid_levels.len() == 2);
+        assert_eq!(back.draw(&states[0], 64, 32)?, a);
+        std::fs::remove_dir_all(&dir).ok();
+        Ok(())
+    }
 
     const TOGGLE_WITH_SCENE: &str = r#"
 nerve: 1

@@ -29,10 +29,26 @@ class RustShaderConfig:
     hidden: int = 128
     layers: int = 4
     octaves: int = 8
+    kind: str = "mlp"                                  # "mlp" | "grid"
+    grid_levels: list = None                           # [[gw, gh], ...] in cells, coarse to fine
+    grid_channels: int = 0
+
+    def __post_init__(self):
+        if self.grid_levels is None:
+            self.grid_levels = []
 
     @property
     def aspect(self) -> float:
         return self.w / self.h
+
+    @property
+    def grid_dim(self) -> int:
+        return len(self.grid_levels) * self.grid_channels if self.kind == "grid" else 0
+
+    @classmethod
+    def grid(cls, w: int, h: int, state_dim: int, bases=(16, 64), channels: int = 8, hidden: int = 64, layers: int = 2, octaves: int = 4, cond: int = 128):
+        aspect = w / h
+        return cls(w, h, state_dim, cond, hidden, layers, octaves, "grid", [[max(2, round(b * aspect)), max(2, b)] for b in bases], channels)
 
 
 class RustShader(nn.Module):
@@ -40,7 +56,8 @@ class RustShader(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.cond = nn.ModuleDict({"0": nn.Linear(cfg.state_dim, 256), "2": nn.Linear(256, cfg.cond)})
-        self.inp = nn.Linear(2 + 4 * cfg.octaves, cfg.hidden)
+        self.grids = nn.ParameterList([nn.Parameter(torch.empty(gw * gh, cfg.grid_channels).uniform_(-0.1, 0.1)) for gw, gh in cfg.grid_levels]) if cfg.kind == "grid" else None
+        self.inp = nn.Linear(2 + 4 * cfg.octaves + cfg.grid_dim, cfg.hidden)
         self.layers = nn.ModuleList([nn.Linear(cfg.hidden, cfg.hidden) for _ in range(cfg.layers)])
         self.film = nn.ModuleList([nn.Linear(cfg.cond, 2 * cfg.hidden) for _ in range(cfg.layers)])
         self.out = nn.Linear(cfg.hidden, 3)
@@ -56,10 +73,30 @@ class RustShader(nn.Module):
         c = F.gelu(self.cond["2"](F.gelu(self.cond["0"](x))))
         return [f(c) for f in self.film]
 
+    def grid_features(self, xy: torch.Tensor) -> torch.Tensor:
+        """Bilinear features of every level at xy [B, P, 2] -> [B, P, levels * channels]; cell i sits at i/(g-1)."""
+        b, p = xy.shape[0], xy.shape[1]
+        feats = []
+        for g, (gw, gh) in zip(self.grids, self.cfg.grid_levels):
+            u = ((xy[..., 0] + 1) * 0.5).clamp(0, 1) * (gw - 1)
+            v = ((xy[..., 1] + 1) * 0.5).clamp(0, 1) * (gh - 1)
+            x0 = u.floor().clamp(max=gw - 2); y0 = v.floor().clamp(max=gh - 2)
+            fx, fy = u - x0, v - y0
+            x0, y0 = x0.long(), y0.long()
+            def corner(dx, dy):
+                return g[(y0 + dy) * gw + x0 + dx]                                       # [B, P, C]
+            f = (corner(0, 0) * ((1 - fx) * (1 - fy))[..., None] + corner(1, 0) * (fx * (1 - fy))[..., None]
+                 + corner(0, 1) * ((1 - fx) * fy)[..., None] + corner(1, 1) * (fx * fy)[..., None])
+            feats.append(f)
+        return torch.cat(feats, -1)
+
     def forward(self, x: torch.Tensor, xy: torch.Tensor) -> torch.Tensor:
         """x [B, state_dim], xy [B, P, 2] -> [B, P, 3] unclamped."""
         gb = self.film_params(x)
-        h = F.gelu(self.inp(self.features(xy)))
+        f = self.features(xy)
+        if self.grids is not None:
+            f = torch.cat([f, self.grid_features(xy)], -1)
+        h = F.gelu(self.inp(f))
         nh = self.cfg.hidden
         for lin, p in zip(self.layers, gb):
             g, b = p[:, :nh], p[:, nh:]
@@ -85,7 +122,7 @@ class RustShader(nn.Module):
     def export_rust(self, spec_name: str, out_dir: str | Path, train_cfg: dict[str, Any], report: dict[str, Any]) -> None:
         from safetensors.torch import save_file
         out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
-        sd = {k: v.detach().float().cpu().contiguous() for k, v in self.state_dict().items() if k != "freqs"}
+        sd = {k.replace("grids.", "grid."): v.detach().float().cpu().contiguous() for k, v in self.state_dict().items() if k != "freqs"}
         save_file(sd, str(out / "shader.safetensors"))
         meta = {"spec": spec_name, "kind": "shader", "shader": asdict(self.cfg), "train": train_cfg, "eval": report}
         (out / "shader.json").write_text(json.dumps(meta, indent=1))
@@ -104,6 +141,8 @@ class Rasters:
         self.w, self.h = w, h
 
     def config(self, **kw) -> RustShaderConfig:
+        if kw.pop("kind", "mlp") == "grid":
+            return RustShaderConfig.grid(self.w, self.h, self.meta["state_dim"], **{k: v for k, v in kw.items() if k in ("bases", "channels", "hidden", "layers", "octaves", "cond")})
         return RustShaderConfig(self.w, self.h, self.meta["state_dim"], **kw)
 
 

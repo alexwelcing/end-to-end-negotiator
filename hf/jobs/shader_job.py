@@ -27,7 +27,9 @@ def main() -> int:
     from nerve.render.shader import Rasters, ShaderTrain, train_shader
     import torch
     rs = Rasters(inp)
-    arch = {k: cfg.pop(k) for k in ("cond", "hidden", "layers", "octaves") if k in cfg}
+    arch = {k: cfg.pop(k) for k in ("kind", "bases", "channels", "cond", "hidden", "layers", "octaves") if k in cfg}
+    if "bases" in arch:
+        arch["bases"] = tuple(arch["bases"])
     spec_name = cfg.pop("spec_name")
     print(f"[job] shader spec={spec_name} rasters={rs.images.shape} cuda={torch.cuda.is_available()} arch={arch} train={cfg}", flush=True)
     out = work / "out"

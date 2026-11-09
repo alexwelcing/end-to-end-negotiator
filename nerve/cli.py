@@ -169,6 +169,9 @@ def cmd_shader(a):
     from .render.shader import Rasters, ShaderTrain, train_shader
     t = ShaderTrain(steps=a.steps, pixels=a.pixels, batch_states=a.batch, lr=a.lr, seed=a.seed, log_every=a.log_every, device=a.device)
     arch = {"cond": a.cond, "hidden": a.hidden, "layers": a.layers, "octaves": a.octaves}
+    if a.kind == "grid":
+        arch = {"kind": "grid", "bases": tuple(int(b) for b in a.grid_bases.split(",")), "channels": a.grid_channels, "cond": a.cond,
+                "hidden": a.hidden if a.hidden != 128 else 64, "layers": a.layers if a.layers != 4 else 2, "octaves": a.octaves if a.octaves != 8 else 4}
     if a.remote:
         from .render.shader_remote import shader_remote
         print(json.dumps(shader_remote(a.spec_name, a.rasters, a.out, t, arch, flavor=a.flavor))); return 0
@@ -257,6 +260,7 @@ def main(argv=None) -> int:
     s.add_argument("--steps", type=int, default=20000); s.add_argument("--pixels", type=int, default=4096); s.add_argument("--batch", type=int, default=8)
     s.add_argument("--lr", type=float, default=1e-3); s.add_argument("--seed", type=int, default=0); s.add_argument("--log-every", type=int, default=1000); s.add_argument("--device", default="auto")
     s.add_argument("--cond", type=int, default=128); s.add_argument("--hidden", type=int, default=128); s.add_argument("--layers", type=int, default=4); s.add_argument("--octaves", type=int, default=8)
+    s.add_argument("--kind", choices=["mlp", "grid"], default="mlp"); s.add_argument("--grid-bases", default="16,64"); s.add_argument("--grid-channels", type=int, default=8)
     s.add_argument("--remote", choices=["hf"]); s.add_argument("--flavor", default="a10g-small"); s.set_defaults(f=cmd_shader)
     s = sub.add_parser("evolve", help="EAT-style supervisor loop over team configs"); s.add_argument("spec"); s.add_argument("--workdir", required=True)
     s.add_argument("--budget", type=float, default=5.0); s.add_argument("--iterations", type=int, default=4); s.add_argument("--mode", choices=["offline", "claude"], default="offline")

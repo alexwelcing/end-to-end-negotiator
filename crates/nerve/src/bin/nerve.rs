@@ -99,6 +99,14 @@ enum Cmd {
         octaves: usize,
         #[arg(long, default_value_t = 200)]
         log_every: usize,
+        /// `mlp` (whole network per pixel) or `grid` (learned feature grids + a small per-pixel network).
+        #[arg(long, default_value = "mlp")]
+        kind: String,
+        /// Grid rows per level, coarse to fine (grid kind).
+        #[arg(long, value_delimiter = ',', default_value = "16,64")]
+        grid_bases: Vec<usize>,
+        #[arg(long, default_value_t = 8)]
+        grid_channels: usize,
         #[arg(long)]
         cuda: bool,
     },
@@ -249,13 +257,23 @@ fn device(cuda: bool) -> Result<candle_core::Device> {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Serve { specs, addr, lambda, models, cuda, machines, pictures, shaders } => serve(&specs, &addr, lambda, models.as_deref(), &machines, pictures.as_deref(), shaders.as_deref(), &device(cuda)?)?,
-        Cmd::TrainShader { spec, out, steps, batch, pixels, lr, seed, samples, scale, hidden, layers, octaves, log_every, cuda } => {
+        Cmd::TrainShader { spec, out, steps, batch, pixels, lr, seed, samples, scale, hidden, layers, octaves, log_every, kind, grid_bases, grid_channels, cuda } => {
             let s = Spec::load(&spec)?;
             let cfg = nerve::shader::ShaderTrainConfig { steps, batch_states: batch, pixels, lr, seed, samples, scale, log_every };
-            let mut sc = nerve::shader::ShaderConfig::for_spec(&s, scale)?;
-            sc.hidden = hidden;
-            sc.layers = layers;
-            sc.octaves = octaves;
+            let mut sc = if kind == "grid" {
+                nerve::shader::ShaderConfig::grid_for_spec(&s, scale, &grid_bases, grid_channels)?
+            } else {
+                let mut c = nerve::shader::ShaderConfig::for_spec(&s, scale)?;
+                c.hidden = hidden;
+                c.layers = layers;
+                c.octaves = octaves;
+                c
+            };
+            if kind == "grid" {
+                sc.hidden = if hidden == 128 { 64 } else { hidden };
+                sc.layers = if layers == 4 { 2 } else { layers };
+                sc.octaves = if octaves == 8 { 4 } else { octaves };
+            }
             let (p, report) = nerve::shader::train_with(&s, &cfg, sc, &device(cuda)?)?;
             let dir = out.join(&s.name);
             p.save(&dir, &cfg, &report)?;

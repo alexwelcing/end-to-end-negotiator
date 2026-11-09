@@ -450,9 +450,20 @@ async function refresh(changed = []) {
 const glsh = {spec: null, ready: null, gl: null, prog: null, cfg: null, view: null, canvas: null, filmTex: null, loc: {}};
 
 function glsl(cfg, nin, ninp, tw) {
+  const grid = cfg.kind === "grid";
+  const L = grid ? cfg.grid_levels.length : 0, C = grid ? cfg.grid_channels : 0, CH = Math.ceil(C / 4);
+  const decls = grid ? Array.from({length: L * CH}, (_, i) => `uniform sampler2D uG${i};`).join(" ") : "";
+  // grid features follow the Fourier features in the input vector, level by level, channel by channel
+  let gridCode = "";
+  if (grid) for (let l = 0; l < L; l++) {
+    const [gw, gh] = cfg.grid_levels[l];
+    gridCode += `{ vec2 uv = (vec2(((x + 1.0) * 0.5) * ${(gw - 1).toFixed(1)}, ((y + 1.0) * 0.5) * ${(gh - 1).toFixed(1)}) + 0.5) / vec2(${gw.toFixed(1)}, ${gh.toFixed(1)});\n`;
+    for (let c = 0; c < CH; c++) { gridCode += `  vec4 g${c} = texture(uG${l * CH + c}, uv);\n`; for (let k = 0; k < 4 && c * 4 + k < C; k++) gridCode += `  f[${2 + 4 * cfg.octaves + l * C + c * 4 + k}] = g${c}[${k}];\n`; }
+    gridCode += "}\n";
+  }
   return `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D;
-uniform sampler2D uW; uniform sampler2D uF; uniform vec2 uSize; uniform float uAspect;
+uniform sampler2D uW; uniform sampler2D uF; uniform vec2 uSize; uniform float uAspect; ${decls}
 out vec4 frag;
 const int HID = ${cfg.hidden}; const int OCT = ${cfg.octaves}; const int LAYERS = ${cfg.layers}; const int NIN = ${nin}; const int NINP = ${ninp}; const int TW = ${tw};
 float erf_(float x) { float s = sign(x); x = abs(x); float t = 1.0 / (1.0 + 0.3275911 * x);
@@ -467,6 +478,7 @@ void main() {
   f[0] = x * uAspect; f[1] = y;
   for (int k = 0; k < OCT; k++) { float fr = exp2(float(k)) * 3.14159265358979;
     f[2 + 2 * k] = sin(f[0] * fr); f[3 + 2 * k] = sin(f[1] * fr); f[2 + 2 * OCT + 2 * k] = cos(f[0] * fr); f[3 + 2 * OCT + 2 * k] = cos(f[1] * fr); }
+  ${gridCode}
   float h[HID]; float h2[HID];
   for (int j = 0; j < HID; j++) { float acc = texelFetch(uW, ivec2(TW - 1, j), 0).x;
     for (int i = 0; i < NINP; i += 4) acc += dot(texelFetch(uW, ivec2(i / 4, j), 0), vec4(f[i], f[i + 1], f[i + 2], f[i + 3]));
@@ -493,7 +505,8 @@ function shaderReady(spec) {
     if (!spec.shader) return false;
     const w = await api(`/api/${spec.name}/shader_weights`, {});
     const cfg = w.shader, T = w.tensors, HID = cfg.hidden;
-    const nin = 2 + 4 * cfg.octaves, ninp = Math.ceil(nin / 4) * 4, tw = Math.ceil(Math.max(ninp, HID) / 4) + 1;
+    const isGrid = cfg.kind === "grid", GL_ = isGrid ? cfg.grid_levels.length : 0, GC = isGrid ? cfg.grid_channels : 0, GCH = Math.ceil(GC / 4);
+    const nin = 2 + 4 * cfg.octaves + GL_ * GC, ninp = Math.ceil(nin / 4) * 4, tw = Math.ceil(Math.max(ninp, HID) / 4) + 1;
     const rows = HID * (1 + cfg.layers) + 3;
     const tex = new Float32Array(4 * tw * rows);
     const put = (name, rowBase, nIn) => { const W = T[`${name}.weight`].data, B = T[`${name}.bias`].data, nOut = T[`${name}.weight`].shape[0];
@@ -502,19 +515,26 @@ function shaderReady(spec) {
     const canvas = document.createElement("canvas");
     const gl = canvas.getContext("webgl2", {antialias: false, preserveDrawingBuffer: true, premultipliedAlpha: false});
     if (!gl) return false;
+    const floatLinear = !!gl.getExtension("OES_texture_float_linear");
+    if (isGrid && !floatLinear) { console.warn("GPU shader: grid kind needs OES_texture_float_linear"); return false; }
     const sh = (type, src) => { const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error("shader: " + gl.getShaderInfoLog(o)); return o; };
     const prog = gl.createProgram();
     gl.attachShader(prog, sh(gl.VERTEX_SHADER, `#version 300 es\nvoid main(){ vec2 p = vec2((gl_VertexID & 1) * 4 - 1, (gl_VertexID & 2) * 2 - 1); gl_Position = vec4(p, 0.0, 1.0); }`));
     gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, glsl(cfg, nin, ninp, tw)));
     gl.linkProgram(prog); if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error("shader link: " + gl.getProgramInfoLog(prog));
     gl.useProgram(prog);
-    const mk = (unit, width, height, data) => { const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    const mk = (unit, width, height, data, linear = false) => { const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, linear ? gl.LINEAR : gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, linear ? gl.LINEAR : gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, data); return t; };
     mk(0, tw, rows, tex);
     const filmTex = mk(1, HID / 4, 2 * cfg.layers, new Float32Array(2 * cfg.layers * HID));
     gl.uniform1i(gl.getUniformLocation(prog, "uW"), 0); gl.uniform1i(gl.getUniformLocation(prog, "uF"), 1);
+    // the feature grids: one RGBA32F texture per level per 4 channels, cell (i, j) at texel (i, j), sampled bilinearly
+    for (let l = 0; l < GL_; l++) { const [gw, gh] = cfg.grid_levels[l], G = T[`grid.${l}`].data;
+      for (let c = 0; c < GCH; c++) { const data = new Float32Array(4 * gw * gh);
+        for (let cell = 0; cell < gw * gh; cell++) for (let k = 0; k < 4 && c * 4 + k < GC; k++) data[4 * cell + k] = G[cell * GC + c * 4 + k];
+        const unit = 2 + l * GCH + c; mk(unit, gw, gh, data, true); gl.uniform1i(gl.getUniformLocation(prog, `uG${l * GCH + c}`), unit); } }
     Object.assign(glsh, {gl, prog, cfg, canvas, filmTex, view: w.view, loc: {size: gl.getUniformLocation(prog, "uSize"), aspect: gl.getUniformLocation(prog, "uAspect")}});
     gl.uniform1f(glsh.loc.aspect, w.aspect);
     glsh.timerExt = gl.getExtension("EXT_disjoint_timer_query_webgl2");
