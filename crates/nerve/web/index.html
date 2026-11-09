@@ -32,6 +32,10 @@ h1{font-size:22px;margin:0;letter-spacing:-.01em}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)}
 .card h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 10px;font-weight:600}
 .stagecard{padding:0;overflow:hidden}
+.stagecard:fullscreen{display:flex;flex-direction:column;background:var(--bg);border:0;border-radius:0}
+.stagecard:fullscreen svg#stage{flex:1;height:auto!important;min-height:0}
+.fullbtn{background:none;border:1px solid var(--line);border-radius:8px;padding:3px 9px;color:var(--mut);font:inherit;font-size:13px;cursor:pointer}
+.fullbtn:hover{color:var(--fg);border-color:var(--fg)}
 .stagebar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .stagebar .hint{color:var(--mut);font-size:13px}
 .toggles{display:flex;gap:12px;color:var(--mut);font-size:13px}
@@ -127,6 +131,7 @@ input.num{width:86px;background:var(--bg);color:var(--ink);border:1px solid var(
             <label title="Show the render oracle's exact picture instead of the render network's"><input type="checkbox" id="showOracle"> spec picture</label>
             <label title="Draw with the shader (the picture as a function of the pixel) on your GPU at the display's resolution, when the interface has one"><input type="checkbox" id="useShader" checked> shader (GPU)</label>
             <span class="pill" id="picpill" hidden></span>
+            <button class="fullbtn" id="fullBtn" title="Fill the screen: the shader draws the interface at your display's full resolution (Esc leaves)">⛶ full screen</button>
           </div>
         </div>
         <svg id="stage" role="img" aria-label="Draggable interface"></svg>
@@ -431,7 +436,8 @@ async function refresh(changed = []) {
   // With a scene the picture is the interface: tight padding, and the stage takes the scene's shape.
   const padX = cur.scene ? w * 0.04 + 6 : w * 0.18 + 30, padY = cur.scene ? h * 0.1 + 8 : Math.max(h * 0.25, 45);
   fitHeight(w + 2 * padX, h + 2 * padY);
-  const prev = view && view.spec === cur.name ? view.fixed : null;
+  const prev = view && view.spec === cur.name && !window.__refitView ? view.fixed : null;
+  window.__refitView = false;
   view = {spec: cur.name, positions: v.positions, gestures, box: fitStage([x0 - padX, y0 - padY, w + 2 * padX, h + 2 * padY])};
   view.fixed = prev && inside(prev, view.box) ? prev : view.box;
   renderState(changed);
@@ -550,9 +556,11 @@ async function shaderDraw(spec, s) {
   const {gl, canvas, cfg, filmTex, loc, view} = glsh;
   const film = (await api(`/api/${spec.name}/shader_film`, {state: s})).film;   // the state's share, from the engine
   if (cur !== spec) return null;
-  const k = scale(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const isGrid = cfg.kind === "grid", k = scale(), dpr = Math.min(window.devicePixelRatio || 1, isGrid ? 3 : 2);
   let W = Math.max(8, Math.round(view[2] * k * dpr)), H = Math.max(8, Math.round(view[3] * k * dpr));
-  const cap = Math.sqrt(2.5e6 / (W * H)); if (cap < 1) { W = Math.round(W * cap); H = Math.round(H * cap); }
+  // the mlp shader is ~30 ms per half megapixel on a good GPU; the grid shader is cheap enough for a whole display
+  const maxPx = isGrid ? 9e6 : 2.5e6;
+  const cap = Math.sqrt(maxPx / (W * H)); if (cap < 1) { W = Math.round(W * cap); H = Math.round(H * cap); }
   canvas.width = W; canvas.height = H; gl.viewport(0, 0, W, H);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, filmTex);
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, cfg.hidden / 4, 2 * cfg.layers, gl.RGBA, gl.FLOAT, new Float32Array(film));
@@ -629,7 +637,9 @@ function rgbToUrl(b64, w, h) {
 const inside = (a, b) => b[0] >= a[0] && b[1] >= a[1] && b[0] + b[2] <= a[0] + a[2] && b[1] + b[3] <= a[1] + a[3];
 /** The stage's height follows the view's shape (160 to 420 px), so a wide scene is a wide picture, not a strip in a tall box. */
 function fitHeight(w, h) {
-  const stage = $("stage"), sw = stage.getBoundingClientRect().width || 600;
+  const stage = $("stage");
+  if (document.fullscreenElement) { stage.style.height = ""; return; }   // full screen: the stage takes what is left of the screen
+  const sw = stage.getBoundingClientRect().width || 600;
   stage.style.height = `${Math.round(Math.max(160, Math.min(420, sw * h / Math.max(w, 1))))}px`;
 }
 /** Grow a box around its centre so it has the stage's aspect ratio (the field then fills the stage). */
@@ -928,7 +938,17 @@ function buildActions() {
   }
 }
 
-window.addEventListener("resize", () => view && render());
+const redrawPicture = () => { if (!view) return; picture = {...picture, key: null}; render(); if (state) fetchPicture(state); };
+window.addEventListener("resize", () => { if (!view) return; render(); clearTimeout(window.__pictureResize); window.__pictureResize = setTimeout(redrawPicture, 150); });
+$("fullBtn").onclick = () => { const card = document.querySelector(".stagecard"); if (document.fullscreenElement) document.exitFullscreen(); else card.requestFullscreen().catch(err => { $("hint").innerHTML = `<span class="err">${err.message}</span>`; }); };
+document.addEventListener("fullscreenchange", async () => {
+  $("fullBtn").textContent = document.fullscreenElement ? "⛶ leave full screen" : "⛶ full screen";
+  if (!cur) return;
+  await new Promise(r => setTimeout(r, 60));          // let the layout settle at the new size
+  window.__refitView = true;                            // the stage's aspect changed: fit the view box to it again
+  await refresh();
+  redrawPicture();
+});
 (window.nerveReady || Promise.resolve()).then(init).catch(err => { $("who").textContent = "error"; $("hint").innerHTML = `<span class="err">${err.message}</span>`; });
 </script>
 </body>
