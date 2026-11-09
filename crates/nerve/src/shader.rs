@@ -5,11 +5,13 @@
 //! resolution, on random pixels, and scored like the picture: mean absolute pixel error against the
 //! oracle. Because each pixel is independent, the browser runs the same weights as a fragment shader.
 //!
-//!     c      = cond(state features)                       what to draw
-//!     f(x,y) = (x, y, sin(2^k π x), cos(2^k π x), ... )    where, k < octaves
-//!     h_0    = gelu(W_in f)
-//!     h_i    = gelu(W_i h_{i-1}) * (1 + g_i(c)) + b_i(c)   FiLM: the state modulates every layer
-//!     rgb    = W_out h_L                                   clamped to 0..1 when drawn
+//! ```text
+//! c      = cond(state features)                       what to draw
+//! f(x,y) = (x, y, sin(2^k π x), cos(2^k π x), ... )    where, k < octaves
+//! h_0    = gelu(W_in f)
+//! h_i    = gelu(W_i h_{i-1}) * (1 + g_i(c)) + b_i(c)   FiLM: the state modulates every layer
+//! rgb    = W_out h_L                                   clamped to 0..1 when drawn
+//! ```
 
 use crate::encode::Encoder;
 use crate::jepa::{Lin, Store};
