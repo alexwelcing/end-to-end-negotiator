@@ -258,13 +258,18 @@ Each ships in the lab and on the site the day it passes, with its numbers in thi
   If a puzzle's network misses examples, the lab says *misses example* at that move and the machine
   stops there, which is itself a demonstration; the fix is more capacity or the hole-oversampling knob,
   both already in the trainer.
-- **Picture sharpness.** Render networks at 192 pixels reach 0.7–3% mean pixel error so far; edges are
-  soft. More steps, a perceptual term and smaller per-block rasters (thirty blocks share one screen).
-  The oracle's picture is one click away and the error is always on screen, so a blurry block is a
-  number, not an embarrassment.
-- **Speed in the browser.** A render network forward is 30–100 ms in WebAssembly; thirty blocks at 30 Hz
-  is not that. Only blocks whose state changed this tick are redrawn (most do not change on most
-  ticks), block rasters shrink, and a WebGPU path is the next step if that is not enough.
+- **Picture sharpness.** *Resolved 2026-11-09 by the shader (`shader.rs`, `experiments/round3-shaders/`).*
+  The render networks at 192 pixels reached 0.7–3% mean pixel error with soft edges. The shader asks a
+  different question of the weights, "what colour is the point (x, y) in this state?", a FiLM MLP over
+  Fourier features of the coordinate, conditioned on the state, trained on the oracle at four times the
+  raster. It reaches 0.03–0.5% at that resolution and 0.06–0.7% box-filtered back to the scene's raster,
+  with 240k parameters per interface, in two GPU minutes each. There is no raster to be soft: the edge
+  is as sharp as the highest octave the network learned.
+- **Speed in the browser.** *Resolved by the same move.* Because each pixel of the shader is independent,
+  the page runs the weights as a WebGL fragment shader at the display's resolution (the engine does the
+  state's share once per state, `shader_film`; the GPU does the pixels): 573×286 px in 0.1 ms where the
+  picture network took 30–100 ms for 192 px in WebAssembly, matching the engine's CPU draw to 0.001/255.
+  Thirty blocks at 30 Hz is three frames of budget per block, not a fraction of one.
 - **Synchronous time with two marbles.** Two balls in one tick are two external advances and their
   cascades, in order; the tick semantics covers it, and the tests will say whether order ever matters.
 - **Our patience.** Six new specs, four new holes, eight new events, thirty blocks to place. The

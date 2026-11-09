@@ -51,6 +51,10 @@ Seventeen interfaces, each a small neural network trained to be the program, eac
   ```
   then open http://127.0.0.1:8787. The trained networks are committed under `models/served/`, so a fresh clone
   plays immediately; `docker build -t nerve-lab . && docker run -p 7860:7860 nerve-lab` does the same without Rust.
+* **The picture is a shader.** Each interface's look is a second network, trained from the spec's own drawing,
+  that answers "what colour is this point?" Your GPU runs it as a fragment shader at the screen's resolution
+  (toggle "shader (GPU)" in the lab), so the same 240k parameters draw a phone and a 4K monitor; see
+  [`experiments/round3-shaders/`](experiments/round3-shaders/README.md) for the numbers against the oracle.
 * **Train one yourself:** `cargo run --release -p nerve -- train specs/hanoi.nerve --holdout 0` trains Tower of
   Hanoi on every cell of its spec in a few CPU minutes and prints exactness and violations.
 

@@ -26,6 +26,7 @@ for (const name of manifest.specs) room.add_spec(text(`specs/${name}.nerve`));
 for (const name of manifest.machines) room.add_machine(text(`machines/${name}.nerve`));
 for (const name of manifest.models) room.add_model(name, text(`models/${name}/model.json`), new Uint8Array(read(`models/${name}/model.safetensors`)));
 for (const name of manifest.pictures || []) room.add_picture(name, text(`models/${name}/picture.json`), new Uint8Array(read(`models/${name}/picture.safetensors`)));
+for (const name of manifest.shaders || []) room.add_shader(name, text(`models/${name}/shader.json`), new Uint8Array(read(`models/${name}/shader.safetensors`)));
 const wasm = (p, body) => JSON.parse(room.call(p, body === undefined ? "" : JSON.stringify(body)));
 
 async function native(p, body) {
@@ -82,6 +83,23 @@ for (const s of specs.filter(s => s.picture)) {
 }
 if (drawn !== (manifest.pictures || []).length) throw new Error("not every render network loaded");
 console.log(`${drawn} pictures drawn by their networks within ${PIXEL_ERROR} of the oracle`);
+
+// The shaders: each draws its spec's initial state at its training raster within tolerance of the oracle, and
+// at a size the training never saw (the scene's raster, 1x) the picture is still the picture (supersampling
+// is the display's job, so the point-sampled 1x bound is looser).
+let shaded = 0;
+for (const s of specs.filter(s => s.shader)) {
+  const p = wasm(`/api/${s.name}/shader`, { state: s.initial });
+  if (!p.network || !(p.mae < PIXEL_ERROR)) throw new Error(`${s.name}: shader ${p.network ? `error ${p.mae} at ${p.w}x${p.h}` : "not drawn"}`);
+  const q = wasm(`/api/${s.name}/shader`, { state: s.initial, w: Math.round(p.w / 4), h: Math.round(p.h / 4) });
+  if (!(q.mae < 2 * PIXEL_ERROR)) throw new Error(`${s.name}: shader at ${q.w}x${q.h} error ${q.mae}`);
+  const film = wasm(`/api/${s.name}/shader_film`, { state: s.initial }).film;
+  const weights = wasm(`/api/${s.name}/shader_weights`);
+  if (film.length !== 2 * s.shader.layers * s.shader.hidden || !weights.tensors["inp.weight"]) throw new Error(`${s.name}: shader weights/film malformed`);
+  shaded += 1;
+}
+if (shaded !== (manifest.shaders || []).length) throw new Error("not every shader loaded");
+console.log(`${shaded} shaders drawn within ${PIXEL_ERROR} of the oracle at their training raster, and again at a quarter of it`);
 
 // Every gesture of the reorder list: open, one frame at a landing spot, release.
 const reorder = specs.find(s => s.name === "reorder");
