@@ -30,7 +30,7 @@ jobs:
           from huggingface_hub import HfApi
           api = HfApi(token=os.environ["HF_TOKEN"])
           space = os.environ["HF_SPACE"]
-          roots = ["crates/**", "specs/**", "machines/**", "models/served/**", "models/pictures/**"]
+          roots = ["crates/**", "specs/**", "machines/**", "models/served/**", "models/pictures/**", "models/shaders/**"]
           allow = ["README.md", "Dockerfile", "Cargo.toml", "Cargo.lock", "docs/QUICKSTART.md", *roots]
           # Everything the Dockerfile copies must be uploaded, or the Space's build fails after the deploy succeeds.
           import fnmatch, pathlib, re

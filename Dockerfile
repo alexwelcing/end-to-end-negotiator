@@ -20,6 +20,7 @@ COPY specs ./specs
 COPY machines ./machines
 COPY models/served ./models/served
 COPY models/pictures ./models/pictures
+COPY models/shaders ./models/shaders
 USER nerve
 EXPOSE 7860
 CMD ["nerve", "serve", "--specs", "specs", "--models", "models/served", "--addr", "0.0.0.0:7860"]
