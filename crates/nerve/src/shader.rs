@@ -515,7 +515,7 @@ initial: {status: off}
     fn a_two_state_shader_trains_draws_at_two_sizes_and_round_trips() -> Result<()> {
         let spec = Spec::parse(TOGGLE_WITH_SCENE)?;
         let cfg = ShaderTrainConfig { steps: 250, batch_states: 2, pixels: 1024, lr: 2e-3, log_every: 0, scale: 1, ..Default::default() };
-        let small = ShaderConfig { w: 64, h: 32, state_dim: Encoder::new(&spec)?.state_dim, cond: 32, hidden: 64, layers: 3, octaves: 6 };
+        let small = ShaderConfig { w: 64, h: 32, state_dim: Encoder::new(&spec)?.state_dim, cond: 32, hidden: 64, layers: 3, octaves: 6, kind: "mlp".into(), grid_levels: vec![], grid_channels: 0 };
         let (sh, report) = train_with(&spec, &cfg, small, &Device::Cpu)?;
         let mae = report["mae"].as_f64().unwrap();
         assert!(mae < 0.12, "the shader should get close in 250 steps: {report}");
